@@ -1,12 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/nextjs';
+import dynamic from 'next/dynamic';
 import { BookOpen } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { Button } from '@/components/ui/button';
+
+const ClerkControls = dynamic(() => import('@/components/clerk-controls').then((m) => m.ClerkControls), {
+  ssr: false,
+});
 
 export function SiteHeader() {
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/50">
       <div className="container flex h-16 items-center justify-between">
@@ -31,14 +36,7 @@ export function SiteHeader() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <SignedOut>
-            <Button asChild variant="secondary" className="rounded-2xl">
-              <SignInButton mode="modal">Sign in</SignInButton>
-            </Button>
-          </SignedOut>
-          <SignedIn>
-            <UserButton appearance={{ elements: { avatarBox: 'h-9 w-9' } }} />
-          </SignedIn>
+          {clerkEnabled ? <ClerkControls /> : null}
         </div>
       </div>
     </header>

@@ -17,6 +17,8 @@ type ProjectDetail = {
 };
 
 async function fetchProject(id: string): Promise<ProjectDetail | null> {
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+  if (!clerkEnabled) return null;
   const { getToken } = await auth();
   const token = await getToken();
   const api = process.env.NEXT_PUBLIC_API_URL;
