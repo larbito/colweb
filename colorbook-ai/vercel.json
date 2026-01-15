@@ -1,6 +1,6 @@
 {
-  "installCommand": "corepack enable && pnpm install",
-  "buildCommand": "corepack enable && pnpm --filter @colorbook/web build",
+  "installCommand": "corepack enable && corepack pnpm install",
+  "buildCommand": "corepack enable && corepack pnpm --filter @colorbook/web build",
   "outputDirectory": "apps/web/.next"
 }
 
