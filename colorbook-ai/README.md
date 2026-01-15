@@ -30,6 +30,16 @@ pnpm install
 pnpm dev
 ```
 
+### Deploy (Vercel)
+
+This repo is nested under `colweb/colorbook-ai`. In Vercel:
+
+- **Root Directory**: `colorbook-ai`
+- **Framework Preset**: Next.js
+- **Install Command**: `corepack enable && pnpm install`
+- **Build Command**: `corepack enable && pnpm --filter @colorbook/web build`
+- **Output Directory**: `apps/web/.next`
+
 ### Database migrations (Prisma)
 
 ```bash
