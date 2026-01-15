@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { auth } from '@clerk/nextjs/server';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 
 type ProjectListItem = {
   id: string;
@@ -28,6 +29,7 @@ async function fetchProjects(): Promise<ProjectListItem[]> {
 
 export default async function DashboardPage() {
   const projects = await fetchProjects();
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
   return (
     <div className="space-y-6">
@@ -41,7 +43,16 @@ export default async function DashboardPage() {
         </Button>
       </div>
 
-      {projects.length === 0 ? (
+      {!apiUrl ? (
+        <Card className="rounded-2xl">
+          <CardHeader>
+            <CardTitle className="text-base">Connect your API</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Set <span className="font-mono">NEXT_PUBLIC_API_URL</span> in your environment to load projects.
+          </CardContent>
+        </Card>
+      ) : projects.length === 0 ? (
         <Card className="rounded-2xl">
           <CardHeader>
             <CardTitle className="text-base">No projects yet</CardTitle>
@@ -76,6 +87,13 @@ export default async function DashboardPage() {
           ))}
         </div>
       )}
+
+      {/* lightweight skeleton block to establish the pattern */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+      </div>
     </div>
   );
 }

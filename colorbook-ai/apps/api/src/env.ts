@@ -6,10 +6,10 @@ const EnvSchema = z.object({
 
   DATABASE_URL: z.string().min(1),
 
-  // Phase 4+ (worker/queue) — validated now so deploy-time misconfig is caught early.
-  REDIS_URL: z.string().min(1).optional(),
-  OPENAI_API_KEY: z.string().min(1).optional(),
-  REPLICATE_API_TOKEN: z.string().min(1).optional(),
+  // Validated early to catch misconfig at deploy time (even if not used until Phase 3/4).
+  REDIS_URL: z.string().min(1),
+  OPENAI_API_KEY: z.string().min(1),
+  REPLICATE_API_TOKEN: z.string().min(1),
 
   // Auth
   CLERK_JWT_VERIFICATION_KEY: z.string().min(1),
