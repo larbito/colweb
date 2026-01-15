@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate --schema=./prisma/schema.prisma",
     "dev": "node --env-file=../../.env -r tsx/cjs src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
