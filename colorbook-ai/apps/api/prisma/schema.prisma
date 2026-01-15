@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TrimPreset {
+  US_LETTER
+  EIGHT_BY_TEN
+  A4
+  SQUARE_8_25
+}
+
+enum Complexity {
+  kids
+  medium
+  detailed
+}
+
+enum LineThickness {
+  thin
+  medium
+  bold
+}
+
+enum ProjectStatus {
+  draft
+  prompted
+  generating
+  ready
+  failed
+}
+
+enum PageStatus {
+  draft
+  queued
+  generating
+  ready
+  failed
+  approved
+  rejected
+}
+
+enum JobStatus {
+  queued
+  running
+  succeeded
+  failed
+}
+
+enum JobType {
+  generate_page
+  export_pdf
+}
+
+model User {
+  id          String    @id @default(uuid())
+  clerkUserId String    @unique
+  email       String?
+  name        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  projects Project[]
+  jobs     Job[]
+}
+
+model Project {
+  id            String        @id @default(uuid())
+  userId        String
+  title         String
+  trimPreset    TrimPreset
+  theme         String
+  character     String
+  pageCount     Int
+  complexity    Complexity
+  lineThickness LineThickness
+  status        ProjectStatus @default(draft)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pages Page[]
+
+  @@index([userId, createdAt])
+}
+
+model Page {
+  id            String        @id @default(uuid())
+  projectId     String
+  index         Int
+  prompt        String
+  complexity    Complexity
+  lineThickness LineThickness
+  status        PageStatus    @default(draft)
+  lastError     String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generations Generation[]
+
+  @@unique([projectId, index])
+  @@index([projectId, status])
+}
+
+model Generation {
+  id                    String   @id @default(uuid())
+  pageId                String
+  replicatePredictionId String?
+  outputUrl             String?
+  createdAt             DateTime @default(now())
+
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([pageId, createdAt])
+}
+
+model Job {
+  id        String    @id @default(uuid())
+  userId    String
+  projectId String?
+  type      JobType
+  status    JobStatus @default(queued)
+  progress  Int       @default(0)
+  total     Int       @default(0)
+  lastError String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+
