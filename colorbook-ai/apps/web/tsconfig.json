@@ -3,6 +3,9 @@
   "compilerOptions": {
     "jsx": "preserve",
     "noEmit": true,
+    "allowJs": true,
+    "incremental": true,
+    "isolatedModules": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]

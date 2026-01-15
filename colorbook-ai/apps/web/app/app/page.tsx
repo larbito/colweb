@@ -14,7 +14,7 @@ type ProjectListItem = {
 };
 
 async function fetchProjects(): Promise<ProjectListItem[]> {
-  const { getToken } = auth();
+  const { getToken } = await auth();
   const token = await getToken();
   const api = process.env.NEXT_PUBLIC_API_URL;
   if (!api || !token) return [];
