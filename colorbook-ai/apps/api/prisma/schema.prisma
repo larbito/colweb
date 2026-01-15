@@ -84,6 +84,7 @@ model Project {
 
   user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   pages Page[]
+  jobs  Job[]
 
   @@index([userId, createdAt])
 }
