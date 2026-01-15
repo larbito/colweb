@@ -1,0 +1,7 @@
+{
+  "installCommand": "corepack enable && cd colorbook-ai && pnpm install",
+  "buildCommand": "corepack enable && cd colorbook-ai && pnpm --filter @colorbook/web build",
+  "outputDirectory": "colorbook-ai/apps/web/.next"
+}
+
+
