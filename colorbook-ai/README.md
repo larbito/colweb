@@ -32,13 +32,15 @@ pnpm dev
 
 ### Deploy (Vercel)
 
-This repo is nested under `colweb/colorbook-ai`. In Vercel:
+This repo is nested under `colweb/colorbook-ai`. **Most reliable** setup in Vercel is to deploy the Next app folder directly:
 
-- **Root Directory**: `colorbook-ai`
+- **Root Directory**: `colorbook-ai/apps/web`
 - **Framework Preset**: Next.js
-- **Install Command**: `corepack enable && pnpm install`
-- **Build Command**: `corepack enable && pnpm --filter @colorbook/web build`
-- **Output Directory**: `apps/web/.next`
+- **Install Command**: `corepack enable && cd ../.. && pnpm install`
+- **Build Command**: `corepack enable && cd ../.. && pnpm --filter @colorbook/web build`
+- **Output Directory**: (leave default)
+
+If you see a Vercel platform `404: NOT_FOUND`, it usually means the **Root Directory** is pointing at the wrong folder or you’re visiting a URL that isn’t attached to this project.
 
 ### Database migrations (Prisma)
 
