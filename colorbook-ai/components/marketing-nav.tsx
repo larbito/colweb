@@ -27,14 +27,16 @@ export function MarketingNav() {
       )}
     >
       <div className="container flex h-16 items-center gap-4">
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight transition hover:opacity-80">
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-border bg-gradient-to-br from-primary/20 to-primary/5">
+        <Link href="/" className="flex items-center gap-2.5 font-bold tracking-tight transition hover:opacity-80">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/20 via-primary/10 to-primary/5 shadow-sm">
             <BookOpen className="h-4 w-4 text-primary" />
           </div>
-          <span>ColorBook AI</span>
+          <span className="bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
+            ColorBook AI
+          </span>
         </Link>
 
-        <nav className="hidden flex-1 items-center justify-center gap-8 text-sm text-muted-foreground lg:flex">
+        <nav className="hidden flex-1 items-center justify-center gap-8 text-sm font-medium text-muted-foreground lg:flex">
           <Link href="#features" className="transition hover:text-foreground">
             Features
           </Link>

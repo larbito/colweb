@@ -63,39 +63,47 @@ export function PricingSection() {
         {tiers.map((tier) => (
           <Card
             key={tier.name}
-            className={`relative overflow-hidden rounded-2xl ${
-              tier.popular ? "border-primary shadow-lg" : "border-border"
+            className={`group relative overflow-hidden transition-all duration-300 ${
+              tier.popular 
+                ? "glass-card scale-105 border-primary/40 shadow-2xl ring-1 ring-primary/20" 
+                : "glass-card hover:border-primary/20 hover:shadow-xl"
             }`}
           >
             {tier.popular && (
               <div className="absolute right-4 top-4">
-                <Badge>Most popular</Badge>
+                <Badge className="border-primary/20 bg-primary/20 text-primary-foreground">
+                  ✨ Most popular
+                </Badge>
               </div>
             )}
-            <CardHeader className="space-y-4 pb-8">
-              <CardTitle className="text-xl">{tier.name}</CardTitle>
+            {tier.popular && (
+              <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/10 via-transparent to-transparent" />
+            )}
+            <CardHeader className="space-y-6 pb-6">
+              <CardTitle className="text-2xl font-bold">{tier.name}</CardTitle>
               <div>
-                <span className="text-4xl font-semibold">
+                <span className="text-5xl font-bold">
                   {tier.price[billing] === "Free" ? "Free" : tier.price[billing]}
                 </span>
                 {tier.price[billing] !== "Free" && (
-                  <span className="text-muted-foreground">/mo</span>
+                  <span className="text-lg text-muted-foreground">/mo</span>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">{tier.description}</p>
+              <p className="text-sm leading-relaxed text-muted-foreground">{tier.description}</p>
             </CardHeader>
             <CardContent className="space-y-6">
-              <ul className="space-y-3">
+              <ul className="space-y-3.5">
                 {tier.features.map((feature) => (
-                  <li key={feature} className="flex items-center gap-2 text-sm">
-                    <Check className="h-4 w-4 text-primary" />
-                    {feature}
+                  <li key={feature} className="flex items-start gap-3 text-sm">
+                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
+                    <span>{feature}</span>
                   </li>
                 ))}
               </ul>
               <Button
-                className="w-full rounded-2xl"
+                className="w-full rounded-2xl shadow-sm"
                 variant={tier.popular ? "default" : "secondary"}
+                size="lg"
               >
                 Choose {tier.name}
               </Button>

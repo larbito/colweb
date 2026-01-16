@@ -20,13 +20,15 @@ export default function MarketingPage() {
       <section className="container py-20 md:py-32">
         <div className="grid gap-12 md:grid-cols-[1.1fr_0.9fr] md:items-center">
           <div className="space-y-8">
-            <Badge variant="secondary" className="gap-1.5">
+            <Badge variant="secondary" className="gap-1.5 border-primary/20 bg-primary/10">
               📘 KDP-ready workflow
             </Badge>
-            <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-6xl">
-              Generate print-ready coloring books in minutes.
+            <h1 className="text-balance text-5xl font-bold leading-[1.1] tracking-tight md:text-7xl">
+              <span className="gradient-text">Generate print-ready</span>
+              <br />
+              coloring books in minutes
             </h1>
-            <p className="max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
+            <p className="max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
               Choose KDP trim sizes, craft story-mode prompts, bulk generate clean line art pages, and export a
               print-ready PDF—all in one calm workflow.
             </p>
@@ -84,58 +86,60 @@ export default function MarketingPage() {
 
       {/* FEATURES SECTION */}
       <section id="features" className="container py-24 md:py-32">
-        <div className="space-y-4">
-          <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Features</p>
-          <h2 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">
-            Everything you need to ship a book
+        <div className="mx-auto max-w-4xl space-y-5 text-center">
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">Features</p>
+          <h2 className="text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+            <span className="gradient-text">Everything you need</span>
+            <br />
+            to ship a book
           </h2>
-          <p className="max-w-2xl text-lg text-muted-foreground">
+          <p className="mx-auto max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
             From trim size presets to bulk regeneration—built for creators who want reliability.
           </p>
         </div>
-        <div className="mt-12">
+        <div className="mt-16">
           <FeatureBento />
         </div>
       </section>
 
       {/* HOW IT WORKS */}
       <section id="how" className="container py-24 md:py-32">
-        <div className="space-y-4">
-          <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">How it works</p>
-          <h2 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">
-            From idea to printable PDF
+        <div className="mx-auto max-w-4xl space-y-5 text-center">
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">How it works</p>
+          <h2 className="text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+            From idea to <span className="gradient-text">printable PDF</span>
           </h2>
         </div>
-        <div className="mt-12">
+        <div className="mt-16">
           <HowItWorks />
         </div>
       </section>
 
       {/* PRICING */}
       <section id="pricing" className="container py-24 md:py-32">
-        <div className="space-y-4 text-center">
-          <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Pricing</p>
-          <h2 className="text-3xl font-semibold tracking-tight md:text-5xl">
-            Start simple, scale when ready
+        <div className="mx-auto max-w-4xl space-y-5 text-center">
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">Pricing</p>
+          <h2 className="text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+            Start simple, <span className="gradient-text">scale when ready</span>
           </h2>
-          <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
+          <p className="mx-auto max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
             Choose a plan that fits your workflow. Upgrade anytime.
           </p>
         </div>
-        <div className="mt-12">
+        <div className="mt-16">
           <PricingSection />
         </div>
       </section>
 
       {/* FAQ */}
       <section id="faq" className="container py-24 md:py-32">
-        <div className="mx-auto max-w-3xl space-y-4">
-          <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">FAQ</p>
-          <h2 className="text-3xl font-semibold tracking-tight md:text-5xl">
-            Answers to common questions
+        <div className="mx-auto max-w-3xl space-y-5 text-center">
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">FAQ</p>
+          <h2 className="text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+            <span className="gradient-text">Answers</span> to common questions
           </h2>
         </div>
-        <div className="mx-auto mt-12 max-w-3xl">
+        <div className="mx-auto mt-16 max-w-3xl">
           <FAQSection />
         </div>
       </section>

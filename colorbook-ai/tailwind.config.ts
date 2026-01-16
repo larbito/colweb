@@ -67,6 +67,9 @@ const config: Config = {
       boxShadow: {
         soft: "0 1px 0 rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.08)",
       },
+      backgroundImage: {
+        "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
+      },
     },
   },
   plugins: [],

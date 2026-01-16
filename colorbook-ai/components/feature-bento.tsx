@@ -49,17 +49,20 @@ const features = [
 export function FeatureBento() {
   return (
     <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-      {features.map((feature) => (
-        <Card key={feature.title} className="group overflow-hidden rounded-2xl border-border bg-card/50 backdrop-blur transition-all hover:shadow-lg">
-          <CardHeader className="space-y-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 transition-transform group-hover:scale-110">
-              <span className="text-2xl">{feature.emoji}</span>
+      {features.map((feature, idx) => (
+        <Card 
+          key={feature.title} 
+          className="group glass-card overflow-hidden transition-all duration-300 hover:border-primary/30 hover:shadow-2xl"
+        >
+          <CardHeader className="space-y-4 pb-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 via-primary/10 to-primary/5 ring-1 ring-primary/20 transition-transform group-hover:scale-105 group-hover:ring-primary/30">
+              <span className="text-3xl">{feature.emoji}</span>
             </div>
-            <CardTitle className="text-base">{feature.title}</CardTitle>
+            <CardTitle className="text-lg font-semibold leading-tight">{feature.title}</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-sm text-foreground">{feature.description}</p>
-            <p className="text-xs text-muted-foreground">{feature.detail}</p>
+          <CardContent className="space-y-3">
+            <p className="text-sm leading-relaxed text-foreground/90">{feature.description}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">{feature.detail}</p>
           </CardContent>
         </Card>
       ))}

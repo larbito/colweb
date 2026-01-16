@@ -39,11 +39,11 @@ export function FAQSection() {
   return (
     <Accordion type="single" collapsible className="space-y-3">
       {faqs.map((item, idx) => (
-        <AccordionItem key={idx} value={`item-${idx}`} className="rounded-2xl border-border bg-card/50 backdrop-blur">
-          <AccordionTrigger className="px-6 py-4 text-left hover:no-underline">
+        <AccordionItem key={idx} value={`item-${idx}`} className="glass-card rounded-2xl">
+          <AccordionTrigger className="px-6 py-5 text-left text-base font-semibold hover:no-underline">
             {item.q}
           </AccordionTrigger>
-          <AccordionContent className="px-6 pb-6 text-sm text-muted-foreground">
+          <AccordionContent className="px-6 pb-6 text-sm leading-relaxed text-muted-foreground">
             {item.a}
           </AccordionContent>
         </AccordionItem>

@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 const steps = ["Size", "Theme", "Style", "Prompts", "Generate"];
 
@@ -45,12 +47,14 @@ export default function NewBookPage() {
                   Define the story world and main character for the prompt generator.
                 </p>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm text-muted-foreground">
-                <div className="rounded-2xl border border-border px-4 py-3">
-                  Theme: “Panda daily life”
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Theme</label>
+                  <Input placeholder="e.g., Panda daily life" defaultValue="Panda daily life" />
                 </div>
-                <div className="rounded-2xl border border-border px-4 py-3">
-                  Character: “Curious panda cub”
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Character</label>
+                  <Input placeholder="e.g., Curious panda cub" defaultValue="Curious panda cub" />
                 </div>
               </CardContent>
             </Card>
