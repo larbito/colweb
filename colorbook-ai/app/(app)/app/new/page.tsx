@@ -23,13 +23,13 @@ import {
   Lock,
   CheckCircle2,
   AlertCircle,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { MAX_PAGES } from "@/lib/schemas";
 import type {
   ThemeSuggestionResponse,
   PromptListResponse,
-  PagePrompt,
   CharacterLock,
 } from "@/lib/schemas";
 import { TrendingPanel } from "@/components/app/trending-panel";
@@ -65,6 +65,16 @@ const thicknesses = [
 type Complexity = "kids" | "medium" | "detailed";
 type Thickness = "thin" | "medium" | "bold";
 
+// Extended PagePrompt with UI state
+interface PromptItem {
+  id: string;
+  pageNumber: number;
+  sceneTitle: string;
+  prompt: string;
+  isRegenerating?: boolean;
+  lastError?: string;
+}
+
 interface FormState {
   size: string;
   theme: string;
@@ -73,8 +83,9 @@ interface FormState {
   pageCount: number;
   complexity: Complexity;
   thickness: Thickness;
-  prompts: PagePrompt[];
+  prompts: PromptItem[];
   generatedImages: Record<number, string>;
+  imageErrors: Record<number, string>;
   characterLock: CharacterLock | null;
   characterSheetUrl: string | null;
 }
@@ -109,6 +120,7 @@ export default function NewBookPage() {
     thickness: "bold",
     prompts: [],
     generatedImages: {},
+    imageErrors: {},
     characterLock: null,
     characterSheetUrl: null,
   });
@@ -147,7 +159,6 @@ export default function NewBookPage() {
       setThemeSuggestion(data);
       updateForm("theme", data.theme);
 
-      // Parse character name and description from mainCharacter
       const mainChar = data.mainCharacter;
       const nameMatch = mainChar.match(/^([^,\-–]+)/);
       const name = nameMatch ? nameMatch[1].trim() : mainChar;
@@ -186,7 +197,6 @@ export default function NewBookPage() {
       const data: TrendingSuggestionResponse = await response.json();
       setTrendingSuggestion(data);
       
-      // Auto-fill form
       updateForm("theme", data.theme);
       updateForm("characterName", data.mainCharacterName);
       updateForm("characterDescription", data.mainCharacterDescription);
@@ -233,7 +243,6 @@ export default function NewBookPage() {
       updateForm("characterLock", data.characterLock);
       toast.success("Character locked! Now generating reference sheet...");
 
-      // Auto-generate character sheet
       await generateCharacterSheet(data.characterLock);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to lock character");
@@ -273,7 +282,7 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Generate Prompts
+  // AI: Generate All Prompts
   // =====================
   const generatePrompts = async () => {
     if (!form.theme || !form.characterName) {
@@ -303,7 +312,15 @@ export default function NewBookPage() {
       }
 
       const data: PromptListResponse = await response.json();
-      updateForm("prompts", data.pages);
+      // Convert to PromptItem with unique IDs
+      const promptItems: PromptItem[] = data.pages.map((p) => ({
+        id: `prompt-${p.pageNumber}-${Date.now()}`,
+        pageNumber: p.pageNumber,
+        sceneTitle: p.sceneTitle,
+        prompt: p.prompt,
+        isRegenerating: false,
+      }));
+      updateForm("prompts", promptItems);
       toast.success(`Generated ${data.pages.length} prompts!`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate prompts");
@@ -313,21 +330,104 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Generate Single Image
+  // AI: Regenerate ONE Prompt
+  // =====================
+  const regenerateOnePrompt = async (pageNumber: number) => {
+    const currentPrompt = form.prompts.find((p) => p.pageNumber === pageNumber);
+    if (!currentPrompt) return;
+
+    // Set loading state for this row
+    setForm((prev) => ({
+      ...prev,
+      prompts: prev.prompts.map((p) =>
+        p.pageNumber === pageNumber ? { ...p, isRegenerating: true, lastError: undefined } : p
+      ),
+    }));
+
+    try {
+      const response = await fetch("/api/ai/regenerate-one-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageNumber,
+          theme: form.theme,
+          mainCharacter: `${form.characterName} - ${form.characterDescription}`,
+          characterLock: form.characterLock,
+          stylePreset: form.complexity,
+          lineThickness: form.thickness,
+          trimSize: form.size,
+          previousSceneTitle: currentPrompt.sceneTitle,
+          previousPrompt: currentPrompt.prompt,
+          totalPages: form.pageCount,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to regenerate prompt");
+      }
+
+      const data = await response.json();
+      
+      // Update just this prompt
+      setForm((prev) => ({
+        ...prev,
+        prompts: prev.prompts.map((p) =>
+          p.pageNumber === pageNumber
+            ? {
+                ...p,
+                sceneTitle: data.sceneTitle,
+                prompt: data.prompt,
+                isRegenerating: false,
+                lastError: undefined,
+              }
+            : p
+        ),
+      }));
+      
+      toast.success(`Page ${pageNumber} prompt updated!`);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Failed to regenerate";
+      setForm((prev) => ({
+        ...prev,
+        prompts: prev.prompts.map((p) =>
+          p.pageNumber === pageNumber ? { ...p, isRegenerating: false, lastError: errorMsg } : p
+        ),
+      }));
+      toast.error(errorMsg);
+    }
+  };
+
+  // =====================
+  // AI: Generate Single Image (using new endpoint)
   // =====================
   const generateImage = async (pageNumber: number, prompt: string) => {
+    // Require character lock for quality generation
+    if (!form.characterLock) {
+      toast.error("Please lock your character first for consistent results", {
+        description: "Go back to Theme step and click 'Lock Character'",
+      });
+      return;
+    }
+
     setGeneratingImage(pageNumber);
+    // Clear any previous error
+    setForm((prev) => ({
+      ...prev,
+      imageErrors: { ...prev.imageErrors, [pageNumber]: "" },
+    }));
+
     try {
-      const response = await fetch("/api/ai/generate-image", {
+      const response = await fetch("/api/ai/generate-page-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          complexity: form.complexity,
-          lineThickness: form.thickness,
-          aspect: "portrait",
-          sizePreset: form.size,
           characterLock: form.characterLock,
+          characterSheetImageUrl: form.characterSheetUrl,
+          stylePreset: form.complexity,
+          lineThickness: form.thickness,
+          trimSize: form.size,
         }),
       });
 
@@ -341,11 +441,17 @@ export default function NewBookPage() {
         setForm((prev) => ({
           ...prev,
           generatedImages: { ...prev.generatedImages, [pageNumber]: data.imageUrl },
+          imageErrors: { ...prev.imageErrors, [pageNumber]: "" },
         }));
         toast.success(`Page ${pageNumber} generated!`);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : `Failed to generate page ${pageNumber}`);
+      const errorMsg = error instanceof Error ? error.message : `Failed to generate page ${pageNumber}`;
+      setForm((prev) => ({
+        ...prev,
+        imageErrors: { ...prev.imageErrors, [pageNumber]: errorMsg },
+      }));
+      toast.error(errorMsg);
     } finally {
       setGeneratingImage(null);
     }
@@ -360,13 +466,20 @@ export default function NewBookPage() {
       return;
     }
 
+    if (!form.characterLock) {
+      toast.error("Please lock your character first", {
+        description: "Go back to Theme step and click 'Lock Character'",
+      });
+      return;
+    }
+
     setBulkGenerating(true);
     toast.info(`Starting generation of ${form.prompts.length} pages...`);
 
     for (const page of form.prompts) {
       if (!form.generatedImages[page.pageNumber]) {
         await generateImage(page.pageNumber, page.prompt);
-        await new Promise((r) => setTimeout(r, 1500)); // Rate limit delay
+        await new Promise((r) => setTimeout(r, 2000)); // Rate limit delay
       }
     }
 
@@ -375,7 +488,7 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // Navigation helpers
+  // Helpers
   // =====================
   const canProceed = () => {
     switch (step) {
@@ -399,6 +512,20 @@ export default function NewBookPage() {
         p.pageNumber === pageNumber ? { ...p, prompt: newPrompt } : p
       ),
     }));
+  };
+
+  const updateSceneTitle = (pageNumber: number, newTitle: string) => {
+    setForm((prev) => ({
+      ...prev,
+      prompts: prev.prompts.map((p) =>
+        p.pageNumber === pageNumber ? { ...p, sceneTitle: newTitle } : p
+      ),
+    }));
+  };
+
+  const copyPrompt = (prompt: string) => {
+    navigator.clipboard.writeText(prompt);
+    toast.success("Prompt copied to clipboard!");
   };
 
   const isCharacterLocked = !!form.characterLock;
@@ -453,14 +580,12 @@ export default function NewBookPage() {
                   <p className="text-muted-foreground">Define theme, character, and lock the style</p>
                 </div>
 
-                {/* Trending Ideas Panel */}
                 <TrendingPanel
                   onSelectKeyword={setSelectedTrendKeyword}
                   onSuggestTrending={suggestTrending}
                   isSuggesting={suggestingTrending}
                 />
 
-                {/* Trending Suggestion Results */}
                 {trendingSuggestion && (
                   <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4">
                     <p className="mb-2 text-sm font-semibold text-green-600 dark:text-green-400">
@@ -484,7 +609,6 @@ export default function NewBookPage() {
                   </div>
                 )}
 
-                {/* Random AI Suggest Button */}
                 <div className="flex justify-center">
                   <Button
                     variant="outline"
@@ -500,7 +624,6 @@ export default function NewBookPage() {
                   </Button>
                 </div>
 
-                {/* Suggestion chips */}
                 {themeSuggestion?.supportingDetails && themeSuggestion.supportingDetails.length > 0 && (
                   <div className="rounded-xl border border-border/50 bg-muted/30 p-4">
                     <p className="mb-2 text-xs font-medium text-muted-foreground">Scene Ideas:</p>
@@ -512,7 +635,6 @@ export default function NewBookPage() {
                   </div>
                 )}
 
-                {/* Form Fields */}
                 <div className="space-y-4">
                   <div>
                     <label className="mb-2 block text-sm font-medium">Theme / Setting</label>
@@ -573,7 +695,7 @@ export default function NewBookPage() {
                       <p className="text-sm text-muted-foreground">
                         {isCharacterLocked
                           ? "Your character will look consistent across all pages"
-                          : "Lock the character design for consistent pages"}
+                          : "Required for consistent black & white pages"}
                       </p>
                     </div>
                     <Button
@@ -592,7 +714,6 @@ export default function NewBookPage() {
                     </Button>
                   </div>
 
-                  {/* Character Sheet Preview */}
                   {form.characterSheetUrl && (
                     <div className="mt-4">
                       <p className="mb-2 text-xs font-medium text-muted-foreground">Character Reference Sheet:</p>
@@ -606,7 +727,6 @@ export default function NewBookPage() {
                     </div>
                   )}
 
-                  {/* Character Lock Details */}
                   {form.characterLock && (
                     <div className="mt-4 rounded-lg bg-muted/50 p-3 text-xs">
                       <p className="font-medium">{form.characterLock.canonicalName}</p>
@@ -671,14 +791,13 @@ export default function NewBookPage() {
                     </div>
                   </div>
 
-                  {/* Warning if character not locked */}
                   {!isCharacterLocked && (
                     <div className="flex items-start gap-3 rounded-xl border border-yellow-500/50 bg-yellow-500/10 p-4">
                       <AlertCircle className="h-5 w-5 shrink-0 text-yellow-600" />
                       <div>
                         <p className="font-medium text-yellow-700 dark:text-yellow-400">Character not locked</p>
                         <p className="text-sm text-muted-foreground">
-                          Go back to Theme step and lock your character for consistent results across all pages.
+                          Go back to Theme step and lock your character for consistent black & white results.
                         </p>
                       </div>
                     </div>
@@ -734,17 +853,56 @@ export default function NewBookPage() {
                       </Button>
                     </div>
                     {form.prompts.map((page) => (
-                      <Card key={page.pageNumber} className="border-border/50 bg-card/60">
+                      <Card key={page.id} className={cn(
+                        "border-border/50 bg-card/60",
+                        page.lastError && "border-red-500/50"
+                      )}>
                         <CardContent className="p-4">
-                          <div className="mb-2 flex items-center gap-2">
-                            <Badge variant="secondary">{page.pageNumber}</Badge>
-                            <span className="text-sm font-medium">{page.sceneTitle}</span>
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary">{page.pageNumber}</Badge>
+                              <Input
+                                value={page.sceneTitle}
+                                onChange={(e) => updateSceneTitle(page.pageNumber, e.target.value)}
+                                className="h-7 w-48 rounded-lg text-sm font-medium"
+                                placeholder="Scene title..."
+                              />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => copyPrompt(page.prompt)}
+                                title="Copy prompt"
+                              >
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 gap-1 rounded-lg text-xs"
+                                onClick={() => regenerateOnePrompt(page.pageNumber)}
+                                disabled={page.isRegenerating}
+                              >
+                                {page.isRegenerating ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="h-3 w-3" />
+                                )}
+                                Regenerate
+                              </Button>
+                            </div>
                           </div>
                           <Textarea
                             value={page.prompt}
                             onChange={(e) => updatePrompt(page.pageNumber, e.target.value)}
-                            className="min-h-[80px] resize-none rounded-xl"
+                            className="min-h-[80px] resize-none rounded-xl text-sm"
+                            disabled={page.isRegenerating}
                           />
+                          {page.lastError && (
+                            <p className="mt-2 text-xs text-red-500">{page.lastError}</p>
+                          )}
                         </CardContent>
                       </Card>
                     ))}
@@ -758,8 +916,29 @@ export default function NewBookPage() {
               <div className="space-y-6">
                 <div className="text-center">
                   <h2 className="text-2xl font-semibold">Generate pages 🚀</h2>
-                  <p className="text-muted-foreground">Generate coloring pages from your prompts</p>
+                  <p className="text-muted-foreground">Generate black & white coloring pages</p>
                 </div>
+
+                {/* Character lock warning */}
+                {!isCharacterLocked && (
+                  <div className="flex items-start gap-3 rounded-xl border border-red-500/50 bg-red-500/10 p-4">
+                    <AlertCircle className="h-5 w-5 shrink-0 text-red-600" />
+                    <div>
+                      <p className="font-medium text-red-700 dark:text-red-400">Character Lock Required</p>
+                      <p className="text-sm text-muted-foreground">
+                        You must lock your character before generating images. This ensures consistent black & white line art across all pages.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2"
+                        onClick={() => setStep(2)}
+                      >
+                        Go to Theme Step
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <Card className="border-border/50 bg-card/60">
                   <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
@@ -777,7 +956,10 @@ export default function NewBookPage() {
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Character</p>
-                      <p className="font-medium">{form.characterName}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">{form.characterName}</p>
+                        {isCharacterLocked && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -789,7 +971,7 @@ export default function NewBookPage() {
                     </p>
                     <Button
                       onClick={startBulkGeneration}
-                      disabled={bulkGenerating || form.prompts.length === 0}
+                      disabled={bulkGenerating || form.prompts.length === 0 || !isCharacterLocked}
                       className="rounded-xl"
                     >
                       {bulkGenerating ? (
@@ -802,22 +984,29 @@ export default function NewBookPage() {
 
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {form.prompts.map((page) => (
-                      <Card key={page.pageNumber} className="overflow-hidden border-border/50">
-                        <div className="aspect-[8.5/11] bg-muted">
+                      <Card key={page.id} className={cn(
+                        "overflow-hidden border-border/50",
+                        form.imageErrors[page.pageNumber] && "border-red-500/50"
+                      )}>
+                        <div className="aspect-[8.5/11] bg-white">
                           {form.generatedImages[page.pageNumber] ? (
                             <img
                               src={form.generatedImages[page.pageNumber]}
                               alt={`Page ${page.pageNumber}`}
-                              className="h-full w-full object-contain bg-white"
+                              className="h-full w-full object-contain"
                             />
                           ) : generatingImage === page.pageNumber ? (
-                            <div className="flex h-full items-center justify-center">
+                            <div className="flex h-full flex-col items-center justify-center gap-2 bg-muted">
                               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                              <p className="text-xs text-muted-foreground">Generating B&W line art...</p>
                             </div>
                           ) : (
-                            <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+                            <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-muted">
                               <ImageIcon className="mb-2 h-8 w-8 text-muted-foreground" />
                               <p className="text-xs text-muted-foreground">Page {page.pageNumber}</p>
+                              {form.imageErrors[page.pageNumber] && (
+                                <p className="mt-2 text-xs text-red-500">{form.imageErrors[page.pageNumber]}</p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -828,7 +1017,7 @@ export default function NewBookPage() {
                             variant="outline"
                             className="w-full rounded-lg text-xs"
                             onClick={() => generateImage(page.pageNumber, page.prompt)}
-                            disabled={generatingImage === page.pageNumber || bulkGenerating}
+                            disabled={generatingImage === page.pageNumber || bulkGenerating || !isCharacterLocked}
                           >
                             {form.generatedImages[page.pageNumber] ? (
                               <><RefreshCw className="mr-1 h-3 w-3" /> Regenerate</>
