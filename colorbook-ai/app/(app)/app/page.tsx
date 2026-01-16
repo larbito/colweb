@@ -1,70 +1,114 @@
+"use client";
+
 import Link from "next/link";
-import { AppTopbar } from "@/components/app-topbar";
-import { Badge } from "@/components/ui/badge";
+import { AppTopbar } from "@/components/app/app-topbar";
+import { QuickActionCard } from "@/components/app/quick-action-card";
+import { StatCard } from "@/components/app/stat-card";
+import { ProjectCard } from "@/components/app/project-card";
+import { ActivityFeed } from "@/components/app/activity-feed";
+import { EmptyState } from "@/components/app/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkles } from "lucide-react";
-
-const mockProjects = [
-  { title: "Forest Friends Adventure", size: "8.5×11", pages: 32, status: "Draft" },
-  { title: "Tiny Robots at Play", size: "8×10", pages: 24, status: "Ready" },
-  { title: "Ocean Calm Patterns", size: "A4", pages: 40, status: "Generating" },
-];
+import { mockUser, getRecentProjects, getStats } from "@/lib/mock-data";
+import { Sparkles, Pencil, FileText, FolderOpen, Image, Download, ArrowRight } from "lucide-react";
 
 export default function DashboardPage() {
+  const recentProjects = getRecentProjects(4);
+  const stats = getStats();
+
   return (
-    <div className="min-h-screen">
-      <AppTopbar title="My Books" description="Manage your projects and export ready-to-print PDFs." />
-      <div className="container py-10 space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Recent projects</h2>
-          <Button asChild className="rounded-2xl">
-            <Link href="/app/new">Create New</Link>
-          </Button>
-        </div>
+    <>
+      <AppTopbar title="Dashboard" />
 
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {mockProjects.map((project) => (
-            <Card key={project.title} className="rounded-2xl">
-              <CardHeader className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">{project.title}</CardTitle>
-                  <Badge variant="secondary">{project.status}</Badge>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {project.size} · {project.pages} pages
-                </p>
-              </CardHeader>
-              <CardContent className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Sparkles className="h-4 w-4" />
-                  KDP ready
-                </div>
-                  <Button variant="outline" className="rounded-2xl" asChild>
-                    <Link href="/app/projects/1">Open</Link>
+      <main className="p-4 lg:p-6">
+        <div className="mx-auto max-w-6xl space-y-8">
+          {/* Welcome Header */}
+          <section>
+            <h2 className="text-2xl font-semibold tracking-tight">
+              Welcome back, {mockUser.name.split(" ")[0]} 👋
+            </h2>
+            <p className="text-muted-foreground">
+              Create a new book or continue where you left off.
+            </p>
+          </section>
+
+          {/* Quick Actions */}
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <QuickActionCard
+              emoji="✨"
+              title="New Book (Story Mode)"
+              description="Generate a full coloring book with AI-powered story prompts."
+              href="/app/new"
+              icon={Sparkles}
+            />
+            <QuickActionCard
+              emoji="🖍️"
+              title="Single Page Generator"
+              description="Generate individual coloring pages without a full book."
+              href="/app/new?mode=single"
+              icon={Pencil}
+            />
+            <QuickActionCard
+              emoji="📄"
+              title="Export PDF"
+              description="Export your ready projects as print-ready PDFs."
+              href="/app/projects"
+              icon={FileText}
+            />
+          </section>
+
+          {/* Stats */}
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard icon={FolderOpen} label="Total Projects" value={stats.totalProjects} />
+            <StatCard icon={Image} label="Pages Generated" value={stats.totalPages} />
+            <StatCard
+              icon={Image}
+              label="Pages Ready"
+              value={stats.readyPages}
+              sublabel={`of ${stats.totalPages}`}
+            />
+            <StatCard icon={Download} label="Exports Created" value={stats.exports} />
+          </section>
+
+          {/* Main Grid */}
+          <section className="grid gap-6 lg:grid-cols-3">
+            {/* Recent Projects */}
+            <div className="lg:col-span-2">
+              <Card className="border-border/50 bg-card/60 backdrop-blur">
+                <CardHeader className="flex-row items-center justify-between pb-3">
+                  <CardTitle className="text-base font-semibold">Recent Projects</CardTitle>
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href="/app/projects">
+                      View all <ArrowRight className="ml-1 h-3 w-3" />
+                    </Link>
                   </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                </CardHeader>
+                <CardContent>
+                  {recentProjects.length === 0 ? (
+                    <EmptyState
+                      title="No projects yet"
+                      description="Create your first coloring book to get started."
+                      actionLabel="Create Book"
+                      actionHref="/app/new"
+                    />
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {recentProjects.map((project) => (
+                        <ProjectCard key={project.id} project={project} />
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
+            {/* Activity Feed */}
+            <div>
+              <ActivityFeed limit={6} />
+            </div>
+          </section>
         </div>
-
-        <Card className="rounded-2xl border-dashed">
-          <CardHeader>
-            <CardTitle className="text-base">Create your first book</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Start with a trim size and theme, then we’ll guide you through prompts and generation.
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      </main>
+    </>
   );
 }
-
