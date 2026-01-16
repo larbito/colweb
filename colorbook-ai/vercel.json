@@ -1,0 +1,13 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/refresh-trends",
+      "schedule": "0 5 * * *"
+    }
+  ]
+}
+
