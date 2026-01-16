@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { AnimatedSection } from "@/components/animated-section";
 import { FloatingEmojis } from "@/components/floating-emojis";
 import { FloatingCards } from "@/components/floating-cards";
+import { StatsSection } from "@/components/stats-section";
 import { 
   Sparkles, ArrowRight, Check, Zap, RefreshCw, 
   FileOutput, SlidersHorizontal, Ruler, PenTool, ChevronDown, Star, Quote
@@ -241,6 +242,9 @@ export default function Home() {
 
         <FloatingCards />
       </section>
+
+      {/* Stats */}
+      <StatsSection />
 
       {/* Features */}
       <section id="features" className="mx-auto max-w-5xl px-6 py-24">
