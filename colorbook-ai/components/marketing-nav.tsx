@@ -20,26 +20,25 @@ export function MarketingNav() {
   return (
     <header
       className={cn(
-        "fixed top-0 z-50 w-full transition-all duration-300",
-        scrolled ? "border-b border-border/50 bg-background/80 backdrop-blur-xl" : ""
+        "fixed left-0 right-0 top-0 z-50 transition-all duration-200",
+        scrolled && "border-b border-border/50 bg-background/80 backdrop-blur-md"
       )}
     >
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <BookOpen className="h-4 w-4 text-primary-foreground" />
-          </div>
-          <span className="font-semibold">ColorBook AI</span>
+      <nav className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
+        <Link href="/" className="flex items-center gap-2 font-medium">
+          <BookOpen className="h-5 w-5" />
+          <span>ColorBook AI</span>
         </Link>
 
-        <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
-          <Link href="#features" className="transition hover:text-foreground">Features</Link>
-          <Link href="#how" className="transition hover:text-foreground">How it works</Link>
-          <Link href="/pricing" className="transition hover:text-foreground">Pricing</Link>
-          <Link href="/faq" className="transition hover:text-foreground">FAQ</Link>
-        </nav>
+        <div className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
+          <Link href="#features" className="transition-colors hover:text-foreground">Features</Link>
+          <Link href="#how-it-works" className="transition-colors hover:text-foreground">How it works</Link>
+          <Link href="#pricing" className="transition-colors hover:text-foreground">Pricing</Link>
+          <Link href="/faq" className="transition-colors hover:text-foreground">FAQ</Link>
+        </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="md:hidden">
@@ -48,17 +47,16 @@ export function MarketingNav() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild><Link href="#features">Features</Link></DropdownMenuItem>
-              <DropdownMenuItem asChild><Link href="#how">How it works</Link></DropdownMenuItem>
-              <DropdownMenuItem asChild><Link href="/pricing">Pricing</Link></DropdownMenuItem>
+              <DropdownMenuItem asChild><Link href="#how-it-works">How it works</Link></DropdownMenuItem>
+              <DropdownMenuItem asChild><Link href="#pricing">Pricing</Link></DropdownMenuItem>
               <DropdownMenuItem asChild><Link href="/faq">FAQ</Link></DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <ThemeToggle />
-          <Button asChild className="hidden h-9 rounded-lg px-4 md:flex">
-            <Link href="/app/new">Get Started</Link>
+          <Button asChild size="sm" className="hidden rounded-full md:inline-flex">
+            <Link href="/app/new">Get started</Link>
           </Button>
         </div>
-      </div>
+      </nav>
     </header>
   );
 }
