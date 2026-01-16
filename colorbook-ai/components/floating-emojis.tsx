@@ -19,23 +19,23 @@ export function FloatingEmojis() {
   }
 
   return (
-    <div className="pointer-events-none fixed inset-0 -z-5 overflow-hidden">
+    <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
       {emojis.map((item, i) => (
         <motion.div
           key={i}
-          className="absolute text-2xl opacity-20 sm:text-3xl md:text-4xl"
+          className="absolute text-3xl sm:text-4xl md:text-5xl"
           style={{ left: item.x, top: item.y }}
           initial={{ opacity: 0, scale: 0 }}
           animate={{ 
-            opacity: 0.15, 
+            opacity: 0.12, 
             scale: 1,
-            y: [0, -15, 0],
+            y: [0, -20, 0],
           }}
           transition={{
-            opacity: { duration: 0.5, delay: item.delay },
-            scale: { duration: 0.5, delay: item.delay },
+            opacity: { duration: 0.8, delay: item.delay },
+            scale: { duration: 0.8, delay: item.delay },
             y: { 
-              duration: 3 + i * 0.5, 
+              duration: 4 + i * 0.5, 
               repeat: Infinity, 
               ease: "easeInOut",
               delay: item.delay 
