@@ -1,8 +1,8 @@
 import Link from "next/link";
-import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { AnimatedSection } from "@/components/animated-section";
 import { FloatingEmojis } from "@/components/floating-emojis";
+import { FloatingCards } from "@/components/floating-cards";
 import { 
   Sparkles, ArrowRight, Check, Zap, RefreshCw, 
   FileOutput, SlidersHorizontal, Ruler, PenTool, ChevronDown, Star, Quote
@@ -215,6 +215,21 @@ export default function Home() {
             </div>
           </div>
         </AnimatedSection>
+      </section>
+
+      {/* Why Choose Us */}
+      <section id="why-us" className="mx-auto max-w-5xl px-6 py-24">
+        <AnimatedSection className="mb-16 text-center">
+          <p className="mb-2 text-sm font-medium text-muted-foreground">Why choose us</p>
+          <h2 className="text-3xl font-medium tracking-tight sm:text-4xl">
+            Built for serious creators
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-muted-foreground">
+            We understand what KDP publishers actually need — speed, consistency, and print-ready output.
+          </p>
+        </AnimatedSection>
+
+        <FloatingCards />
       </section>
 
       {/* Features */}
