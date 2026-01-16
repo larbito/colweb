@@ -53,7 +53,7 @@ export function MarketingNav() {
             </DropdownMenuContent>
           </DropdownMenu>
           <Button asChild size="sm" className="hidden rounded-full md:inline-flex">
-            <Link href="/app/new">Get started</Link>
+            <Link href="/auth">Get started</Link>
           </Button>
         </div>
       </nav>

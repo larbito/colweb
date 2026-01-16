@@ -81,7 +81,7 @@ export default function PricingPage() {
                   className="w-full rounded-full" 
                   variant={tier.popular ? "default" : "outline"}
                 >
-                  <Link href="/app/new">{tier.cta}</Link>
+                  <Link href="/auth">{tier.cta}</Link>
                 </Button>
               </div>
             </AnimatedSection>

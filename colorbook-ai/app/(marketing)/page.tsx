@@ -64,19 +64,22 @@ const testimonials = [
     name: "Sarah M.",
     role: "KDP Publisher",
     content: "Finally, a tool that understands the KDP workflow. I went from idea to published book in a single afternoon.",
-    avatar: "SM",
+    avatar: "👩‍🎨",
+    color: "bg-pink-100 dark:bg-pink-900/30",
   },
   {
     name: "David L.",
     role: "Children's Book Creator",
     content: "The story-mode prompts are a game changer. My coloring books now have actual narratives that kids love.",
-    avatar: "DL",
+    avatar: "👨‍💼",
+    color: "bg-blue-100 dark:bg-blue-900/30",
   },
   {
     name: "Emily R.",
     role: "Indie Creator",
     content: "I've tried other AI tools, but this is the only one that gives me consistent, print-ready line art.",
-    avatar: "ER",
+    avatar: "👩‍🏫",
+    color: "bg-purple-100 dark:bg-purple-900/30",
   },
 ];
 
@@ -161,7 +164,7 @@ export default function Home() {
         <AnimatedSection delay={0.3}>
           <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Button asChild size="lg" className="h-12 min-w-[180px] rounded-full text-base">
-              <Link href="/app/new">
+              <Link href="/auth">
                 Start creating
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
@@ -210,7 +213,14 @@ export default function Home() {
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-4">
                 <div className="mb-3 text-sm font-medium">Preview</div>
-                <div className="aspect-[8.5/11] rounded border-2 border-dashed border-border bg-background/50" />
+                <div className="aspect-[8.5/11] overflow-hidden rounded border border-border bg-white">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src="/preview-coloring-page.png" 
+                    alt="Coloring page preview"
+                    className="h-full w-full object-cover"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -305,7 +315,7 @@ export default function Home() {
                   "{testimonial.content}"
                 </p>
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-medium">
+                  <div className={`flex h-12 w-12 items-center justify-center rounded-full text-2xl ${testimonial.color}`}>
                     {testimonial.avatar}
                   </div>
                   <div>
@@ -362,7 +372,7 @@ export default function Home() {
                   className="w-full rounded-full" 
                   variant={tier.popular ? "default" : "outline"}
                 >
-                  <Link href="/app/new">{tier.cta}</Link>
+                  <Link href="/auth">{tier.cta}</Link>
                 </Button>
               </div>
             </AnimatedSection>
@@ -413,7 +423,7 @@ export default function Home() {
               Join creators shipping KDP coloring books with AI-powered workflows.
             </p>
             <Button asChild size="lg" className="h-12 min-w-[200px] rounded-full text-base">
-              <Link href="/app/new">
+              <Link href="/auth">
                 Start creating free
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
