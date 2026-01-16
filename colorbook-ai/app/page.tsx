@@ -13,11 +13,11 @@ export default function LandingPage() {
 
       <section className="container relative py-16 md:py-24">
         <div className="mx-auto max-w-3xl text-center">
-          <p className="mb-4 text-sm text-muted-foreground">Coloring Book Generator</p>
+          <p className="mb-4 text-sm text-[var(--color-muted-foreground)]">Coloring Book Generator</p>
           <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-6xl">
             Create print-ready coloring books with a calm, reliable workflow.
           </h1>
-          <p className="mt-6 text-pretty text-lg text-muted-foreground">
+          <p className="mt-6 text-pretty text-lg text-[var(--color-muted-foreground)]">
             Build projects, generate prompts and pages in bulk, review/regenerate, and export a clean PDF—without
             juggling tools.
           </p>
@@ -36,7 +36,7 @@ export default function LandingPage() {
             <CardHeader>
               <CardTitle className="text-base">Projects that feel professional</CardTitle>
             </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
+            <CardContent className="text-sm text-[var(--color-muted-foreground)]">
               Clear status pills, progress, retries, and calm UI states for creators.
             </CardContent>
           </Card>
@@ -44,7 +44,7 @@ export default function LandingPage() {
             <CardHeader>
               <CardTitle className="text-base">Bulk generation, safely</CardTitle>
             </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
+            <CardContent className="text-sm text-[var(--color-muted-foreground)]">
               Queue page generation with predictable progress and per-page actions.
             </CardContent>
           </Card>
@@ -52,7 +52,7 @@ export default function LandingPage() {
             <CardHeader>
               <CardTitle className="text-base">Export without storage</CardTitle>
             </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
+            <CardContent className="text-sm text-[var(--color-muted-foreground)]">
               We only store prompts/metadata + temporary URLs; export is streamed on demand.
             </CardContent>
           </Card>
@@ -63,7 +63,7 @@ export default function LandingPage() {
         <div className="grid gap-8 md:grid-cols-3">
           <div>
             <h2 className="text-xl font-semibold tracking-tight">How it works</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
               A straightforward pipeline from idea → prompts → pages → PDF.
             </p>
           </div>
@@ -78,7 +78,7 @@ export default function LandingPage() {
                 <CardHeader>
                   <CardTitle className="text-base">{x.title}</CardTitle>
                 </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">{x.body}</CardContent>
+                <CardContent className="text-sm text-[var(--color-muted-foreground)]">{x.body}</CardContent>
               </Card>
             ))}
           </div>

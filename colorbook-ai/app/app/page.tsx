@@ -9,7 +9,7 @@ export default function DashboardPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">My Books</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Projects, pages, and export status.</p>
+            <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">Projects, pages, and export status.</p>
           </div>
           <Button asChild>
             <Link href="/app/new">Create New</Link>
@@ -20,7 +20,7 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="text-base">Welcome to Colorbook AI</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
+          <CardContent className="text-sm text-[var(--color-muted-foreground)]">
             <p className="mb-4">
               This is a preview of your dashboard. API integration will be added later.
             </p>

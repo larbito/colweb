@@ -6,7 +6,7 @@ export default function FAQPage() {
       <div className="mx-auto max-w-3xl">
         <div className="text-center mb-12">
           <h1 className="text-4xl font-semibold tracking-tight mb-4">FAQ</h1>
-          <p className="text-lg text-muted-foreground">Frequently asked questions.</p>
+          <p className="text-lg text-[var(--color-muted-foreground)]">Frequently asked questions.</p>
         </div>
 
         <div className="space-y-4">
@@ -19,7 +19,7 @@ export default function FAQPage() {
               <CardHeader>
                 <CardTitle className="text-base">{item.q}</CardTitle>
               </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">{item.a}</CardContent>
+              <CardContent className="text-sm text-[var(--color-muted-foreground)]">{item.a}</CardContent>
             </Card>
           ))}
         </div>

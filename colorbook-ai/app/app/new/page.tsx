@@ -6,14 +6,14 @@ export default function NewBookPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Create New Book</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Set up your coloring book project.</p>
+          <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">Set up your coloring book project.</p>
         </div>
 
         <Card className="rounded-2xl">
           <CardHeader>
             <CardTitle className="text-base">Book Wizard</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
+          <CardContent className="text-sm text-[var(--color-muted-foreground)]">
             <p>Book creation wizard will be implemented here. API integration coming soon.</p>
           </CardContent>
         </Card>
