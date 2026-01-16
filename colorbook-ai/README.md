@@ -54,8 +54,18 @@ Open http://localhost:3000
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/ai/suggest-theme` | POST | AI theme & character suggestions |
+| `/api/ai/lock-character` | POST | Create canonical character definition for consistency |
+| `/api/ai/generate-character-sheet` | POST | Generate character reference sheet image |
 | `/api/ai/generate-prompts` | POST | Generate story prompts (max 80 pages) |
 | `/api/ai/generate-image` | POST | Generate coloring page image |
+
+## Series Consistency
+
+The **Character Lock** system ensures your main character looks identical across all pages:
+
+1. **Lock Character** — AI creates a canonical definition with exact proportions, features, and outfit
+2. **Character Sheet** — A reference sheet is generated showing multiple poses
+3. **Generate Pages** — Each page uses the character lock for visual consistency
 
 ## Stack
 
