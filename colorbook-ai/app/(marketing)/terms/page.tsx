@@ -12,7 +12,7 @@ export default function TermsPage() {
     <main className="relative">
       <PageHeader
         badge="Legal"
-        badgeIcon={FileText}
+        badgeIcon={<FileText className="h-3.5 w-3.5" />}
         title="Terms of Service"
         subtitle="Last updated: January 2024"
       />

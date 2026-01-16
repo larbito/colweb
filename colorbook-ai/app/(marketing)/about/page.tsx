@@ -39,7 +39,7 @@ export default function AboutPage() {
     <main className="relative">
       <PageHeader
         badge="About Us"
-        badgeIcon={Sparkles}
+        badgeIcon={<Sparkles className="h-3.5 w-3.5" />}
         title="Built for KDP creators who ship"
         subtitle="We understand the coloring book workflow because we've been there. ColorBook AI exists to remove the friction between your ideas and a published book."
       />
@@ -111,4 +111,3 @@ export default function AboutPage() {
     </main>
   );
 }
-

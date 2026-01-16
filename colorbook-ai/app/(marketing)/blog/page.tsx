@@ -23,7 +23,7 @@ export default function BlogPage() {
     <main className="relative">
       <PageHeader
         badge="Blog"
-        badgeIcon={BookOpen}
+        badgeIcon={<BookOpen className="h-3.5 w-3.5" />}
         title="Tips & guides for KDP creators"
         subtitle="Learn how to create better coloring books, faster."
       />
@@ -83,4 +83,3 @@ export default function BlogPage() {
     </main>
   );
 }
-

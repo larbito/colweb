@@ -45,7 +45,7 @@ export default function ContactPage() {
     <main className="relative">
       <PageHeader
         badge="Contact"
-        badgeIcon={MessageSquare}
+        badgeIcon={<MessageSquare className="h-3.5 w-3.5" />}
         title="Get in touch"
         subtitle="Have a question or need help? We're here for you."
       />
@@ -134,4 +134,3 @@ export default function ContactPage() {
     </main>
   );
 }
-

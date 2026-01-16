@@ -2,16 +2,16 @@
 
 import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
-import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface PageHeaderProps {
   badge?: string;
-  badgeIcon?: LucideIcon;
+  badgeIcon?: ReactNode;
   title: string;
   subtitle?: string;
 }
 
-export function PageHeader({ badge, badgeIcon: BadgeIcon, title, subtitle }: PageHeaderProps) {
+export function PageHeader({ badge, badgeIcon, title, subtitle }: PageHeaderProps) {
   return (
     <section className="mx-auto max-w-4xl px-6 pb-12 pt-28 text-center">
       {badge && (
@@ -21,7 +21,7 @@ export function PageHeader({ badge, badgeIcon: BadgeIcon, title, subtitle }: Pag
           transition={{ duration: 0.5 }}
         >
           <Badge variant="secondary" className="mb-6 gap-1.5 rounded-full px-3 py-1">
-            {BadgeIcon && <BadgeIcon className="h-3.5 w-3.5" />}
+            {badgeIcon}
             {badge}
           </Badge>
         </motion.div>
@@ -49,4 +49,3 @@ export function PageHeader({ badge, badgeIcon: BadgeIcon, title, subtitle }: Pag
     </section>
   );
 }
-

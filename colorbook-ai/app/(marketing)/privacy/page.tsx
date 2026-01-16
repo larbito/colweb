@@ -12,7 +12,7 @@ export default function PrivacyPage() {
     <main className="relative">
       <PageHeader
         badge="Legal"
-        badgeIcon={Shield}
+        badgeIcon={<Shield className="h-3.5 w-3.5" />}
         title="Privacy Policy"
         subtitle="Last updated: January 2024"
       />
