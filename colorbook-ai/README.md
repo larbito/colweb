@@ -1,39 +1,34 @@
-# Colorbook AI
+# ColorBook AI — UI-First MVP
 
-A simple Next.js app for generating coloring book projects. Clean, modern UI with dark/light mode.
+Clean, production-ready UI for a coloring book generator. No APIs yet (easy deployment on Vercel).
 
 ## Deploy to Vercel
 
-**Zero configuration needed!** Just:
-
-1. Push this repo to GitHub
-2. Import it in Vercel
+1. Import the repo in Vercel
+2. Root directory: `colorbook-ai`
 3. Deploy
 
-Vercel will auto-detect Next.js and deploy it automatically.
+No environment variables required for this UI-only phase.
 
-## Local Development
+## Local development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open http://localhost:3000
 
-## Features
+## Structure
 
-- ✅ Clean, modern UI (LobeHub-inspired)
-- ✅ Dark/light mode (next-themes)
-- ✅ Responsive design
-- ✅ Zero API dependencies (for now)
-- ✅ Easy Vercel deployment
+- `app/(marketing)` — public marketing site
+- `app/(app)` — dashboard + wizard UI
+- `components/ui` — shadcn-style UI primitives
 
-## Tech Stack
+## Stack
 
-- Next.js 16
-- React 19
+- Next.js (App Router)
 - TypeScript
-- Tailwind CSS v4
+- Tailwind CSS (tokens + dark/light)
 - next-themes
 - lucide-react
