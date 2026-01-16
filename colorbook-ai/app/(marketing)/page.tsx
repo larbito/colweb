@@ -1,9 +1,11 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { AnimatedSection } from "@/components/animated-section";
+import { FloatingEmojis } from "@/components/floating-emojis";
 import { 
-  Sparkles, ArrowRight, Check, Zap, Layers, RefreshCw, 
-  FileOutput, SlidersHorizontal, Ruler, PenTool
+  Sparkles, ArrowRight, Check, Zap, RefreshCw, 
+  FileOutput, SlidersHorizontal, Ruler, PenTool, ChevronDown, Star, Quote
 } from "lucide-react";
 
 const features = [
@@ -57,6 +59,46 @@ const steps = [
   },
 ];
 
+const testimonials = [
+  {
+    name: "Sarah M.",
+    role: "KDP Publisher",
+    content: "Finally, a tool that understands the KDP workflow. I went from idea to published book in a single afternoon.",
+    avatar: "SM",
+  },
+  {
+    name: "David L.",
+    role: "Children's Book Creator",
+    content: "The story-mode prompts are a game changer. My coloring books now have actual narratives that kids love.",
+    avatar: "DL",
+  },
+  {
+    name: "Emily R.",
+    role: "Indie Creator",
+    content: "I've tried other AI tools, but this is the only one that gives me consistent, print-ready line art.",
+    avatar: "ER",
+  },
+];
+
+const faqs = [
+  { 
+    q: "Can I use this for Amazon KDP?", 
+    a: "Yes! We support all common KDP trim sizes with proper bleed and margin settings." 
+  },
+  { 
+    q: "Do generated images expire?", 
+    a: "Preview links may expire, but you can always regenerate from your saved prompts." 
+  },
+  { 
+    q: "Who owns the generated content?", 
+    a: "You do. Your prompts and outputs belong to you." 
+  },
+  { 
+    q: "Can I edit prompts after generating?", 
+    a: "Yes, all prompts are fully editable at any time." 
+  },
+];
+
 const pricing = [
   {
     name: "Starter",
@@ -90,6 +132,7 @@ export default function Home() {
       {/* Background */}
       <div className="gradient-bg fixed inset-0 -z-10" />
       <div className="bg-grid fixed inset-0 -z-10" />
+      <FloatingEmojis />
 
       {/* Hero */}
       <section className="mx-auto max-w-5xl px-6 pb-24 pt-32 text-center">
@@ -224,6 +267,43 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Testimonials */}
+      <section id="testimonials" className="mx-auto max-w-5xl px-6 py-24">
+        <AnimatedSection className="mb-16 text-center">
+          <p className="mb-2 text-sm font-medium text-muted-foreground">Testimonials</p>
+          <h2 className="text-3xl font-medium tracking-tight sm:text-4xl">
+            Loved by creators
+          </h2>
+        </AnimatedSection>
+
+        <div className="grid gap-6 md:grid-cols-3">
+          {testimonials.map((testimonial, i) => (
+            <AnimatedSection key={testimonial.name} delay={i * 0.1}>
+              <div className="relative rounded-2xl border border-border bg-card/50 p-6">
+                <Quote className="absolute right-4 top-4 h-8 w-8 text-muted-foreground/20" />
+                <div className="mb-4 flex items-center gap-1">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                  ))}
+                </div>
+                <p className="mb-6 text-sm text-muted-foreground">
+                  "{testimonial.content}"
+                </p>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-medium">
+                    {testimonial.avatar}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">{testimonial.name}</p>
+                    <p className="text-xs text-muted-foreground">{testimonial.role}</p>
+                  </div>
+                </div>
+              </div>
+            </AnimatedSection>
+          ))}
+        </div>
+      </section>
+
       {/* Pricing */}
       <section id="pricing" className="mx-auto max-w-5xl px-6 py-24">
         <AnimatedSection className="mb-16 text-center">
@@ -275,21 +355,55 @@ export default function Home() {
         </div>
       </section>
 
+      {/* FAQ */}
+      <section id="faq" className="mx-auto max-w-2xl px-6 py-24">
+        <AnimatedSection className="mb-16 text-center">
+          <p className="mb-2 text-sm font-medium text-muted-foreground">FAQ</p>
+          <h2 className="text-3xl font-medium tracking-tight sm:text-4xl">
+            Common questions
+          </h2>
+        </AnimatedSection>
+
+        <div className="space-y-3">
+          {faqs.map((faq, i) => (
+            <AnimatedSection key={i} delay={i * 0.1}>
+              <details className="group rounded-xl border border-border bg-card/50 [&_summary::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer items-center justify-between p-5 font-medium">
+                  {faq.q}
+                  <ChevronDown className="h-5 w-5 text-muted-foreground transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="px-5 pb-5 text-sm text-muted-foreground">
+                  {faq.a}
+                </div>
+              </details>
+            </AnimatedSection>
+          ))}
+        </div>
+
+        <AnimatedSection delay={0.5} className="mt-8 text-center">
+          <Link href="/faq" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
+            View all FAQs →
+          </Link>
+        </AnimatedSection>
+      </section>
+
       {/* CTA */}
       <section className="mx-auto max-w-3xl px-6 py-24 text-center">
         <AnimatedSection>
-          <h2 className="mb-4 text-3xl font-medium tracking-tight sm:text-4xl">
-            Ready to create your book?
-          </h2>
-          <p className="mb-8 text-muted-foreground">
-            Join creators shipping KDP coloring books with AI-powered workflows.
-          </p>
-          <Button asChild size="lg" className="h-12 min-w-[200px] rounded-full text-base">
-            <Link href="/app/new">
-              Start creating free
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Link>
-          </Button>
+          <div className="rounded-2xl border border-border bg-card/50 p-12">
+            <h2 className="mb-4 text-3xl font-medium tracking-tight sm:text-4xl">
+              Ready to create your book?
+            </h2>
+            <p className="mb-8 text-muted-foreground">
+              Join creators shipping KDP coloring books with AI-powered workflows.
+            </p>
+            <Button asChild size="lg" className="h-12 min-w-[200px] rounded-full text-base">
+              <Link href="/app/new">
+                Start creating free
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
         </AnimatedSection>
       </section>
     </div>
