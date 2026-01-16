@@ -1,0 +1,64 @@
+// Prisma schema for ColorBook AI
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TrendSource {
+  google_trends
+  keepa
+  pytrends
+}
+
+model TrendSignal {
+  id          String      @id @default(uuid())
+  keyword     String
+  source      TrendSource
+  region      String      @default("US")
+  periodDays  Int
+  score       Float
+  raw         Json?
+  collectedAt DateTime    @default(now())
+
+  @@index([region, periodDays, collectedAt])
+  @@index([keyword])
+}
+
+model Project {
+  id                    String   @id @default(uuid())
+  title                 String
+  theme                 String?
+  mainCharacterName     String?
+  mainCharacterDesc     String?
+  stylePreset           String   @default("kids")
+  lineThickness         String   @default("bold")
+  trimSize              String   @default("8.5x11")
+  pageCount             Int      @default(12)
+  characterLockJson     Json?
+  characterSheetUrl     String?
+  status                String   @default("draft")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  pages                 Page[]
+}
+
+model Page {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pageNumber  Int
+  sceneTitle  String?
+  prompt      String
+  imageUrl    String?
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId])
+}

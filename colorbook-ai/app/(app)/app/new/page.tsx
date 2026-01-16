@@ -32,6 +32,8 @@ import type {
   PagePrompt,
   CharacterLock,
 } from "@/lib/schemas";
+import { TrendingPanel } from "@/components/app/trending-panel";
+import type { TrendingSuggestionResponse } from "@/app/api/ai/suggest-trending/route";
 
 const steps = [
   { id: 1, label: "Size" },
@@ -92,6 +94,9 @@ export default function NewBookPage() {
 
   // Suggestions from AI
   const [themeSuggestion, setThemeSuggestion] = useState<ThemeSuggestionResponse | null>(null);
+  const [trendingSuggestion, setTrendingSuggestion] = useState<TrendingSuggestionResponse | null>(null);
+  const [suggestingTrending, setSuggestingTrending] = useState(false);
+  const [selectedTrendKeyword, setSelectedTrendKeyword] = useState<string | null>(null);
 
   // Form state
   const [form, setForm] = useState<FormState>({
@@ -154,6 +159,45 @@ export default function NewBookPage() {
       toast.error(error instanceof Error ? error.message : "Failed to suggest theme");
     } finally {
       setSuggestingTheme(false);
+    }
+  };
+
+  // =====================
+  // AI: Suggest Trending
+  // =====================
+  const suggestTrending = async (region: string, periodDays: number, keyword?: string) => {
+    setSuggestingTrending(true);
+    try {
+      const response = await fetch("/api/ai/suggest-trending", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          region,
+          periodDays: periodDays.toString(),
+          optionalKeyword: keyword,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to suggest trending idea");
+      }
+
+      const data: TrendingSuggestionResponse = await response.json();
+      setTrendingSuggestion(data);
+      
+      // Auto-fill form
+      updateForm("theme", data.theme);
+      updateForm("characterName", data.mainCharacterName);
+      updateForm("characterDescription", data.mainCharacterDescription);
+
+      toast.success(`Trending idea: ${data.bookIdeaTitle}`, {
+        description: "Form has been filled with the suggested idea!",
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to suggest trending idea");
+    } finally {
+      setSuggestingTrending(false);
     }
   };
 
@@ -409,7 +453,38 @@ export default function NewBookPage() {
                   <p className="text-muted-foreground">Define theme, character, and lock the style</p>
                 </div>
 
-                {/* AI Suggest Button */}
+                {/* Trending Ideas Panel */}
+                <TrendingPanel
+                  onSelectKeyword={setSelectedTrendKeyword}
+                  onSuggestTrending={suggestTrending}
+                  isSuggesting={suggestingTrending}
+                />
+
+                {/* Trending Suggestion Results */}
+                {trendingSuggestion && (
+                  <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4">
+                    <p className="mb-2 text-sm font-semibold text-green-600 dark:text-green-400">
+                      💡 {trendingSuggestion.bookIdeaTitle}
+                    </p>
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {trendingSuggestion.tags?.map((tag, i) => (
+                        <Badge key={i} variant="outline" className="text-xs border-green-500/30">{tag}</Badge>
+                      ))}
+                    </div>
+                    {trendingSuggestion.exampleScenes && trendingSuggestion.exampleScenes.length > 0 && (
+                      <div>
+                        <p className="mb-1 text-xs font-medium text-muted-foreground">Example Scenes:</p>
+                        <ul className="list-inside list-disc text-xs text-muted-foreground">
+                          {trendingSuggestion.exampleScenes.slice(0, 4).map((scene, i) => (
+                            <li key={i}>{scene}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Random AI Suggest Button */}
                 <div className="flex justify-center">
                   <Button
                     variant="outline"
@@ -420,7 +495,7 @@ export default function NewBookPage() {
                     {suggestingTheme ? (
                       <><Loader2 className="h-4 w-4 animate-spin" /> Thinking...</>
                     ) : (
-                      <><Wand2 className="h-4 w-4" /> ✨ AI Suggest Theme</>
+                      <><Wand2 className="h-4 w-4" /> 🎲 Random AI Suggest</>
                     )}
                   </Button>
                 </div>
