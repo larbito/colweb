@@ -6,6 +6,32 @@ const config: Config = {
   theme: {
     container: {
       center: true,
+      padding: "1.5rem",
+      screens: {
+        "2xl": "1280px",
+      },
+    },
+    extend: {
+      borderRadius: {
+        "2xl": "1rem",
+      },
+      boxShadow: {
+        soft: "0 1px 0 rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.08)",
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  darkMode: ["class"],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
+  theme: {
+    container: {
+      center: true,
       padding: {
         DEFAULT: "1.5rem",
         md: "2rem",

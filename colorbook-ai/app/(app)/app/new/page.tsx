@@ -101,7 +101,10 @@ export default function NewBookPage() {
                         <TableRow key={page}>
                           <TableCell className="font-medium">{page}</TableCell>
                           <TableCell>
-                            Panda exploring a bamboo forest with playful squirrels.
+                            <textarea
+                              className="min-h-[64px] w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground outline-none ring-ring focus-visible:ring-2"
+                              defaultValue="Panda exploring a bamboo forest with playful squirrels."
+                            />
                           </TableCell>
                         </TableRow>
                       ))}
@@ -112,9 +115,10 @@ export default function NewBookPage() {
                   {[1, 2, 3].map((page) => (
                     <div key={page} className="rounded-2xl border px-4 py-3 text-sm">
                       <p className="font-medium">Page {page}</p>
-                      <p className="text-muted-foreground">
-                        Panda exploring a bamboo forest with playful squirrels.
-                      </p>
+                      <textarea
+                        className="mt-2 min-h-[72px] w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground outline-none ring-ring focus-visible:ring-2"
+                        defaultValue="Panda exploring a bamboo forest with playful squirrels."
+                      />
                     </div>
                   ))}
                 </div>

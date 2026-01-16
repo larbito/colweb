@@ -75,22 +75,22 @@ export default function MarketingPage() {
           <div className="absolute -bottom-32 left-0 h-72 w-72 rounded-full bg-gradient-to-br from-secondary/50 via-transparent to-transparent blur-3xl" />
         </div>
 
-        <div className="container grid gap-10 py-20 md:grid-cols-[1.2fr_0.8fr] md:items-center">
+        <div className="container grid gap-10 py-16 md:py-24 md:grid-cols-[1.15fr_0.85fr] md:items-center">
           <div className="space-y-6">
             <Badge variant="secondary">KDP-ready workflow</Badge>
             <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-6xl">
               Generate print-ready coloring books in minutes.
             </h1>
             <p className="text-lg text-muted-foreground">
-              Choose trim size presets, craft a story theme, bulk generate clean line art, and export a PDF
-              ready for KDP.
+              Pick KDP trim sizes, generate story mode prompts, bulk create clean line art, and export a
+              print-ready PDF.
             </p>
             <div className="flex flex-wrap gap-3">
               <Button asChild className="rounded-2xl">
                 <Link href="/app/new">Create a Book</Link>
               </Button>
               <Button asChild variant="outline" className="rounded-2xl">
-                <Link href="/app/projects/demo">View Demo</Link>
+                <Link href="/app/projects/1">View Demo</Link>
               </Button>
             </div>
           </div>
@@ -110,7 +110,7 @@ export default function MarketingPage() {
         </div>
       </section>
 
-      <section className="container py-16">
+      <section className="container py-12 md:py-16">
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
           <span>Built for KDP creators, teachers, and parents</span>
           <Separator className="hidden h-6 md:block" orientation="vertical" />
@@ -120,7 +120,7 @@ export default function MarketingPage() {
         </div>
       </section>
 
-      <section id="features" className="container py-20">
+      <section id="features" className="container py-16 md:py-24">
         <div className="space-y-3">
           <p className="text-sm font-medium text-muted-foreground">Features</p>
           <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Everything you need to ship a book</h2>
@@ -140,7 +140,7 @@ export default function MarketingPage() {
         </div>
       </section>
 
-      <section id="how" className="container py-20">
+      <section id="how" className="container py-16 md:py-24">
         <div className="space-y-3">
           <p className="text-sm font-medium text-muted-foreground">How it works</p>
           <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">From idea to printable PDF</h2>
@@ -164,7 +164,7 @@ export default function MarketingPage() {
         </div>
       </section>
 
-      <section id="pricing" className="container py-20">
+      <section id="pricing" className="container py-16 md:py-24">
         <div className="space-y-3">
           <p className="text-sm font-medium text-muted-foreground">Pricing</p>
           <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Start simple, scale when ready</h2>
@@ -194,7 +194,7 @@ export default function MarketingPage() {
         </div>
       </section>
 
-      <section id="faq" className="container py-20">
+      <section id="faq" className="container py-16 md:py-24">
         <div className="space-y-3">
           <p className="text-sm font-medium text-muted-foreground">FAQ</p>
           <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Answers to common questions</h2>

@@ -42,7 +42,7 @@ export default function DashboardPage() {
                   KDP ready
                 </div>
                   <Button variant="outline" className="rounded-2xl" asChild>
-                    <Link href="/app/projects/preview">Open</Link>
+                    <Link href="/app/projects/1">Open</Link>
                   </Button>
               </CardContent>
             </Card>

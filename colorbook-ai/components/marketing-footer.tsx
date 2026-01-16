@@ -5,7 +5,7 @@ export function MarketingFooter() {
   return (
     <footer className="border-t border-border bg-background">
       <div className="container py-12">
-        <div className="grid gap-8 md:grid-cols-3">
+        <div className="grid gap-8 md:grid-cols-4">
           <div className="space-y-2">
             <p className="text-sm font-semibold">ColorBook AI</p>
             <p className="text-sm text-muted-foreground">
@@ -28,6 +28,26 @@ export function MarketingFooter() {
               <li>
                 <Link href="/app" className="hover:text-foreground">
                   Dashboard
+                </Link>
+              </li>
+            </ul>
+          </div>
+          <div className="space-y-2 text-sm">
+            <p className="font-semibold">Company</p>
+            <ul className="space-y-2 text-muted-foreground">
+              <li>
+                <Link href="/pricing" className="hover:text-foreground">
+                  Roadmap
+                </Link>
+              </li>
+              <li>
+                <Link href="/faq" className="hover:text-foreground">
+                  Support
+                </Link>
+              </li>
+              <li>
+                <Link href="/app" className="hover:text-foreground">
+                  Contact
                 </Link>
               </li>
             </ul>

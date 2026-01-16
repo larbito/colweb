@@ -6,8 +6,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 export function MarketingNav() {
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-border bg-background/80 backdrop-blur">
-      <div className="container flex h-16 items-center justify-between">
+    <header className="sticky top-0 z-40 w-full border-b border-border bg-background/75 backdrop-blur">
+      <div className="container flex h-16 items-center gap-4">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border bg-card">
             <BookOpen className="h-4 w-4" />
@@ -15,7 +15,7 @@ export function MarketingNav() {
           <span>ColorBook AI</span>
         </Link>
 
-        <nav className="hidden items-center gap-6 text-sm text-muted-foreground lg:flex">
+        <nav className="hidden flex-1 items-center justify-center gap-8 text-sm text-muted-foreground lg:flex">
           <Link href="#features" className="hover:text-foreground">
             Features
           </Link>
@@ -30,7 +30,7 @@ export function MarketingNav() {
           </Link>
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" className="rounded-2xl lg:hidden">

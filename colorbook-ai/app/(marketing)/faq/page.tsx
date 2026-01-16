@@ -30,7 +30,7 @@ const items = [
 export default function FAQPage() {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <section className="container py-20">
+      <section className="container py-16 md:py-24">
         <div className="max-w-2xl space-y-4">
           <h1 className="text-4xl font-semibold tracking-tight md:text-5xl">FAQ</h1>
           <p className="text-lg text-muted-foreground">Everything you need to know about the workflow.</p>
