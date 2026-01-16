@@ -62,9 +62,11 @@ export function HeroBento() {
         </div>
 
         {/* Right: Bento Cards with Floating Emojis */}
-        <div className="relative hidden lg:block">
-          {/* Floating Emojis */}
-          <FloatingEmojis />
+        <div className="relative hidden min-h-[450px] lg:block">
+          {/* Floating Emojis - positioned outside the cards */}
+          <div className="absolute -inset-16 z-50">
+            <FloatingEmojis />
+          </div>
           
           {/* Gradient blur background */}
           <div className="absolute -inset-4 bg-gradient-to-br from-primary/20 via-transparent to-transparent blur-3xl" />

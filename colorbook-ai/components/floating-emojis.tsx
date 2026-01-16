@@ -3,25 +3,29 @@
 import { motion, useReducedMotion } from "framer-motion";
 
 const emojis = [
-  { emoji: "🐼", x: "5%", y: "15%", delay: 0, size: "text-3xl" },
-  { emoji: "📘", x: "85%", y: "10%", delay: 0.5, size: "text-2xl" },
-  { emoji: "✨", x: "10%", y: "65%", delay: 1, size: "text-2xl" },
-  { emoji: "🖍️", x: "90%", y: "55%", delay: 1.5, size: "text-3xl" },
-  { emoji: "📄", x: "0%", y: "40%", delay: 2, size: "text-2xl" },
-  { emoji: "🖨️", x: "95%", y: "80%", delay: 2.5, size: "text-2xl" },
-  { emoji: "📐", x: "8%", y: "85%", delay: 3, size: "text-xl" },
+  { emoji: "🐼", x: "-5%", y: "10%", delay: 0, size: "text-4xl" },
+  { emoji: "📘", x: "100%", y: "5%", delay: 0.5, size: "text-3xl" },
+  { emoji: "✨", x: "-10%", y: "60%", delay: 1, size: "text-3xl" },
+  { emoji: "🖍️", x: "105%", y: "50%", delay: 1.5, size: "text-4xl" },
+  { emoji: "📄", x: "-8%", y: "35%", delay: 2, size: "text-3xl" },
+  { emoji: "🖨️", x: "102%", y: "85%", delay: 2.5, size: "text-3xl" },
+  { emoji: "📐", x: "0%", y: "90%", delay: 3, size: "text-2xl" },
 ];
 
-export function FloatingEmojis() {
+interface FloatingEmojisProps {
+  className?: string;
+}
+
+export function FloatingEmojis({ className = "" }: FloatingEmojisProps) {
   const shouldReduceMotion = useReducedMotion();
 
   if (shouldReduceMotion) {
     return (
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className={`pointer-events-none absolute inset-0 z-0 overflow-visible ${className}`}>
         {emojis.map((item, i) => (
           <div
             key={i}
-            className={`absolute opacity-20 ${item.size}`}
+            className={`absolute opacity-30 ${item.size}`}
             style={{ left: item.x, top: item.y }}
           >
             {item.emoji}
@@ -32,28 +36,27 @@ export function FloatingEmojis() {
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div className={`pointer-events-none absolute inset-0 z-0 overflow-visible ${className}`}>
       {emojis.map((item, i) => (
         <motion.div
           key={i}
           className={`absolute ${item.size}`}
           style={{ left: item.x, top: item.y }}
-          initial={{ opacity: 0, scale: 0.8 }}
+          initial={{ opacity: 0, scale: 0.5 }}
           animate={{
-            opacity: [0.15, 0.25, 0.15],
-            y: [0, -10, 0],
+            opacity: [0.2, 0.35, 0.2],
+            y: [0, -12, 0],
             scale: 1,
           }}
           transition={{
-            opacity: { duration: 4, repeat: Infinity, ease: "easeInOut", delay: item.delay },
-            y: { duration: 5 + i * 0.3, repeat: Infinity, ease: "easeInOut", delay: item.delay },
-            scale: { duration: 0.5, delay: item.delay },
+            opacity: { duration: 3, repeat: Infinity, ease: "easeInOut", delay: item.delay },
+            y: { duration: 4 + i * 0.3, repeat: Infinity, ease: "easeInOut", delay: item.delay },
+            scale: { duration: 0.6, delay: item.delay },
           }}
         >
-          <span className="drop-shadow-sm filter">{item.emoji}</span>
+          {item.emoji}
         </motion.div>
       ))}
     </div>
   );
 }
-

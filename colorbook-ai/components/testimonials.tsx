@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Quote } from "lucide-react";
+import { Quote, Star } from "lucide-react";
 
 const testimonials = [
   {
@@ -11,24 +11,24 @@ const testimonials = [
     role: "KDP Publisher",
     tag: "Beta user",
     quote: "Finally, a tool that understands the KDP workflow. I went from idea to published book in a single afternoon.",
-    initials: "SM",
-    color: "bg-pink-100 dark:bg-pink-900/30 text-pink-600 dark:text-pink-300",
+    avatar: "👩‍🎨",
+    bgColor: "bg-pink-100 dark:bg-pink-950",
   },
   {
     name: "David L.",
     role: "Children's Book Creator",
     tag: "Early adopter",
     quote: "The story-mode prompts are a game changer. My coloring books now have actual narratives that kids love.",
-    initials: "DL",
-    color: "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300",
+    avatar: "👨‍💼",
+    bgColor: "bg-blue-100 dark:bg-blue-950",
   },
   {
     name: "Emily R.",
     role: "Indie Creator",
     tag: "Beta user",
     quote: "I've tried other AI tools, but this is the only one that gives me consistent, print-ready line art every time.",
-    initials: "ER",
-    color: "bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300",
+    avatar: "👩‍🏫",
+    bgColor: "bg-purple-100 dark:bg-purple-950",
   },
 ];
 
@@ -53,21 +53,28 @@ export function Testimonials() {
           >
             <Card className="group h-full border-border/50 bg-card/50 transition-all hover:border-border hover:bg-card hover:shadow-lg">
               <CardContent className="p-6">
-                <Quote className="mb-4 h-8 w-8 text-muted-foreground/20" />
+                <div className="mb-4 flex items-center justify-between">
+                  <Quote className="h-6 w-6 text-primary/30" />
+                  <div className="flex gap-0.5">
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                    ))}
+                  </div>
+                </div>
                 
-                <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
+                <p className="mb-6 text-sm leading-relaxed text-foreground/80">
                   "{t.quote}"
                 </p>
 
                 <div className="flex items-center gap-3">
-                  <div className={`flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold ${t.color}`}>
-                    {t.initials}
+                  <div className={`flex h-12 w-12 items-center justify-center rounded-full text-2xl ${t.bgColor}`}>
+                    {t.avatar}
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{t.name}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">{t.name}</p>
                     <p className="text-xs text-muted-foreground">{t.role}</p>
                   </div>
-                  <Badge variant="secondary" className="text-xs">
+                  <Badge variant="secondary" className="shrink-0 text-xs">
                     {t.tag}
                   </Badge>
                 </div>
@@ -79,4 +86,3 @@ export function Testimonials() {
     </section>
   );
 }
-
