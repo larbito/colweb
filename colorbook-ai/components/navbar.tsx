@@ -1,20 +1,32 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Menu } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
+  const pathname = usePathname();
+  const isHome = pathname === "/";
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // Links with proper routing
+  const navLinks = [
+    { label: "Features", href: isHome ? "#features" : "/#features" },
+    { label: "Pricing", href: isHome ? "#pricing" : "/#pricing" },
+    { label: "FAQ", href: isHome ? "#faq" : "/#faq" },
+    { label: "Blog", href: "/blog" },
+  ];
 
   return (
     <header
@@ -34,22 +46,44 @@ export function Navbar() {
         </Link>
 
         <div className="hidden items-center gap-8 text-sm md:flex">
-          <Link href="#features" className="text-muted-foreground transition hover:text-foreground">Features</Link>
-          <Link href="#pricing" className="text-muted-foreground transition hover:text-foreground">Pricing</Link>
-          <Link href="#faq" className="text-muted-foreground transition hover:text-foreground">FAQ</Link>
+          {navLinks.map((link) => (
+            <Link 
+              key={link.label} 
+              href={link.href} 
+              className="text-muted-foreground transition hover:text-foreground"
+            >
+              {link.label}
+            </Link>
+          ))}
         </div>
 
         <div className="flex items-center gap-3">
           <ThemeToggle />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="md:hidden">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {navLinks.map((link) => (
+                <DropdownMenuItem key={link.label} asChild>
+                  <Link href={link.href}>{link.label}</Link>
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem asChild>
+                <Link href="/about">About</Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/contact">Contact</Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button asChild size="sm" className="hidden rounded-full px-4 md:inline-flex">
             <Link href="/auth">Get Started</Link>
-          </Button>
-          <Button variant="ghost" size="icon" className="md:hidden">
-            <Menu className="h-5 w-5" />
           </Button>
         </div>
       </nav>
     </header>
   );
 }
-

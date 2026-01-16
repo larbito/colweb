@@ -4,8 +4,6 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Sparkles } from "lucide-react";
-import { FloatingEmojis } from "./floating-emojis";
-
 export function FinalCTA() {
   return (
     <section className="mx-auto max-w-4xl px-6 pb-24">
@@ -18,11 +16,6 @@ export function FinalCTA() {
       >
         {/* Gradient border effect */}
         <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/20 via-transparent to-transparent opacity-50" />
-        
-        {/* Floating emojis */}
-        <div className="absolute inset-0 opacity-50">
-          <FloatingEmojis />
-        </div>
 
         <div className="relative">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">

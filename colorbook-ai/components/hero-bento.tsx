@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, Sparkles, FileText, Image, Ruler } from "lucide-react";
-import { FloatingEmojis } from "./floating-emojis";
 
 export function HeroBento() {
   return (
@@ -61,12 +60,8 @@ export function HeroBento() {
           </motion.div>
         </div>
 
-        {/* Right: Bento Cards with Floating Emojis */}
+        {/* Right: Bento Cards */}
         <div className="relative hidden min-h-[450px] lg:block">
-          {/* Floating Emojis - positioned outside the cards */}
-          <div className="absolute -inset-16 z-50">
-            <FloatingEmojis />
-          </div>
           
           {/* Gradient blur background */}
           <div className="absolute -inset-4 bg-gradient-to-br from-primary/20 via-transparent to-transparent blur-3xl" />

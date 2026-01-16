@@ -2,9 +2,14 @@ import Link from "next/link";
 
 const links = {
   product: [
-    { label: "Features", href: "#features" },
-    { label: "Pricing", href: "#pricing" },
-    { label: "FAQ", href: "#faq" },
+    { label: "Features", href: "/#features" },
+    { label: "Pricing", href: "/#pricing" },
+    { label: "FAQ", href: "/#faq" },
+    { label: "Blog", href: "/blog" },
+  ],
+  company: [
+    { label: "About", href: "/about" },
+    { label: "Contact", href: "/contact" },
   ],
   legal: [
     { label: "Terms", href: "/terms" },
@@ -16,7 +21,7 @@ export function Footer() {
   return (
     <footer className="border-t border-border/40">
       <div className="mx-auto max-w-6xl px-6 py-12">
-        <div className="grid gap-8 sm:grid-cols-3">
+        <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           <div>
             <Link href="/" className="flex items-center gap-2 font-semibold">
               <svg width="24" height="24" viewBox="0 0 28 28" fill="none" className="text-primary">
@@ -43,6 +48,17 @@ export function Footer() {
           </div>
 
           <div>
+            <p className="mb-3 text-sm font-medium">Company</p>
+            <ul className="space-y-2 text-sm text-muted-foreground">
+              {links.company.map((link) => (
+                <li key={link.label}>
+                  <Link href={link.href} className="transition hover:text-foreground">{link.label}</Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
             <p className="mb-3 text-sm font-medium">Legal</p>
             <ul className="space-y-2 text-sm text-muted-foreground">
               {links.legal.map((link) => (
@@ -61,4 +77,3 @@ export function Footer() {
     </footer>
   );
 }
-
