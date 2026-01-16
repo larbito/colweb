@@ -4,8 +4,9 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Sparkles } from "lucide-react";
+import { FloatingEmojis } from "./floating-emojis";
 
-export function CTASection() {
+export function FinalCTA() {
   return (
     <section className="mx-auto max-w-4xl px-6 pb-24">
       <motion.div
@@ -13,11 +14,15 @@ export function CTASection() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
         transition={{ duration: 0.5 }}
-        className="relative overflow-hidden rounded-3xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-12 text-center md:p-16"
+        className="relative overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-br from-primary/5 via-card to-card p-10 text-center shadow-lg md:p-14"
       >
-        {/* Gradient orbs */}
-        <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-primary/20 blur-3xl" />
-        <div className="absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+        {/* Gradient border effect */}
+        <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/20 via-transparent to-transparent opacity-50" />
+        
+        {/* Floating emojis */}
+        <div className="absolute inset-0 opacity-50">
+          <FloatingEmojis />
+        </div>
 
         <div className="relative">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
@@ -29,12 +34,12 @@ export function CTASection() {
             Ship your first coloring book today
           </h2>
 
-          <p className="mb-8 text-muted-foreground">
-            Join creators publishing KDP coloring books with AI-powered workflows.
+          <p className="mx-auto mb-8 max-w-lg text-muted-foreground">
+            Join creators who are publishing KDP coloring books faster with AI-powered workflows.
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button asChild size="lg" className="rounded-full">
+            <Button asChild size="lg" className="rounded-full shadow-md">
               <Link href="/auth">
                 Start Creating Free <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
