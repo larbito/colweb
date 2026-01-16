@@ -1,0 +1,7 @@
+{
+  "buildCommand": "cd colorbook-ai && npm install && npm run build",
+  "outputDirectory": "colorbook-ai/.next",
+  "installCommand": "cd colorbook-ai && npm install",
+  "framework": "nextjs"
+}
+
