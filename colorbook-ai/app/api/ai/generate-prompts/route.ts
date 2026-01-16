@@ -8,10 +8,9 @@ import {
 } from "@/lib/schemas";
 
 export async function POST(request: NextRequest) {
-  // Check if OpenAI is configured
   if (!isOpenAIConfigured()) {
     return NextResponse.json(
-      { error: "OpenAI API key not configured. Please add OPENAI_API_KEY to your environment variables." },
+      { error: "OpenAI API key not configured." },
       { status: 503 }
     );
   }
@@ -19,7 +18,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Validate request
     const parseResult = generatePromptsRequestSchema.safeParse(body);
     if (!parseResult.success) {
       return NextResponse.json(
@@ -28,15 +26,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { theme, mainCharacter, pageCount, complexity, lineThickness, trimSize, extraNotes } =
+    const { theme, mainCharacter, pageCount, complexity, lineThickness, trimSize, extraNotes, characterLock } =
       parseResult.data;
 
-    // Extra validation for max pages
     if (pageCount > MAX_PAGES) {
-      return NextResponse.json(
-        { error: `Maximum ${MAX_PAGES} pages allowed` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `Maximum ${MAX_PAGES} pages allowed` }, { status: 400 });
     }
 
     const complexityGuide = {
@@ -51,11 +45,25 @@ export async function POST(request: NextRequest) {
       bold: "thick bold outlines suitable for younger children",
     };
 
+    // Build character consistency section
+    let characterSection = `MAIN CHARACTER: ${mainCharacter}`;
+    if (characterLock) {
+      characterSection = `
+MAIN CHARACTER (LOCKED - MUST BE IDENTICAL IN ALL SCENES):
+Name: ${characterLock.canonicalName}
+Proportions: ${characterLock.visualRules.proportions}
+Face: ${characterLock.visualRules.face}
+Unique Features: ${characterLock.visualRules.uniqueFeatures.join(", ")}
+Outfit: ${characterLock.visualRules.outfit}
+
+CRITICAL: The character MUST look EXACTLY the same in every scene - same proportions, same features, same outfit.`;
+    }
+
     const systemPrompt = `You are an expert coloring book prompt writer.
 Generate ${pageCount} sequential scene prompts for a cohesive coloring book story.
 
 THEME: ${theme}
-MAIN CHARACTER: ${mainCharacter}
+${characterSection}
 STYLE: ${complexityGuide[complexity]}, ${lineGuide[lineThickness]}
 PAGE SIZE: ${trimSize}
 ${extraNotes ? `ADDITIONAL NOTES: ${extraNotes}` : ""}
@@ -65,21 +73,20 @@ CRITICAL RULES FOR EACH PROMPT:
 2. NO text, letters, numbers, logos, or watermarks in the image
 3. Clean, closed outlines perfect for coloring
 4. Centered subject composition with print-friendly framing
-5. Keep the main character VISUALLY CONSISTENT across all pages (same attributes, proportions)
+5. Keep the main character VISUALLY IDENTICAL across all pages
 6. Each prompt describes ONE clear scene/composition
 7. Include simple background elements appropriate to complexity level
 8. Make it a cohesive story with a beginning, middle, and end
 
-RESPONSE FORMAT - Return ONLY this JSON structure:
+Return ONLY this JSON structure:
 {
   "pages": [
-    { "pageNumber": 1, "sceneTitle": "Short title", "prompt": "Detailed scene description..." },
+    { "pageNumber": 1, "sceneTitle": "Short title", "prompt": "Detailed scene description for the image generator..." },
     ...
   ]
 }
 
-Generate exactly ${pageCount} pages. Start with pageNumber 1.
-Return JSON only, no markdown, no explanation.`;
+Generate exactly ${pageCount} pages starting at pageNumber 1.`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -88,8 +95,7 @@ Return JSON only, no markdown, no explanation.`;
         { role: "user", content: `Generate ${pageCount} coloring page prompts for this story.` },
       ],
       temperature: 0.7,
-      max_tokens: pageCount * 150, // ~150 tokens per page
-      response_format: { type: "json_object" },
+      max_tokens: pageCount * 200,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -97,24 +103,29 @@ Return JSON only, no markdown, no explanation.`;
       return NextResponse.json({ error: "No response from AI" }, { status: 500 });
     }
 
-    // Parse and validate the response
+    // Parse JSON from response
+    let jsonContent = content.trim();
+    if (jsonContent.startsWith("```json")) jsonContent = jsonContent.slice(7);
+    else if (jsonContent.startsWith("```")) jsonContent = jsonContent.slice(3);
+    if (jsonContent.endsWith("```")) jsonContent = jsonContent.slice(0, -3);
+    jsonContent = jsonContent.trim();
+
     let parsed: unknown;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(jsonContent);
     } catch {
-      return NextResponse.json({ error: "Invalid JSON from AI" }, { status: 500 });
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        return NextResponse.json({ error: "Invalid JSON from AI" }, { status: 500 });
+      }
     }
 
     const validationResult = promptListResponseSchema.safeParse(parsed);
     if (!validationResult.success) {
-      console.error("AI response validation failed:", validationResult.error);
+      console.error("Prompts validation failed:", validationResult.error);
       return NextResponse.json({ error: "AI response did not match expected format" }, { status: 500 });
-    }
-
-    // Ensure we have the right number of pages
-    const pages = validationResult.data.pages;
-    if (pages.length !== pageCount) {
-      console.warn(`AI returned ${pages.length} pages but ${pageCount} were requested`);
     }
 
     return NextResponse.json(validationResult.data satisfies PromptListResponse);
@@ -126,4 +137,3 @@ Return JSON only, no markdown, no explanation.`;
     );
   }
 }
-

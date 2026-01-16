@@ -2,15 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { generateImageRequestSchema, type GenerateImageResponse } from "@/lib/schemas";
 
-// Image generation suffix for coloring book style
-const IMAGE_STYLE_SUFFIX = `
-Kids coloring book page, pure black and white line art, clean bold outlines, no shading, no grayscale, no gradients, no text, no watermark, white background, closed shapes, print-ready, suitable for coloring with crayons or markers.`;
+// Coloring book style suffix
+const COLORING_BOOK_SUFFIX = `
+Pure black and white line art. Clean bold outlines. No shading. No grayscale. No gradients. No text. No watermark.
+Closed shapes with white fill areas for coloring. Kid-friendly coloring book page. White background.
+Centered composition suitable for print.`;
 
 export async function POST(request: NextRequest) {
-  // Check if OpenAI is configured
   if (!isOpenAIConfigured()) {
     return NextResponse.json(
-      { error: "OpenAI API key not configured. Please add OPENAI_API_KEY to your environment variables." },
+      { error: "OpenAI API key not configured." },
       { status: 503 }
     );
   }
@@ -18,7 +19,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Validate request
     const parseResult = generateImageRequestSchema.safeParse(body);
     if (!parseResult.success) {
       return NextResponse.json(
@@ -27,31 +27,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { prompt, complexity, lineThickness } = parseResult.data;
+    const { prompt, complexity, lineThickness, characterLock } = parseResult.data;
 
-    // Build the full prompt with style suffix
+    // Build the full prompt
     const lineStyle = {
-      thin: "delicate thin outlines",
-      medium: "medium-weight outlines",
-      bold: "thick bold outlines",
+      thin: "delicate thin outlines (2px)",
+      medium: "medium-weight outlines (3-4px)",
+      bold: "thick bold outlines (5-6px)",
     };
 
     const complexityStyle = {
-      kids: "very simple shapes, minimal details",
-      medium: "moderate detail level",
-      detailed: "intricate detailed patterns",
+      kids: "very simple shapes, minimal details, large coloring areas, ages 3-6",
+      medium: "moderate detail level, balanced complexity",
+      detailed: "intricate detailed patterns for older children and adults",
     };
 
-    const fullPrompt = `${prompt}. Style: ${complexityStyle[complexity]}, ${lineStyle[lineThickness]}. ${IMAGE_STYLE_SUFFIX}`;
+    // Include character lock rules if available
+    let characterSection = "";
+    if (characterLock) {
+      characterSection = `
+Character "${characterLock.canonicalName}" MUST have:
+- Proportions: ${characterLock.visualRules.proportions}
+- Face: ${characterLock.visualRules.face}
+- Features: ${characterLock.visualRules.uniqueFeatures.join(", ")}
+- Outfit: ${characterLock.visualRules.outfit}
+`;
+    }
 
-    // Use DALL-E 3 for best quality line art
+    const fullPrompt = `${prompt}
+${characterSection}
+Style: ${complexityStyle[complexity]}, ${lineStyle[lineThickness]}.
+${COLORING_BOOK_SUFFIX}`;
+
+    // Use DALL-E 3
     const response = await openai.images.generate({
       model: "dall-e-3",
       prompt: fullPrompt,
       n: 1,
-      size: "1024x1024", // Square, can be cropped to desired aspect ratio
+      size: "1024x1024",
       quality: "standard",
-      style: "natural", // More literal interpretation
+      style: "natural",
     });
 
     const imageUrl = response.data?.[0]?.url;
@@ -64,7 +79,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Image generation error:", error);
 
-    // Handle specific OpenAI errors
     if (error instanceof Error) {
       if (error.message.includes("content_policy")) {
         return NextResponse.json(
@@ -86,4 +100,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
