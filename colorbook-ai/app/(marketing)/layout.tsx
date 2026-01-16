@@ -1,14 +1,12 @@
-import type { ReactNode } from "react";
-import { MarketingNav } from "@/components/marketing-nav";
-import { MarketingFooter } from "@/components/marketing-footer";
+import { Navbar } from "@/components/navbar";
+import { Footer } from "@/components/footer";
 
-export default function MarketingLayout({ children }: { children: ReactNode }) {
+export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <MarketingNav />
-      <main>{children}</main>
-      <MarketingFooter />
-    </div>
+    <>
+      <Navbar />
+      {children}
+      <Footer />
+    </>
   );
 }
-
