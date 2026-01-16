@@ -36,20 +36,17 @@ This repo is nested under `colweb/colorbook-ai`.
 
 **Deploy without env vars (Preview mode)**: the website will load even with no Clerk keys configured (auth is disabled until you add keys).
 
-**Vercel setup (use ONE of these):**
+**Vercel setup (REQUIRED):**
 
-**Option A: Using vercel.json (recommended)**
-- **Root Directory**: leave empty (repo root)
-- **Framework Preset**: Next.js (auto-detected)
-- **Install/Build Command**: handled by `vercel.json` at repo root
-- **Output Directory**: handled by `vercel.json`
+In Vercel → **Project Settings → Build & Development Settings**, set:
 
-**Option B: Manual Root Directory**
 - **Root Directory**: `colorbook-ai/apps/web`
 - **Framework Preset**: Next.js
 - **Install Command**: `corepack enable && cd ../.. && corepack pnpm install`
 - **Build Command**: (leave default: `next build`)
 - **Output Directory**: (leave default)
+
+**Why**: Vercel needs to detect Next.js in the Root Directory. Setting it to `colorbook-ai/apps/web` makes it find `package.json` with Next.js, then the install command goes up to the monorepo root to install all workspace dependencies.
 
 **If you see `404: NOT_FOUND` after deployment:**
 1. Check you're opening the **"Visit"** URL from Vercel → Deployments (not a custom domain)

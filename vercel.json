@@ -1,7 +1,0 @@
-{
-  "buildCommand": "cd colorbook-ai && corepack enable && corepack pnpm install && corepack pnpm --filter @colorbook/web build",
-  "outputDirectory": "colorbook-ai/apps/web/.next",
-  "installCommand": "echo 'Install handled by buildCommand'",
-  "framework": "nextjs"
-}
-
