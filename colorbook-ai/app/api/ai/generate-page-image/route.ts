@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
 import { characterLockSchema } from "@/lib/schemas";
-import { buildPrompt, buildStricterSuffix } from "@/lib/promptBuilder";
+import { buildPrompt, buildStricterSuffix, ANCHOR_REFERENCE_SUFFIX } from "@/lib/promptBuilder";
 import type { GenerationSpec } from "@/lib/generationSpec";
 
-// Accept GenerationSpec
+// Accept GenerationSpec with anchor support
 const generationSpecSchema = z.object({
+  bookMode: z.enum(["series", "collection"]),
   trimSize: z.string(),
   pixelSize: z.string(),
   complexity: z.enum(["simple", "medium", "detailed"]),
@@ -21,9 +22,13 @@ const generationSpecSchema = z.object({
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
+  pageNumber: z.number().int().min(1).optional(),
   characterLock: characterLockSchema.optional().nullable(),
   characterSheetImageUrl: z.string().optional().nullable(),
   spec: generationSpecSchema,
+  // Anchor-first workflow
+  anchorImageUrl: z.string().optional().nullable(),
+  isAnchorGeneration: z.boolean().optional(),
 });
 
 export type GeneratePageImageRequest = z.infer<typeof requestSchema>;
@@ -35,6 +40,17 @@ const SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = {
   "1024x1536": "1024x1792",
   "1024x1448": "1024x1792",
 };
+
+// Strict eye and style rules to append
+const STRICT_STYLE_RULES = `
+
+CRITICAL DRAWING RULES:
+1. EYES: Draw as outlines only. Pupils must be TINY dots (2-3px max) or empty. NEVER solid black filled eyes.
+2. HAIR/FUR: Outline individual strands. NEVER fill with solid black.
+3. SHADOWS: Do NOT draw any shadows.
+4. DARK OBJECTS: Outline only, interior must be WHITE for coloring.
+5. LINE CONSISTENCY: All outlines must have consistent thickness throughout.
+6. CLOSED SHAPES: Every shape must be fully closed for coloring.`;
 
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
@@ -49,20 +65,37 @@ export async function POST(request: NextRequest) {
     const parseResult = requestSchema.safeParse(body);
 
     if (!parseResult.success) {
+      console.error("Validation error:", JSON.stringify(parseResult.error.flatten(), null, 2));
       return NextResponse.json(
         { error: "Invalid request", details: parseResult.error.flatten() },
         { status: 400 }
       );
     }
 
-    const { prompt, characterLock, spec } = parseResult.data;
+    const { 
+      prompt, 
+      pageNumber,
+      characterLock, 
+      spec, 
+      anchorImageUrl,
+      isAnchorGeneration,
+    } = parseResult.data;
 
     // Build the full prompt with all rules injected
-    const fullPrompt = buildPrompt({
+    let fullPrompt = buildPrompt({
       sceneDescription: prompt,
       characterLock,
       spec: spec as GenerationSpec,
     });
+
+    // Add strict style rules
+    fullPrompt += STRICT_STYLE_RULES;
+
+    // If we have an anchor and this is NOT the anchor generation, add reference requirement
+    if (anchorImageUrl && !isAnchorGeneration) {
+      fullPrompt += ANCHOR_REFERENCE_SUFFIX;
+      fullPrompt += `\nThis is page ${pageNumber || "N"}. Match the anchor/reference image style EXACTLY.`;
+    }
 
     // Get the appropriate image size (always portrait)
     const imageSize = SIZE_MAP[spec.pixelSize] || "1024x1792";
@@ -76,7 +109,7 @@ export async function POST(request: NextRequest) {
       try {
         // Add stricter suffix on retries
         const attemptPrompt = retryCount > 0 
-          ? `${fullPrompt}${buildStricterSuffix()}`
+          ? `${fullPrompt}${buildStricterSuffix()}\n\nSTRICT: Eyes must be OUTLINED only with TINY dot pupils. No solid black eyes!`
           : fullPrompt;
 
         const response = await openai.images.generate({
@@ -91,15 +124,6 @@ export async function POST(request: NextRequest) {
         imageUrl = response.data?.[0]?.url;
 
         if (imageUrl) {
-          // In production, we would:
-          // 1. Fetch the image
-          // 2. Process with sharp (grayscale + binarize)
-          // 3. Check black pixel ratio
-          // 4. If fails, retry with stricter prompt
-          
-          // For now, we trust DALL-E 3 output with our strict prompts
-          // The prompt builder already includes very strict rules
-          
           break;
         }
       } catch (genError) {
@@ -133,11 +157,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       imageUrl,
       retries: retryCount,
-      spec: {
-        complexity: spec.complexity,
-        lineThickness: spec.lineThickness,
-        pixelSize: spec.pixelSize,
-      },
+      isAnchor: isAnchorGeneration || false,
+      pageNumber: pageNumber || 1,
     });
   } catch (error) {
     console.error("Generate page image error:", error);

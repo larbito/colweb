@@ -5,8 +5,11 @@
 
 export type Complexity = "simple" | "medium" | "detailed";
 export type LineThickness = "thin" | "medium" | "bold";
+export type BookMode = "series" | "collection";
 
 export interface GenerationSpec {
+  /** Book mode: series (same character) or collection (varied pages) */
+  bookMode: BookMode;
   /** Trim size label, e.g. "8.5x11" */
   trimSize: string;
   /** Pixel dimensions for image generation, e.g. "1024x1536" */
@@ -47,6 +50,7 @@ export const TRIM_TO_PIXELS: Record<string, string> = {
  * Default generation spec
  */
 export const DEFAULT_SPEC: GenerationSpec = {
+  bookMode: "series",
   trimSize: "8.5x11",
   pixelSize: "1024x1326",
   complexity: "simple",
@@ -63,6 +67,7 @@ export const DEFAULT_SPEC: GenerationSpec = {
  * Create a GenerationSpec from UI inputs
  */
 export function createSpec(params: {
+  bookMode?: BookMode;
   trimSize: string;
   complexity: Complexity;
   lineThickness: LineThickness;
@@ -75,6 +80,7 @@ export function createSpec(params: {
   const pixelSize = TRIM_TO_PIXELS[params.trimSize] || TRIM_TO_PIXELS["8.5x11"];
   
   return {
+    bookMode: params.bookMode ?? "series",
     trimSize: params.trimSize,
     pixelSize,
     complexity: params.complexity,

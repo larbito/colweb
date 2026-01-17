@@ -27,6 +27,9 @@ import {
   Copy,
   Eye,
   AlertTriangle,
+  Users,
+  BookOpen,
+  Anchor,
 } from "lucide-react";
 import { toast } from "sonner";
 import { MAX_PAGES } from "@/lib/schemas";
@@ -41,12 +44,13 @@ import {
   type GenerationSpec,
   type Complexity,
   type LineThickness,
+  type BookMode,
   createSpec,
   TRIM_TO_PIXELS,
 } from "@/lib/generationSpec";
 
 const steps = [
-  { id: 1, label: "Size" },
+  { id: 1, label: "Setup" },
   { id: 2, label: "Theme" },
   { id: 3, label: "Style" },
   { id: 4, label: "Prompts" },
@@ -72,7 +76,7 @@ const thicknesses: { value: LineThickness; label: string; desc: string }[] = [
   { value: "bold", label: "Bold", desc: "Thick, forgiving lines" },
 ];
 
-// Extended PagePrompt with UI state
+// Prompt item with UI state
 interface PromptItem {
   id: string;
   pageNumber: number;
@@ -90,7 +94,17 @@ interface PageImageState {
   failedPrintSafe?: boolean;
 }
 
+// Anchor state
+interface AnchorState {
+  imageUrl: string;
+  prompt: string;
+  approvedAt: Date;
+}
+
 interface FormState {
+  // Book type
+  bookMode: BookMode;
+  
   // Basic settings
   trimSize: string;
   theme: string;
@@ -110,9 +124,12 @@ interface FormState {
   prompts: PromptItem[];
   pageImages: Record<number, PageImageState>;
   
-  // Character lock
+  // Character lock (for series mode)
   characterLock: CharacterLock | null;
   characterSheetUrl: string | null;
+  
+  // Anchor image (style reference)
+  anchor: AnchorState | null;
 }
 
 export default function NewBookPage() {
@@ -125,6 +142,7 @@ export default function NewBookPage() {
   const [lockingCharacter, setLockingCharacter] = useState(false);
   const [generatingSheet, setGeneratingSheet] = useState(false);
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
+  const [generatingAnchor, setGeneratingAnchor] = useState(false);
   const [bulkGenerating, setBulkGenerating] = useState(false);
 
   // AI suggestions
@@ -138,6 +156,7 @@ export default function NewBookPage() {
 
   // Form state
   const [form, setForm] = useState<FormState>({
+    bookMode: "series",
     trimSize: "8.5×11",
     theme: "",
     characterName: "",
@@ -153,11 +172,13 @@ export default function NewBookPage() {
     pageImages: {},
     characterLock: null,
     characterSheetUrl: null,
+    anchor: null,
   });
 
   // Build GenerationSpec from form state
   const buildSpec = (): GenerationSpec => {
     return createSpec({
+      bookMode: form.bookMode,
       trimSize: form.trimSize,
       complexity: form.complexity,
       lineThickness: form.lineThickness,
@@ -173,9 +194,15 @@ export default function NewBookPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
     setTimeout(() => setSaved(true), 500);
+    
     // Reset character lock if theme/character changes
     if (key === "theme" || key === "characterName" || key === "characterDescription") {
       setForm((prev) => ({ ...prev, characterLock: null, characterSheetUrl: null }));
+    }
+    
+    // Reset anchor if style changes
+    if (key === "complexity" || key === "lineThickness" || key === "trimSize") {
+      setForm((prev) => ({ ...prev, anchor: null }));
     }
   };
 
@@ -209,7 +236,7 @@ export default function NewBookPage() {
       updateForm("characterName", name);
       updateForm("characterDescription", mainChar);
 
-      toast.success("Theme suggested! You can customize it.");
+      toast.success("Theme suggested!");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to suggest theme");
     } finally {
@@ -245,9 +272,7 @@ export default function NewBookPage() {
       updateForm("characterName", data.mainCharacterName);
       updateForm("characterDescription", data.mainCharacterDescription);
 
-      toast.success(`Trending idea: ${data.bookIdeaTitle}`, {
-        description: "Form has been filled with the suggested idea!",
-      });
+      toast.success(`Trending idea: ${data.bookIdeaTitle}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to suggest trending idea");
     } finally {
@@ -256,7 +281,7 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Lock Character
+  // AI: Lock Character (Series Mode)
   // =====================
   const lockCharacter = async () => {
     if (!form.theme || !form.characterName || !form.characterDescription) {
@@ -285,7 +310,7 @@ export default function NewBookPage() {
 
       const data = await response.json();
       updateForm("characterLock", data.characterLock);
-      toast.success("Character locked! Now generating reference sheet...");
+      toast.success("Character locked!");
 
       await generateCharacterSheet(data.characterLock);
     } catch (error) {
@@ -326,11 +351,15 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Generate All Prompts (uses GenerationSpec)
+  // AI: Generate All Prompts
   // =====================
   const generatePrompts = async () => {
-    if (!form.theme || !form.characterName) {
-      toast.error("Please fill in theme and character first");
+    if (!form.theme) {
+      toast.error("Please fill in theme first");
+      return;
+    }
+    if (form.bookMode === "series" && (!form.characterName || !form.characterDescription)) {
+      toast.error("Series mode requires character name and description");
       return;
     }
 
@@ -343,7 +372,9 @@ export default function NewBookPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           theme: form.theme,
-          mainCharacter: `${form.characterName} - ${form.characterDescription}`,
+          mainCharacter: form.bookMode === "series" 
+            ? `${form.characterName} - ${form.characterDescription}` 
+            : undefined,
           characterLock: form.characterLock,
           spec,
         }),
@@ -363,6 +394,8 @@ export default function NewBookPage() {
         isRegenerating: false,
       }));
       updateForm("prompts", promptItems);
+      // Reset anchor when prompts change
+      updateForm("anchor", null);
       toast.success(`Generated ${data.pages.length} prompts!`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate prompts");
@@ -372,7 +405,7 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Regenerate ONE Prompt (uses GenerationSpec)
+  // AI: Regenerate ONE Prompt
   // =====================
   const regenerateOnePrompt = async (pageNumber: number) => {
     const currentPrompt = form.prompts.find((p) => p.pageNumber === pageNumber);
@@ -431,12 +464,94 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Generate Single Image (uses GenerationSpec + print-safe pipeline)
+  // AI: Generate Anchor Image (Page 1)
+  // =====================
+  const generateAnchor = async () => {
+    if (form.prompts.length === 0) {
+      toast.error("Generate prompts first");
+      return;
+    }
+
+    const firstPrompt = form.prompts[0];
+    setGeneratingAnchor(true);
+    
+    // Clear any existing anchor
+    updateForm("anchor", null);
+
+    try {
+      const spec = buildSpec();
+
+      const response = await fetch("/api/ai/generate-page-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: firstPrompt.prompt,
+          pageNumber: 1,
+          characterLock: form.characterLock,
+          characterSheetImageUrl: form.characterSheetUrl,
+          spec,
+          isAnchorGeneration: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to generate anchor");
+      }
+
+      const data = await response.json();
+
+      if (data.imageUrl) {
+        // Store as pending anchor (not yet approved)
+        setForm((prev) => ({
+          ...prev,
+          pageImages: {
+            ...prev.pageImages,
+            [1]: { imageUrl: data.imageUrl, isGenerating: false },
+          },
+        }));
+        toast.success("Sample page generated! Review and approve the style.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate anchor");
+    } finally {
+      setGeneratingAnchor(false);
+    }
+  };
+
+  // =====================
+  // Approve Anchor
+  // =====================
+  const approveAnchor = () => {
+    const page1Image = form.pageImages[1];
+    if (!page1Image?.imageUrl) {
+      toast.error("Generate sample page first");
+      return;
+    }
+
+    const firstPrompt = form.prompts[0];
+    setForm((prev) => ({
+      ...prev,
+      anchor: {
+        imageUrl: page1Image.imageUrl!,
+        prompt: firstPrompt?.prompt || "",
+        approvedAt: new Date(),
+      },
+    }));
+    
+    toast.success("Style approved! You can now generate all pages.", {
+      description: "All pages will match this anchor style.",
+    });
+  };
+
+  // =====================
+  // AI: Generate Single Image (with anchor reference)
   // =====================
   const generateImage = async (pageNumber: number, prompt: string) => {
-    if (!form.characterLock) {
-      toast.error("Please lock your character first", {
-        description: "Go back to Theme step and click 'Lock Character'",
+    // For pages > 1, require anchor approval
+    if (pageNumber > 1 && !form.anchor) {
+      toast.error("Approve the sample page style first", {
+        description: "Generate and approve Page 1 to lock the style.",
       });
       return;
     }
@@ -458,9 +573,12 @@ export default function NewBookPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
+          pageNumber,
           characterLock: form.characterLock,
           characterSheetImageUrl: form.characterSheetUrl,
           spec,
+          anchorImageUrl: form.anchor?.imageUrl || null,
+          isAnchorGeneration: pageNumber === 1 && !form.anchor,
         }),
       });
 
@@ -488,9 +606,7 @@ export default function NewBookPage() {
             [pageNumber]: { isGenerating: false, failedPrintSafe: true, error: "Failed print-safe check" },
           },
         }));
-        toast.error("Image failed print-safe check", {
-          description: "Click regenerate to try again",
-        });
+        toast.error("Image failed print-safe check");
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Failed to generate";
@@ -506,7 +622,7 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // Bulk Generation
+  // Bulk Generation (requires anchor approval)
   // =====================
   const startBulkGeneration = async () => {
     if (form.prompts.length === 0) {
@@ -514,20 +630,21 @@ export default function NewBookPage() {
       return;
     }
 
-    if (!form.characterLock) {
-      toast.error("Please lock your character first", {
-        description: "Go back to Theme step and click 'Lock Character'",
+    if (!form.anchor) {
+      toast.error("Approve the sample page style first", {
+        description: "Generate and approve Page 1 to lock the style.",
       });
       return;
     }
 
     setBulkGenerating(true);
-    toast.info(`Starting generation of ${form.prompts.length} pages...`);
+    toast.info(`Generating ${form.prompts.length - 1} remaining pages...`);
 
-    for (const page of form.prompts) {
+    // Skip page 1 (already generated as anchor)
+    for (const page of form.prompts.slice(1)) {
       if (!form.pageImages[page.pageNumber]?.imageUrl) {
         await generateImage(page.pageNumber, page.prompt);
-        await new Promise((r) => setTimeout(r, 2500)); // Rate limit
+        await new Promise((r) => setTimeout(r, 2500));
       }
     }
 
@@ -541,9 +658,12 @@ export default function NewBookPage() {
   const canProceed = () => {
     switch (step) {
       case 1:
-        return !!form.trimSize;
+        return !!form.trimSize && !!form.bookMode;
       case 2:
-        return !!form.theme && !!form.characterName && !!form.characterDescription && form.pageCount >= 1 && form.pageCount <= MAX_PAGES;
+        if (form.bookMode === "series") {
+          return !!form.theme && !!form.characterName && !!form.characterDescription && form.pageCount >= 1 && form.pageCount <= MAX_PAGES;
+        }
+        return !!form.theme && form.pageCount >= 1 && form.pageCount <= MAX_PAGES;
       case 3:
         return true;
       case 4:
@@ -581,6 +701,8 @@ export default function NewBookPage() {
   };
 
   const isCharacterLocked = !!form.characterLock;
+  const isAnchorApproved = !!form.anchor;
+  const page1Image = form.pageImages[1];
   const generatedCount = Object.values(form.pageImages).filter((p) => p.imageUrl).length;
 
   return (
@@ -592,41 +714,84 @@ export default function NewBookPage() {
           <WizardStepper steps={steps} currentStep={step} />
 
           <div className="min-h-[400px]">
-            {/* =============== STEP 1: SIZE =============== */}
+            {/* =============== STEP 1: SETUP (Size + Book Mode) =============== */}
             {step === 1 && (
-              <div className="space-y-6">
-                <div className="text-center">
-                  <h2 className="text-2xl font-semibold">Choose your trim size 📐</h2>
-                  <p className="text-muted-foreground">Select a KDP-compliant page size</p>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {sizes.map((size) => (
+              <div className="space-y-8">
+                {/* Book Mode Selection */}
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <h2 className="text-2xl font-semibold">What kind of book? 📚</h2>
+                    <p className="text-muted-foreground">Choose your book type</p>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <Card
-                      key={size.value}
                       className={cn(
                         "cursor-pointer border-2 transition-all hover:border-primary",
-                        form.trimSize === size.value ? "border-primary bg-primary/5" : "border-border/50"
+                        form.bookMode === "series" ? "border-primary bg-primary/5" : "border-border/50"
                       )}
-                      onClick={() => updateForm("trimSize", size.value)}
+                      onClick={() => updateForm("bookMode", "series")}
                     >
-                      <CardContent className="flex items-center gap-4 p-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted font-mono text-xs">
-                          {size.value.split("×")[0] || size.value.split("x")[0]}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-semibold">{size.label}</p>
-                          <p className="text-sm text-muted-foreground">{size.desc}</p>
-                        </div>
-                        {form.trimSize === size.value && <Check className="h-5 w-5 text-primary" />}
+                      <CardContent className="flex flex-col items-center p-6 text-center">
+                        <Users className="mb-3 h-10 w-10 text-primary" />
+                        <p className="font-semibold">Series Book</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Same main character on every page. Best for story-driven books.
+                        </p>
+                        {form.bookMode === "series" && <Check className="mt-3 h-5 w-5 text-primary" />}
                       </CardContent>
                     </Card>
-                  ))}
+                    <Card
+                      className={cn(
+                        "cursor-pointer border-2 transition-all hover:border-primary",
+                        form.bookMode === "collection" ? "border-primary bg-primary/5" : "border-border/50"
+                      )}
+                      onClick={() => updateForm("bookMode", "collection")}
+                    >
+                      <CardContent className="flex flex-col items-center p-6 text-center">
+                        <BookOpen className="mb-3 h-10 w-10 text-muted-foreground" />
+                        <p className="font-semibold">Collection Book</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Varied pages within same theme. No fixed character required.
+                        </p>
+                        {form.bookMode === "collection" && <Check className="mt-3 h-5 w-5 text-primary" />}
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
-                
-                {/* Pixel size info */}
-                <p className="text-center text-xs text-muted-foreground">
-                  Output: {TRIM_TO_PIXELS[form.trimSize] || "1024x1326"} pixels (portrait)
-                </p>
+
+                {/* Trim Size Selection */}
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <h2 className="text-2xl font-semibold">Choose trim size 📐</h2>
+                    <p className="text-muted-foreground">KDP-compliant page size</p>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {sizes.map((size) => (
+                      <Card
+                        key={size.value}
+                        className={cn(
+                          "cursor-pointer border-2 transition-all hover:border-primary",
+                          form.trimSize === size.value ? "border-primary bg-primary/5" : "border-border/50"
+                        )}
+                        onClick={() => updateForm("trimSize", size.value)}
+                      >
+                        <CardContent className="flex items-center gap-4 p-4">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted font-mono text-xs">
+                            {size.value.split("×")[0] || size.value.split("x")[0]}
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-semibold">{size.label}</p>
+                            <p className="text-sm text-muted-foreground">{size.desc}</p>
+                          </div>
+                          {form.trimSize === size.value && <Check className="h-5 w-5 text-primary" />}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                  <p className="text-center text-xs text-muted-foreground">
+                    Output: {TRIM_TO_PIXELS[form.trimSize] || "1024x1326"} pixels (portrait)
+                  </p>
+                </div>
               </div>
             )}
 
@@ -634,8 +799,14 @@ export default function NewBookPage() {
             {step === 2 && (
               <div className="space-y-6">
                 <div className="text-center">
-                  <h2 className="text-2xl font-semibold">Set your theme 🎨</h2>
-                  <p className="text-muted-foreground">Define theme, character, and lock the style</p>
+                  <h2 className="text-2xl font-semibold">
+                    {form.bookMode === "series" ? "Set your theme & character 🎨" : "Set your theme 🎨"}
+                  </h2>
+                  <p className="text-muted-foreground">
+                    {form.bookMode === "series" 
+                      ? "Define theme and main character for your series" 
+                      : "Define the theme for your collection"}
+                  </p>
                 </div>
 
                 <TrendingPanel
@@ -649,7 +820,7 @@ export default function NewBookPage() {
                     <p className="mb-2 text-sm font-semibold text-green-600 dark:text-green-400">
                       💡 {trendingSuggestion.bookIdeaTitle}
                     </p>
-                    <div className="mb-3 flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2">
                       {trendingSuggestion.tags?.map((tag, i) => (
                         <Badge key={i} variant="outline" className="text-xs border-green-500/30">{tag}</Badge>
                       ))}
@@ -662,21 +833,10 @@ export default function NewBookPage() {
                     {suggestingTheme ? (
                       <><Loader2 className="h-4 w-4 animate-spin" /> Thinking...</>
                     ) : (
-                      <><Wand2 className="h-4 w-4" /> 🎲 Random AI Suggest</>
+                      <><Wand2 className="h-4 w-4" /> 🎲 AI Suggest</>
                     )}
                   </Button>
                 </div>
-
-                {themeSuggestion?.supportingDetails && themeSuggestion.supportingDetails.length > 0 && (
-                  <div className="rounded-xl border border-border/50 bg-muted/30 p-4">
-                    <p className="mb-2 text-xs font-medium text-muted-foreground">Scene Ideas:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {themeSuggestion.supportingDetails.map((detail, i) => (
-                        <Badge key={i} variant="secondary" className="text-xs">{detail}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 <div className="space-y-4">
                   <div>
@@ -688,24 +848,30 @@ export default function NewBookPage() {
                       className="rounded-xl"
                     />
                   </div>
-                  <div>
-                    <label className="mb-2 block text-sm font-medium">Character Name</label>
-                    <Input
-                      placeholder="e.g., Bamboo the Panda"
-                      value={form.characterName}
-                      onChange={(e) => updateForm("characterName", e.target.value)}
-                      className="rounded-xl"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-sm font-medium">Character Description</label>
-                    <Textarea
-                      placeholder="e.g., A curious baby panda with big round eyes, fluffy ears, and a red bowtie"
-                      value={form.characterDescription}
-                      onChange={(e) => updateForm("characterDescription", e.target.value)}
-                      className="min-h-[80px] rounded-xl"
-                    />
-                  </div>
+                  
+                  {form.bookMode === "series" && (
+                    <>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium">Character Name</label>
+                        <Input
+                          placeholder="e.g., Bamboo the Panda"
+                          value={form.characterName}
+                          onChange={(e) => updateForm("characterName", e.target.value)}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium">Character Description</label>
+                        <Textarea
+                          placeholder="e.g., A curious baby panda with big round eyes, fluffy ears, and a red bowtie"
+                          value={form.characterDescription}
+                          onChange={(e) => updateForm("characterDescription", e.target.value)}
+                          className="min-h-[80px] rounded-xl"
+                        />
+                      </div>
+                    </>
+                  )}
+                  
                   <div>
                     <label className="mb-2 block text-sm font-medium">
                       Number of Pages <span className="text-muted-foreground">(max {MAX_PAGES})</span>
@@ -724,60 +890,51 @@ export default function NewBookPage() {
                   </div>
                 </div>
 
-                {/* Character Lock Section */}
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold flex items-center gap-2">
-                        {isCharacterLocked ? (
-                          <><CheckCircle2 className="h-5 w-5 text-green-500" /> Character Locked</>
+                {/* Character Lock Section (Series Mode Only) */}
+                {form.bookMode === "series" && (
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-semibold flex items-center gap-2">
+                          {isCharacterLocked ? (
+                            <><CheckCircle2 className="h-5 w-5 text-green-500" /> Character Locked</>
+                          ) : (
+                            <><Lock className="h-5 w-5 text-muted-foreground" /> Lock Character (Optional)</>
+                          )}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          {isCharacterLocked
+                            ? "Character design is locked for consistency"
+                            : "Optional: Lock character design for extra consistency"}
+                        </p>
+                      </div>
+                      <Button
+                        onClick={lockCharacter}
+                        disabled={lockingCharacter || generatingSheet || !form.theme || !form.characterName || !form.characterDescription}
+                        variant={isCharacterLocked ? "outline" : "secondary"}
+                        size="sm"
+                        className="rounded-xl"
+                      >
+                        {lockingCharacter || generatingSheet ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Locking...</>
+                        ) : isCharacterLocked ? (
+                          <><RefreshCw className="mr-2 h-4 w-4" /> Re-lock</>
                         ) : (
-                          <><Lock className="h-5 w-5 text-muted-foreground" /> Lock Character Style</>
+                          <><Lock className="mr-2 h-4 w-4" /> Lock</>
                         )}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        {isCharacterLocked
-                          ? "Your character will look consistent across all pages"
-                          : "Required for consistent black & white pages"}
-                      </p>
+                      </Button>
                     </div>
-                    <Button
-                      onClick={lockCharacter}
-                      disabled={lockingCharacter || generatingSheet || !form.theme || !form.characterName || !form.characterDescription}
-                      variant={isCharacterLocked ? "outline" : "default"}
-                      className="rounded-xl"
-                    >
-                      {lockingCharacter || generatingSheet ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Locking...</>
-                      ) : isCharacterLocked ? (
-                        <><RefreshCw className="mr-2 h-4 w-4" /> Re-lock</>
-                      ) : (
-                        <><Lock className="mr-2 h-4 w-4" /> 🔒 Lock Character</>
-                      )}
-                    </Button>
+
+                    {form.characterSheetUrl && (
+                      <div className="mt-4">
+                        <p className="mb-2 text-xs font-medium text-muted-foreground">Character Sheet:</p>
+                        <div className="aspect-[2/3] max-w-[120px] overflow-hidden rounded-xl border border-border bg-white">
+                          <img src={form.characterSheetUrl} alt="Character Sheet" className="h-full w-full object-contain" />
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  {form.characterSheetUrl && (
-                    <div className="mt-4">
-                      <p className="mb-2 text-xs font-medium text-muted-foreground">Character Reference Sheet:</p>
-                      <div className="aspect-[2/3] max-w-xs overflow-hidden rounded-xl border border-border bg-white">
-                        <img src={form.characterSheetUrl} alt="Character Sheet" className="h-full w-full object-contain" />
-                      </div>
-                    </div>
-                  )}
-
-                  {form.characterLock && (
-                    <div className="mt-4 rounded-lg bg-muted/50 p-3 text-xs">
-                      <p className="font-medium">{form.characterLock.canonicalName}</p>
-                      <p className="text-muted-foreground">{form.characterLock.visualRules.proportions}</p>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {form.characterLock.visualRules.uniqueFeatures.slice(0, 3).map((f, i) => (
-                          <Badge key={i} variant="outline" className="text-[10px]">{f}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
             )}
 
@@ -831,53 +988,27 @@ export default function NewBookPage() {
                   </div>
 
                   {/* Book Options */}
-                  <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+                  <div className="rounded-xl border border-border bg-card p-4 space-y-3">
                     <h3 className="font-semibold">Book Options</h3>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Blank pages between content</p>
-                          <p className="text-xs text-muted-foreground">Add separator pages</p>
-                        </div>
-                        <Switch
-                          checked={form.includeBlankBetween}
-                          onCheckedChange={(checked) => updateForm("includeBlankBetween", checked)}
-                        />
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">"This book belongs to" page</p>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">"This book belongs to" page</p>
-                          <p className="text-xs text-muted-foreground">Personalization page</p>
-                        </div>
-                        <Switch
-                          checked={form.includeBelongsTo}
-                          onCheckedChange={(checked) => updateForm("includeBelongsTo", checked)}
-                        />
+                      <Switch
+                        checked={form.includeBelongsTo}
+                        onCheckedChange={(checked) => updateForm("includeBelongsTo", checked)}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">Copyright page</p>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Copyright page</p>
-                          <p className="text-xs text-muted-foreground">Standard KDP requirement</p>
-                        </div>
-                        <Switch
-                          checked={form.includeCopyrightPage}
-                          onCheckedChange={(checked) => updateForm("includeCopyrightPage", checked)}
-                        />
-                      </div>
+                      <Switch
+                        checked={form.includeCopyrightPage}
+                        onCheckedChange={(checked) => updateForm("includeCopyrightPage", checked)}
+                      />
                     </div>
                   </div>
-
-                  {!isCharacterLocked && (
-                    <div className="flex items-start gap-3 rounded-xl border border-yellow-500/50 bg-yellow-500/10 p-4">
-                      <AlertCircle className="h-5 w-5 shrink-0 text-yellow-600" />
-                      <div>
-                        <p className="font-medium text-yellow-700 dark:text-yellow-400">Character not locked</p>
-                        <p className="text-sm text-muted-foreground">
-                          Go back to Theme step and lock your character for consistent black & white results.
-                        </p>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -888,7 +1019,9 @@ export default function NewBookPage() {
                 <div className="text-center">
                   <h2 className="text-2xl font-semibold">Generate prompts 📝</h2>
                   <p className="text-muted-foreground">
-                    AI creates prompts using <strong>{form.complexity}</strong> complexity + <strong>{form.lineThickness}</strong> lines
+                    {form.bookMode === "series" 
+                      ? `Story prompts for ${form.characterName}`
+                      : "Themed prompts for your collection"}
                   </p>
                 </div>
 
@@ -898,7 +1031,7 @@ export default function NewBookPage() {
                       <CardContent className="flex flex-col items-center justify-center p-8 text-center">
                         <Sparkles className="mb-3 h-8 w-8 text-muted-foreground" />
                         <p className="mb-4 text-muted-foreground">
-                          Click below to generate {form.pageCount} story prompts
+                          Click below to generate {form.pageCount} prompts
                         </p>
                         <Button onClick={generatePrompts} disabled={generatingPrompts} className="rounded-xl">
                           {generatingPrompts ? (
@@ -939,7 +1072,7 @@ export default function NewBookPage() {
                               />
                             </div>
                             <div className="flex items-center gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyPrompt(page.prompt)} title="Copy">
+                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyPrompt(page.prompt)}>
                                 <Copy className="h-3 w-3" />
                               </Button>
                               <Button
@@ -950,7 +1083,7 @@ export default function NewBookPage() {
                                 disabled={page.isRegenerating}
                               >
                                 {page.isRegenerating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                                Regenerate
+                                Regen
                               </Button>
                             </div>
                           </div>
@@ -960,7 +1093,6 @@ export default function NewBookPage() {
                             className="min-h-[80px] resize-none rounded-xl text-sm"
                             disabled={page.isRegenerating}
                           />
-                          {page.lastError && <p className="mt-2 text-xs text-red-500">{page.lastError}</p>}
                         </CardContent>
                       </Card>
                     ))}
@@ -974,136 +1106,195 @@ export default function NewBookPage() {
               <div className="space-y-6">
                 <div className="text-center">
                   <h2 className="text-2xl font-semibold">Generate pages 🚀</h2>
-                  <p className="text-muted-foreground">Pure black & white line art, portrait orientation</p>
+                  <p className="text-muted-foreground">Anchor-first workflow for consistent style</p>
                 </div>
 
-                {!isCharacterLocked && (
-                  <div className="flex items-start gap-3 rounded-xl border border-red-500/50 bg-red-500/10 p-4">
-                    <AlertCircle className="h-5 w-5 shrink-0 text-red-600" />
-                    <div>
-                      <p className="font-medium text-red-700 dark:text-red-400">Character Lock Required</p>
-                      <p className="text-sm text-muted-foreground">
-                        Lock your character before generating to ensure consistent black & white line art.
-                      </p>
-                      <Button variant="outline" size="sm" className="mt-2" onClick={() => setStep(2)}>
-                        Go to Theme Step
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                <Card className="border-border/50 bg-card/60">
-                  <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Size</p>
-                      <p className="font-medium">{form.trimSize} ({TRIM_TO_PIXELS[form.trimSize]})</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Style</p>
-                      <p className="font-medium">{form.complexity} / {form.lineThickness} lines</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Theme</p>
-                      <p className="font-medium">{form.theme}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Character</p>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{form.characterName}</p>
-                        {isCharacterLocked && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                {/* Anchor Generation Section */}
+                <Card className={cn(
+                  "border-2",
+                  isAnchorApproved ? "border-green-500/50 bg-green-500/5" : "border-primary/50 bg-primary/5"
+                )}>
+                  <CardContent className="p-6">
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-background">
+                        <Anchor className={cn("h-6 w-6", isAnchorApproved ? "text-green-500" : "text-primary")} />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-semibold flex items-center gap-2">
+                          {isAnchorApproved ? (
+                            <><CheckCircle2 className="h-5 w-5 text-green-500" /> Style Approved</>
+                          ) : (
+                            <>Step 1: Generate & Approve Sample Page</>
+                          )}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          {isAnchorApproved
+                            ? "All pages will match this anchor style"
+                            : "Generate Page 1 first to lock the visual style"}
+                        </p>
+                        
+                        {/* Anchor Preview */}
+                        {page1Image?.imageUrl && (
+                          <div className="mt-4 flex gap-4">
+                            <div className="aspect-[2/3] w-32 overflow-hidden rounded-xl border bg-white">
+                              <img
+                                src={page1Image.imageUrl}
+                                alt="Sample page"
+                                className="h-full w-full object-contain"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              {!isAnchorApproved ? (
+                                <>
+                                  <Button onClick={approveAnchor} className="rounded-xl gap-2">
+                                    <CheckCircle2 className="h-4 w-4" /> Approve Style
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    onClick={generateAnchor}
+                                    disabled={generatingAnchor}
+                                    className="rounded-xl gap-2"
+                                  >
+                                    <RefreshCw className="h-4 w-4" /> Regenerate Sample
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openPreview(1, form.prompts[0]?.sceneTitle || "Page 1", page1Image.imageUrl!)}
+                                  className="rounded-xl"
+                                >
+                                  <Eye className="mr-1 h-3 w-3" /> Preview
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Generate Anchor Button */}
+                        {!page1Image?.imageUrl && !generatingAnchor && (
+                          <Button
+                            onClick={generateAnchor}
+                            disabled={form.prompts.length === 0}
+                            className="mt-4 rounded-xl"
+                          >
+                            <Sparkles className="mr-2 h-4 w-4" /> Generate Sample Page
+                          </Button>
+                        )}
+                        
+                        {generatingAnchor && (
+                          <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Generating sample with strict line art rules...
+                          </div>
+                        )}
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">
-                      Generated: {generatedCount} / {form.prompts.length}
-                    </p>
-                    <Button
-                      onClick={startBulkGeneration}
-                      disabled={bulkGenerating || form.prompts.length === 0 || !isCharacterLocked}
-                      className="rounded-xl"
-                    >
-                      {bulkGenerating ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                      ) : (
-                        <><ImageIcon className="mr-2 h-4 w-4" /> Generate All Pages</>
-                      )}
-                    </Button>
+                {/* Generate All Button */}
+                {!isAnchorApproved && (
+                  <div className="flex items-start gap-3 rounded-xl border border-yellow-500/50 bg-yellow-500/10 p-4">
+                    <AlertCircle className="h-5 w-5 shrink-0 text-yellow-600" />
+                    <div>
+                      <p className="font-medium text-yellow-700 dark:text-yellow-400">Approve sample first</p>
+                      <p className="text-sm text-muted-foreground">
+                        Generate and approve the sample page to lock the style before generating all pages.
+                      </p>
+                    </div>
                   </div>
+                )}
 
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {form.prompts.map((page) => {
-                      const pageState = form.pageImages[page.pageNumber];
-                      const hasImage = !!pageState?.imageUrl;
-                      const isGenerating = pageState?.isGenerating;
-                      const hasError = !!pageState?.error;
-                      const failedPrintSafe = pageState?.failedPrintSafe;
+                {isAnchorApproved && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        Generated: {generatedCount} / {form.prompts.length}
+                      </p>
+                      <Button
+                        onClick={startBulkGeneration}
+                        disabled={bulkGenerating || form.prompts.length === 0}
+                        className="rounded-xl"
+                      >
+                        {bulkGenerating ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                        ) : (
+                          <><ImageIcon className="mr-2 h-4 w-4" /> Generate Remaining Pages</>
+                        )}
+                      </Button>
+                    </div>
 
-                      return (
-                        <Card key={page.id} className={cn("overflow-hidden border-border/50", hasError && "border-red-500/50")}>
-                          <div className="aspect-[2/3] bg-white relative" style={{ objectFit: "contain" }}>
-                            {hasImage ? (
-                              <img
-                                src={pageState.imageUrl}
-                                alt={`Page ${page.pageNumber}`}
-                                className="h-full w-full object-contain"
-                                style={{ imageRendering: "auto" }}
-                              />
-                            ) : isGenerating ? (
-                              <div className="flex h-full flex-col items-center justify-center gap-2 bg-muted">
-                                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                                <p className="text-xs text-muted-foreground">Generating B&W line art...</p>
-                              </div>
-                            ) : failedPrintSafe ? (
-                              <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-red-50 dark:bg-red-900/10">
-                                <AlertTriangle className="mb-2 h-8 w-8 text-red-500" />
-                                <p className="text-xs font-medium text-red-600">Failed print-safe check</p>
-                                <p className="text-xs text-muted-foreground">Click regenerate</p>
-                              </div>
-                            ) : (
-                              <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-muted">
-                                <ImageIcon className="mb-2 h-8 w-8 text-muted-foreground" />
-                                <p className="text-xs text-muted-foreground">Page {page.pageNumber}</p>
-                                {pageState?.error && <p className="mt-2 text-xs text-red-500">{pageState.error}</p>}
-                              </div>
-                            )}
-                          </div>
-                          <CardContent className="p-3">
-                            <p className="mb-2 truncate text-xs font-medium">{page.sceneTitle}</p>
-                            <div className="flex gap-2">
-                              {hasImage && (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {form.prompts.map((page) => {
+                        const pageState = form.pageImages[page.pageNumber];
+                        const hasImage = !!pageState?.imageUrl;
+                        const isGenerating = pageState?.isGenerating;
+                        const hasError = !!pageState?.error;
+
+                        return (
+                          <Card key={page.id} className={cn("overflow-hidden border-border/50", hasError && "border-red-500/50")}>
+                            <div className="aspect-[2/3] bg-white relative">
+                              {hasImage ? (
+                                <img
+                                  src={pageState.imageUrl}
+                                  alt={`Page ${page.pageNumber}`}
+                                  className="h-full w-full object-contain"
+                                />
+                              ) : isGenerating ? (
+                                <div className="flex h-full flex-col items-center justify-center gap-2 bg-muted">
+                                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                  <p className="text-xs text-muted-foreground">Generating...</p>
+                                </div>
+                              ) : (
+                                <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-muted">
+                                  <ImageIcon className="mb-2 h-8 w-8 text-muted-foreground" />
+                                  <p className="text-xs text-muted-foreground">Page {page.pageNumber}</p>
+                                </div>
+                              )}
+                              {page.pageNumber === 1 && isAnchorApproved && (
+                                <div className="absolute top-2 left-2">
+                                  <Badge className="bg-green-500 text-white text-[10px]">
+                                    <Anchor className="mr-1 h-3 w-3" /> Anchor
+                                  </Badge>
+                                </div>
+                              )}
+                            </div>
+                            <CardContent className="p-3">
+                              <p className="mb-2 truncate text-xs font-medium">{page.sceneTitle}</p>
+                              <div className="flex gap-2">
+                                {hasImage && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="flex-1 rounded-lg text-xs"
+                                    onClick={() => openPreview(page.pageNumber, page.sceneTitle, pageState.imageUrl!)}
+                                  >
+                                    <Eye className="mr-1 h-3 w-3" /> Preview
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
-                                  variant="ghost"
+                                  variant="outline"
                                   className="flex-1 rounded-lg text-xs"
-                                  onClick={() => openPreview(page.pageNumber, page.sceneTitle, pageState.imageUrl!)}
+                                  onClick={() => generateImage(page.pageNumber, page.prompt)}
+                                  disabled={isGenerating || bulkGenerating || (page.pageNumber > 1 && !isAnchorApproved)}
                                 >
-                                  <Eye className="mr-1 h-3 w-3" /> Preview
+                                  {hasImage ? (
+                                    <><RefreshCw className="mr-1 h-3 w-3" /> Regen</>
+                                  ) : (
+                                    <><Sparkles className="mr-1 h-3 w-3" /> Generate</>
+                                  )}
                                 </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="flex-1 rounded-lg text-xs"
-                                onClick={() => generateImage(page.pageNumber, page.prompt)}
-                                disabled={isGenerating || bulkGenerating || !isCharacterLocked}
-                              >
-                                {hasImage ? (
-                                  <><RefreshCw className="mr-1 h-3 w-3" /> Regen</>
-                                ) : (
-                                  <><Sparkles className="mr-1 h-3 w-3" /> Generate</>
-                                )}
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>

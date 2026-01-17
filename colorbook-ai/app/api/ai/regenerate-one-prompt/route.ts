@@ -5,6 +5,7 @@ import { characterLockSchema } from "@/lib/schemas";
 
 // Accept GenerationSpec directly
 const generationSpecSchema = z.object({
+  bookMode: z.enum(["series", "collection"]),
   trimSize: z.string(),
   pixelSize: z.string(),
   complexity: z.enum(["simple", "medium", "detailed"]),

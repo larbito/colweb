@@ -82,16 +82,38 @@ STRICTLY FORBIDDEN (will cause rejection):
 ✗ Sideways or landscape orientation
 ✗ Complex overlapping elements that create dark masses
 
+=== CRITICAL EYE RULES ===
+- Eyes MUST be drawn as OUTLINES only
+- Pupils: TINY dots (max 2-3 pixels) or leave empty/white
+- NEVER fill eyes with solid black
+- NEVER use large black circles for eyes
+- Eye whites should be WHITE (empty for coloring)
+
 SPECIAL RULES FOR BLACK AREAS:
-- Pupils/eyes: small dots only, NOT fully filled circles
-- Hair: outline only, NOT solid black
+- Hair: outline individual strands only, NEVER solid black fill
 - Shadows: DO NOT draw any shadows at all
-- Dark objects: outline only, leave interior white
+- Dark objects (shoes, hats): outline only, leave interior WHITE
+- Fur/feathers: outline only, no filled areas
 
 The final image must pass a print-safe check where:
 1. Converting to grayscale and thresholding produces ONLY pure black and white
-2. Black pixel ratio is less than 12% of total image
-3. No large contiguous black regions exist`;
+2. Black pixel ratio is less than 10% of total image
+3. No large contiguous black regions exist (max 50x50 pixels)`;
+
+/**
+ * Anchor-reference suffix for consistency
+ */
+export const ANCHOR_REFERENCE_SUFFIX = `
+
+=== STYLE CONSISTENCY REQUIREMENT ===
+You MUST match the EXACT style of the reference/anchor image:
+- Same line thickness and weight
+- Same level of detail
+- Same drawing style
+- Same eye style (outlined only, tiny pupils)
+- Same way of drawing hair/fur (outlined strands, not filled)
+- Same background simplicity level
+Do NOT deviate from the reference style in any way.`;
 
 /**
  * Build a complete prompt with all rules injected
