@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
+import { themePackSchema } from "@/lib/themePack";
 
 // GenerationSpec schema
 const generationSpecSchema = z.object({
@@ -22,12 +23,13 @@ const requestSchema = z.object({
   theme: z.string().min(1),
   mainCharacter: z.string().optional(),
   characterType: z.string().optional(),
+  themePack: themePackSchema.optional().nullable(),
   spec: generationSpecSchema,
   previousSceneTitle: z.string(),
   previousScenePrompt: z.string(),
 });
 
-// Response returns scenePrompt only
+// Response returns structured scenePrompt
 const responseSchema = z.object({
   pageNumber: z.number(),
   sceneTitle: z.string(),
@@ -36,11 +38,11 @@ const responseSchema = z.object({
 
 export type RegenerateSceneResponse = z.infer<typeof responseSchema>;
 
-// Complexity guide
+// Props count by complexity
 const COMPLEXITY_PROPS = {
-  simple: "2-4 props",
-  medium: "4-6 props",
-  detailed: "6-8 props",
+  simple: { min: 3, max: 5 },
+  medium: { min: 5, max: 7 },
+  detailed: { min: 6, max: 8 },
 };
 
 export async function POST(request: NextRequest) {
@@ -68,49 +70,68 @@ export async function POST(request: NextRequest) {
       theme,
       mainCharacter,
       characterType,
+      themePack,
       spec,
       previousSceneTitle,
       previousScenePrompt,
     } = parseResult.data;
 
-    const propsGuide = COMPLEXITY_PROPS[spec.complexity];
-    const characterDesc = mainCharacter ? mainCharacter : "the main character";
+    const propsRange = COMPLEXITY_PROPS[spec.complexity];
+    const characterDesc = mainCharacter ? mainCharacter : "the main subject";
 
-    const systemPrompt = `You are a scene planner for a children's coloring book.
+    // Build theme context
+    let themeContext = "";
+    if (themePack) {
+      themeContext = `
+THEME PACK (use consistently):
+- Setting: ${themePack.setting}
+- Mood: ${themePack.artMood}
+- Allowed subjects: ${themePack.allowedSubjects.join(", ")}
+- Recurring props (MUST reuse): ${themePack.recurringProps.join(", ")}
+- Background motifs: ${themePack.backgroundMotifs.join(", ")}
+- FORBIDDEN: ${themePack.forbidden.join(", ")}`;
+    }
+
+    const systemPrompt = `You are a scene designer for a children's coloring book.
 
 THEME: ${theme}
-MAIN CHARACTER: ${characterDesc}${characterType ? ` (a ${characterType})` : ""}
+MAIN CHARACTER/SUBJECT: ${characterDesc}${characterType ? ` (a ${characterType})` : ""}
 PAGE: ${pageNumber} of ${spec.pageCount}
-PROPS PER PAGE: ${propsGuide}
+${themeContext}
 
-The previous scene idea was:
+The previous scene was:
 Title: "${previousSceneTitle}"
 Scene: "${previousScenePrompt}"
 
-Generate a NEW, DIFFERENT scene idea for page ${pageNumber}.
+Generate a NEW, DIFFERENT structured scene for page ${pageNumber}.
 
-SCENE IDEA FORMAT (STRICT):
-- 1-2 sentences MAXIMUM
-- Describe: character + action + setting + ${propsGuide}
-- List specific props by name and count
-- NO style language (no "black and white", "line art", etc.)
-- Make it different from the previous scene
+STRUCTURED SCENE FORMAT (use EXACTLY):
+"SUBJECT: [main subject with pose/emotion]
+ACTION: [what subject is doing]
+SETTING: ${themePack?.setting || "[same setting as other pages]"}
+FOREGROUND: [items in front]
+MIDGROUND: [main subject area]
+BACKGROUND: [far elements, keep simple]
+PROPS (${propsRange.min}-${propsRange.max}): [list from recurring props]
+COMPOSITION: centered, wide margins, large open areas"
+
+DO NOT include style instructions.
 
 Return ONLY this JSON:
 {
   "pageNumber": ${pageNumber},
   "sceneTitle": "Short 3-5 word title",
-  "scenePrompt": "1-2 sentence scene idea with props list"
+  "scenePrompt": "Full structured scene"
 }`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate a new scene idea for page ${pageNumber}.` },
+        { role: "user", content: `Generate a new structured scene for page ${pageNumber}.` },
       ],
       temperature: 0.85,
-      max_tokens: 300,
+      max_tokens: 500,
     });
 
     const content = response.choices[0]?.message?.content;

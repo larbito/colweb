@@ -51,6 +51,7 @@ import {
   CHARACTER_TYPES,
 } from "@/lib/generationSpec";
 import { getStyleContractSummary, PANDACORN_STYLE_CONTRACT } from "@/lib/styleContract";
+import type { ThemePack } from "@/lib/themePack";
 
 const steps = [
   { id: 1, label: "Setup" },
@@ -140,6 +141,9 @@ interface FormState {
   characterLock: CharacterLock | null;
   characterSheetUrl: string | null;
   
+  // Theme Pack for consistent styling
+  themePack: ThemePack | null;
+  
   // Anchor image (style reference)
   anchor: AnchorState | null;
 }
@@ -156,6 +160,8 @@ export default function NewBookPage() {
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [generatingAnchor, setGeneratingAnchor] = useState(false);
   const [bulkGenerating, setBulkGenerating] = useState(false);
+  const [generatingThemePack, setGeneratingThemePack] = useState(false);
+  const [improvingScene, setImprovingScene] = useState<number | null>(null);
 
   // AI suggestions
   const [themeSuggestion, setThemeSuggestion] = useState<ThemeSuggestionResponse | null>(null);
@@ -184,6 +190,7 @@ export default function NewBookPage() {
     pageImages: {},
     characterLock: null,
     characterSheetUrl: null,
+    themePack: null,
     anchor: null,
     advancedStyleEdit: false,
   });
@@ -374,6 +381,88 @@ export default function NewBookPage() {
   };
 
   // =====================
+  // AI: Generate Theme Pack
+  // =====================
+  const generateThemePack = async () => {
+    if (!form.theme) {
+      toast.error("Please fill in theme first");
+      return;
+    }
+
+    setGeneratingThemePack(true);
+    try {
+      const response = await fetch("/api/ai/generate-theme-pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookMode: form.bookMode,
+          theme: form.theme,
+          subject: form.bookMode === "series" ? form.characterType : undefined,
+          ageGroup: "3-8",
+          complexity: form.complexity,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to generate theme pack");
+      }
+
+      const data = await response.json();
+      updateForm("themePack", data.themePack);
+      toast.success("Theme Pack generated! Your book now has a consistent world.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate theme pack");
+    } finally {
+      setGeneratingThemePack(false);
+    }
+  };
+
+  // =====================
+  // AI: Improve Scene Prompt
+  // =====================
+  const improveScenePrompt = async (pageNumber: number) => {
+    const currentScene = form.scenes.find((p) => p.pageNumber === pageNumber);
+    if (!currentScene) return;
+
+    setImprovingScene(pageNumber);
+    try {
+      const response = await fetch("/api/ai/improve-scene-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scenePrompt: currentScene.scenePrompt,
+          sceneTitle: currentScene.sceneTitle,
+          pageNumber,
+          themePack: form.themePack,
+          complexity: form.complexity,
+          characterType: form.bookMode === "series" ? form.characterType : undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to improve scene");
+      }
+
+      const data = await response.json();
+      setForm((prev) => ({
+        ...prev,
+        scenes: prev.scenes.map((p) =>
+          p.pageNumber === pageNumber
+            ? { ...p, sceneTitle: data.sceneTitle, scenePrompt: data.scenePrompt }
+            : p
+        ),
+      }));
+      toast.success(`Scene ${pageNumber} improved!`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to improve scene");
+    } finally {
+      setImprovingScene(null);
+    }
+  };
+
+  // =====================
   // AI: Generate All Scenes
   // =====================
   const generateScenes = async () => {
@@ -384,6 +473,11 @@ export default function NewBookPage() {
     if (form.bookMode === "series" && (!form.characterName || !form.characterDescription)) {
       toast.error("Series mode requires character name and description");
       return;
+    }
+
+    // Auto-generate theme pack if not exists
+    if (!form.themePack) {
+      await generateThemePack();
     }
 
     setGeneratingPrompts(true);
@@ -400,6 +494,7 @@ export default function NewBookPage() {
             : undefined,
           characterType: form.bookMode === "series" ? form.characterType : undefined,
           characterLock: form.characterLock,
+          themePack: form.themePack,
           spec,
         }),
       });
@@ -456,6 +551,7 @@ export default function NewBookPage() {
             ? `${form.characterName} (${form.characterType})` 
             : undefined,
           characterType: form.bookMode === "series" ? form.characterType : undefined,
+          themePack: form.themePack,
           spec,
           previousSceneTitle: currentScene.sceneTitle,
           previousScenePrompt: currentScene.scenePrompt,
@@ -514,12 +610,12 @@ export default function NewBookPage() {
     }));
 
     try {
-      // API builds finalPrompt server-side using scene + style contract
+      // API builds finalPrompt server-side using scene + style contract + theme pack
       const response = await fetch("/api/ai/generate-page-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          scenePrompt: firstScene.scenePrompt, // Short scene idea
+          scenePrompt: firstScene.scenePrompt, // Structured scene idea
           pageNumber: 1,
           bookMode: form.bookMode,
           characterType: form.bookMode === "series" ? form.characterType : null,
@@ -527,6 +623,7 @@ export default function NewBookPage() {
           complexity: form.complexity,
           lineThickness: form.lineThickness,
           trimSize: form.trimSize,
+          themePack: form.themePack,
           isAnchorGeneration: true,
         }),
       });
@@ -625,12 +722,12 @@ export default function NewBookPage() {
     }));
 
     try {
-      // API builds finalPrompt server-side using scene + style contract
+      // API builds finalPrompt server-side using scene + style contract + theme pack
       const response = await fetch("/api/ai/generate-page-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          scenePrompt, // Short scene idea - style contract applied server-side
+          scenePrompt, // Structured scene - style contract applied server-side
           pageNumber,
           bookMode: form.bookMode,
           characterType: form.bookMode === "series" ? form.characterType : null,
@@ -638,6 +735,7 @@ export default function NewBookPage() {
           complexity: form.complexity,
           lineThickness: form.lineThickness,
           trimSize: form.trimSize,
+          themePack: form.themePack,
           anchorImageUrl: form.anchor?.imageUrl || null,
           anchorImageBase64: form.anchor?.imageBase64 || null,
           isAnchorGeneration: pageNumber === 1 && !form.anchor,
@@ -1065,7 +1163,45 @@ export default function NewBookPage() {
                     </div>
                   </div>
 
-                  {/* Info Box */}
+                  {/* Theme Pack Section */}
+                  <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                          🌍 Theme Pack {form.themePack ? "✓" : "(optional)"}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {form.themePack 
+                            ? `Setting: ${form.themePack.setting}`
+                            : "Generate a consistent world for all pages"
+                          }
+                        </p>
+                      </div>
+                      <Button
+                        variant={form.themePack ? "outline" : "secondary"}
+                        size="sm"
+                        onClick={generateThemePack}
+                        disabled={generatingThemePack || !form.theme}
+                        className="rounded-xl"
+                      >
+                        {generatingThemePack ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                        ) : form.themePack ? (
+                          <><RefreshCw className="mr-2 h-4 w-4" /> Regenerate</>
+                        ) : (
+                          <><Sparkles className="mr-2 h-4 w-4" /> Generate Theme Pack</>
+                        )}
+                      </Button>
+                    </div>
+                    {form.themePack && (
+                      <div className="mt-3 text-xs text-muted-foreground">
+                        <p><strong>Props:</strong> {form.themePack.recurringProps.slice(0, 8).join(", ")}...</p>
+                        <p><strong>Mood:</strong> {form.themePack.artMood}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Style Info Box */}
                   <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4">
                     <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
                       🎨 Style: Pandacorn Busy Day KDP
@@ -1089,6 +1225,18 @@ export default function NewBookPage() {
                       : "Themed scene ideas"}
                   </p>
                 </div>
+
+                {/* Theme Pack Info */}
+                {form.themePack && (
+                  <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4">
+                    <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                      🌍 World: {form.themePack.setting}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      <strong>Props to use:</strong> {form.themePack.recurringProps.slice(0, 6).join(", ")}...
+                    </p>
+                  </div>
+                )}
 
                 {/* Style Contract Info */}
                 <details className="rounded-xl border border-blue-500/30 bg-blue-500/5">
@@ -1152,6 +1300,20 @@ export default function NewBookPage() {
                               />
                             </div>
                             <div className="flex items-center gap-1">
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="h-7 rounded-lg text-xs gap-1"
+                                onClick={() => improveScenePrompt(scene.pageNumber)}
+                                disabled={improvingScene === scene.pageNumber}
+                                title="Make scene richer"
+                              >
+                                {improvingScene === scene.pageNumber ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <><Wand2 className="h-3 w-3" /> Improve</>
+                                )}
+                              </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyScene(scene.scenePrompt)}>
                                 <Copy className="h-3 w-3" />
                               </Button>
@@ -1219,7 +1381,10 @@ export default function NewBookPage() {
                         
                         {page1DisplayUrl && (
                           <div className="mt-4 flex gap-4">
-                            <div className="aspect-[2/3] w-32 overflow-hidden rounded-xl border bg-white">
+                            <div 
+                              className="aspect-[2/3] w-40 overflow-hidden rounded-xl border bg-white cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                              onClick={() => openPreview(1, form.scenes[0]?.sceneTitle || "Sample Page", page1DisplayUrl)}
+                            >
                               <img
                                 src={page1DisplayUrl}
                                 alt="Sample"
@@ -1227,6 +1392,16 @@ export default function NewBookPage() {
                               />
                             </div>
                             <div className="flex flex-col gap-2">
+                              {/* Preview button - always visible */}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openPreview(1, form.scenes[0]?.sceneTitle || "Sample Page", page1DisplayUrl)}
+                                className="rounded-xl gap-2"
+                              >
+                                <Eye className="h-4 w-4" /> Preview Large
+                              </Button>
+                              
                               {!isAnchorApproved ? (
                                 <>
                                   <Button onClick={approveAnchor} className="rounded-xl gap-2">
@@ -1238,18 +1413,13 @@ export default function NewBookPage() {
                                     disabled={generatingAnchor}
                                     className="rounded-xl gap-2"
                                   >
-                                    <RefreshCw className="h-4 w-4" /> Regenerate
+                                    <RefreshCw className="h-4 w-4" /> Regenerate Sample
                                   </Button>
                                 </>
                               ) : (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => openPreview(1, form.scenes[0]?.sceneTitle || "Page 1", page1DisplayUrl)}
-                                  className="rounded-xl"
-                                >
-                                  <Eye className="mr-1 h-3 w-3" /> Preview
-                                </Button>
+                                <p className="text-xs text-green-600 flex items-center gap-1">
+                                  <CheckCircle2 className="h-3 w-3" /> Sample approved ✓
+                                </p>
                               )}
                             </div>
                           </div>

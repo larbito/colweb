@@ -5,6 +5,8 @@
 
 import type { Complexity, LineThickness, CharacterType } from "./generationSpec";
 import { CHARACTER_TYPES } from "./generationSpec";
+import type { ThemePack } from "./themePack";
+import { getThemePackSummary } from "./themePack";
 
 /**
  * The StyleContract contains all locked rules for image generation
@@ -118,11 +120,20 @@ Do NOT deviate from the anchor style in any way.`;
 }
 
 /**
- * Build the complete final prompt from scene idea + style contract
+ * Build the complete final prompt from scene idea + style contract + theme pack
  * This is the ONLY way to build prompts for image generation
+ * 
+ * PROMPT ORDER:
+ * 1. ThemePack summary (world consistency)
+ * 2. ScenePrompt (structured scene)
+ * 3. Character lock (series mode)
+ * 4. Anchor match instruction
+ * 5. Style contract (Pandacorn rules)
+ * 6. Negative rules
  */
 export function buildFinalPrompt(params: {
   scenePrompt: string;
+  themePack?: ThemePack | null;
   styleContract?: StyleContract;
   bookMode: "series" | "collection";
   characterType?: CharacterType;
@@ -135,6 +146,7 @@ export function buildFinalPrompt(params: {
 }): string {
   const {
     scenePrompt,
+    themePack,
     styleContract = PANDACORN_STYLE_CONTRACT,
     bookMode,
     characterType,
@@ -148,38 +160,47 @@ export function buildFinalPrompt(params: {
 
   const parts: string[] = [];
 
-  // 1. Scene description (user content)
+  // 1. ThemePack summary (world consistency) - FIRST for context
+  if (themePack) {
+    parts.push(getThemePackSummary(themePack));
+  }
+
+  // 2. Scene description (structured user content)
   parts.push(`SCENE TO DRAW:\n${scenePrompt}`);
 
-  // 2. Character species lock (series mode)
+  // 3. Character species lock (series mode)
   if (bookMode === "series" && characterType) {
     parts.push(getSpeciesLockText(characterType, characterName));
   }
 
-  // 3. Anchor match instruction (for non-anchor pages when anchor exists)
+  // 4. Anchor match instruction (for non-anchor pages when anchor exists)
   if (hasAnchor && !isAnchorGeneration) {
     parts.push(getAnchorReferenceText());
   }
 
-  // 4. Complexity rules
+  // 5. Complexity rules
   parts.push(styleContract.complexityRules[complexity]);
 
-  // 5. Thickness rules
+  // 6. Thickness rules
   parts.push(styleContract.thicknessRules[lineThickness]);
 
-  // 6. Main style contract
+  // 7. Main style contract
   parts.push(styleContract.contractText);
 
-  // 7. Eye rules
+  // 8. Eye rules
   parts.push(styleContract.eyeRules);
 
-  // 8. Fill rules
+  // 9. Fill rules
   parts.push(styleContract.fillRules);
 
-  // 9. Forbidden items
-  parts.push(styleContract.negativeText);
+  // 10. Forbidden items (merge with ThemePack forbidden)
+  let forbiddenText = styleContract.negativeText;
+  if (themePack && themePack.forbidden.length > 0) {
+    forbiddenText += `\nALSO FORBIDDEN: ${themePack.forbidden.join(", ")}`;
+  }
+  parts.push(forbiddenText);
 
-  // 10. Retry-specific strictness
+  // 11. Retry-specific strictness
   if (retryAttempt >= 1) {
     parts.push(`
 === STRICT RETRY (attempt ${retryAttempt + 1}) ===

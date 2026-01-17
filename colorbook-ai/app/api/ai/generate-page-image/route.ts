@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
-import { buildFinalPrompt, buildNegativePrompt, simplifyScenePrompt } from "@/lib/styleContract";
+import { buildFinalPrompt, simplifyScenePrompt } from "@/lib/styleContract";
 import { processAndValidateImage, checkCharacterMatch, fetchImageAsBase64 } from "@/lib/imageProcessor";
 import type { CharacterType, Complexity, LineThickness } from "@/lib/generationSpec";
+import { themePackSchema } from "@/lib/themePack";
 
 // Request schema - client sends scenePrompt, NOT final prompt
 const requestSchema = z.object({
@@ -18,6 +19,9 @@ const requestSchema = z.object({
   complexity: z.enum(["simple", "medium", "detailed"]),
   lineThickness: z.enum(["thin", "medium", "bold"]),
   trimSize: z.string(),
+  
+  // ThemePack for consistent styling
+  themePack: themePackSchema.optional().nullable(),
   
   // Anchor reference
   anchorImageUrl: z.string().optional().nullable(),
@@ -76,6 +80,7 @@ export async function POST(request: NextRequest) {
       complexity,
       lineThickness,
       trimSize,
+      themePack,
       anchorImageUrl,
       anchorImageBase64,
       isAnchorGeneration,
@@ -120,9 +125,10 @@ export async function POST(request: NextRequest) {
         else if (currentComplexity === "medium") currentComplexity = "simple";
       }
 
-      // BUILD FINAL PROMPT SERVER-SIDE (style contract always applied)
+      // BUILD FINAL PROMPT SERVER-SIDE (style contract + theme pack always applied)
       const finalPrompt = buildFinalPrompt({
         scenePrompt: currentScenePrompt,
+        themePack: themePack || undefined,
         bookMode,
         characterType: characterType as CharacterType || undefined,
         characterName: characterName || undefined,
