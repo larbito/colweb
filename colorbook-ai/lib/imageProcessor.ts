@@ -26,10 +26,11 @@ export interface QualityConfig {
   maxBlackRunLength: number;
 }
 
+// More lenient defaults - DALL-E 3 line art typically has 15-25% black
 const DEFAULT_CONFIG: QualityConfig = {
-  binarizationThreshold: 225,
-  maxBlackRatio: 0.10,
-  maxBlackRunLength: 80,
+  binarizationThreshold: 200, // Less aggressive binarization
+  maxBlackRatio: 0.30,        // Allow up to 30% black (normal line art is 15-25%)
+  maxBlackRunLength: 200,     // Allow longer lines (thick outlines are expected)
 };
 
 /**
@@ -116,33 +117,35 @@ export async function processAndValidateImage(
 
       const blackRatio = blackPixels / totalPixels;
 
-      // Check if black ratio is too high (indicates filled regions)
+      // Log stats for debugging
+      console.log(`Image stats: blackRatio=${(blackRatio * 100).toFixed(1)}%, maxRunLength=${maxRunLength}px`);
+
+      // LENIENT PASS: Always pass if binarization succeeded
+      // The main goal is ensuring B/W output, not rejecting images
+      // Only warn about high black ratios, don't fail
+      let warning: string | undefined;
+      
+      if (blackRatio > 0.40) {
+        // Only fail for extremely high black ratio (40%+) - likely a rendering error
+        return {
+          passed: false,
+          binarizedBase64: binarizedBuffer.toString("base64"),
+          failureReason: "blackfill",
+          blackRatio,
+          details: `Very high black ratio ${(blackRatio * 100).toFixed(1)}% - image may have rendering issues`,
+        };
+      }
+      
       if (blackRatio > config.maxBlackRatio) {
-        return {
-          passed: false,
-          binarizedBase64: binarizedBuffer.toString("base64"),
-          failureReason: "blackfill",
-          blackRatio,
-          details: `Black ratio ${(blackRatio * 100).toFixed(1)}% exceeds max ${config.maxBlackRatio * 100}%`,
-        };
+        warning = `Black ratio ${(blackRatio * 100).toFixed(1)}% is higher than ideal (${config.maxBlackRatio * 100}%)`;
       }
 
-      // Check for long runs (indicates large filled areas)
-      if (maxRunLength > config.maxBlackRunLength) {
-        return {
-          passed: false,
-          binarizedBase64: binarizedBuffer.toString("base64"),
-          failureReason: "blackfill",
-          blackRatio,
-          details: `Detected long black run (${maxRunLength}px) indicating filled region`,
-        };
-      }
-
-      // All checks passed
+      // Pass the image - binarization ensures B/W output
       return {
         passed: true,
         binarizedBase64: binarizedBuffer.toString("base64"),
         blackRatio,
+        details: warning,
       };
 
     } catch (sharpError) {

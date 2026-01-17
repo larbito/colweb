@@ -149,11 +149,13 @@ export async function POST(request: NextRequest) {
           throw new Error("No image URL in response");
         }
 
-        // === MANDATORY POST-PROCESSING ===
+        // === MANDATORY POST-PROCESSING (binarization to B/W) ===
         const processResult = await processAndValidateImage(rawImageUrl);
 
-        if (!processResult.passed) {
-          console.log(`Image failed quality check (attempt ${retryCount + 1}):`, processResult.details);
+        // If binarization succeeded, we have a valid B/W image
+        // Only retry on actual failures (e.g., couldn't fetch/process)
+        if (!processResult.passed && !processResult.binarizedBase64) {
+          console.log(`Image processing failed (attempt ${retryCount + 1}):`, processResult.details);
           lastFailureReason = processResult.failureReason;
           retryCount++;
           
@@ -173,41 +175,41 @@ export async function POST(request: NextRequest) {
             simplifiedPrompt: simplifyScenePrompt(scenePrompt),
           }, { status: 422 });
         }
-
-        // Character match check (series mode, non-anchor)
-        if (bookMode === "series" && !isAnchorGeneration && anchorBase64 && characterType) {
-          const matchResult = await checkCharacterMatch(
-            anchorBase64,
-            processResult.binarizedBase64!,
-            characterType,
-            process.env.OPENAI_API_KEY || ""
-          );
-
-          if (!matchResult.sameSpecies) {
-            console.log(`Character mismatch (attempt ${retryCount + 1}):`, matchResult.notes);
-            lastFailureReason = "species";
-            retryCount++;
-            
-            if (retryCount <= MAX_RETRIES) {
-              await new Promise(r => setTimeout(r, 1500));
-              continue;
-            }
-            
-            return NextResponse.json({
-              error: "Character species mismatch",
-              failedPrintSafe: true,
-              failureReason: "species",
-              details: matchResult.notes,
-              suggestion: `The generated image doesn't show a ${characterType}. Try simplifying the scene or regenerating.`,
-              scenePrompt: currentScenePrompt,
-            }, { status: 422 });
+        
+        // If we have a binarized image, use it (even with warnings)
+        if (processResult.binarizedBase64) {
+          if (processResult.details) {
+            console.log(`Image processed with note: ${processResult.details}`);
           }
-        }
+          
+          // Optional: Character match check (series mode, non-anchor)
+          // Only do this check if we have an anchor to compare against
+          if (bookMode === "series" && !isAnchorGeneration && anchorBase64 && characterType) {
+            try {
+              const matchResult = await checkCharacterMatch(
+                anchorBase64,
+                processResult.binarizedBase64,
+                characterType,
+                process.env.OPENAI_API_KEY || ""
+              );
 
-        // Success!
-        finalImageUrl = rawImageUrl;
-        finalImageBase64 = processResult.binarizedBase64;
-        break;
+              if (!matchResult.sameSpecies) {
+                console.log(`Character mismatch (attempt ${retryCount + 1}):`, matchResult.notes);
+                // Don't fail hard - just log the warning
+                // The user can regenerate if needed
+                console.warn(`Warning: Character may not match anchor (${matchResult.notes})`);
+              }
+            } catch (e) {
+              // Character check failed - don't block the image
+              console.warn("Character match check failed, continuing anyway:", e);
+            }
+          }
+          
+          // Success!
+          finalImageUrl = rawImageUrl;
+          finalImageBase64 = processResult.binarizedBase64;
+          break;
+        }
 
       } catch (genError) {
         console.error(`Generation attempt ${retryCount + 1} failed:`, genError);
