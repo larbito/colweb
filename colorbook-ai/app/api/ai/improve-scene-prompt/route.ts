@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
+import { openai, isOpenAIConfigured, TEXT_MODEL, logModelUsage } from "@/lib/openai";
 import { z } from "zod";
 import { themePackSchema } from "@/lib/themePack";
 
@@ -90,11 +90,13 @@ Return ONLY this JSON:
   "scenePrompt": "Full improved structured scene"
 }`;
 
+    logModelUsage(`Improve scene ${pageNumber}`, "text", TEXT_MODEL);
+
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: TEXT_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: "Improve this scene description while keeping the same core concept." },
+        { role: "user", content: "Improve this scene description while keeping the same core concept. Keep it simple and uncluttered." },
       ],
       temperature: 0.7,
       max_tokens: 500,

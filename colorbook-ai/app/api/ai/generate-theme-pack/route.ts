@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
+import { openai, isOpenAIConfigured, TEXT_MODEL, logModelUsage } from "@/lib/openai";
 import { z } from "zod";
 import { themePackSchema, DEFAULT_FORBIDDEN, DEFAULT_COMPOSITION_RULES } from "@/lib/themePack";
 
@@ -65,8 +65,10 @@ Return ONLY valid JSON matching this schema:
   "compositionRules": ["string", ...]
 }`;
 
+    logModelUsage("Generate ThemePack", "text", TEXT_MODEL);
+    
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: TEXT_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `Generate a ThemePack for: "${theme}"${subject ? ` featuring ${subject}` : ""}` },

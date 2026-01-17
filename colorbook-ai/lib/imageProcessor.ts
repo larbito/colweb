@@ -1,6 +1,11 @@
 /**
  * imageProcessor.ts - Post-processing and validation for coloring book images
  * Ensures all images are pure B/W and pass quality gates
+ * 
+ * QUALITY GATES:
+ * 1. Binarization - force pure B/W
+ * 2. Black pixel ratio check - reject if >10% black
+ * 3. Large blob detection - reject silhouettes
  */
 
 /**
@@ -9,8 +14,9 @@
 export interface QualityCheckResult {
   passed: boolean;
   binarizedBase64?: string;
-  failureReason?: "color" | "species" | "blackfill";
+  failureReason?: "color" | "blackfill" | "silhouette" | "fetch_error";
   blackRatio?: number;
+  largestBlobPercent?: number;
   details?: string;
 }
 
@@ -18,19 +24,19 @@ export interface QualityCheckResult {
  * Configuration for quality checks
  */
 export interface QualityConfig {
-  /** Threshold for binarization (0-255). Pixels below = black */
+  /** Threshold for binarization (0-255). Pixels above = white */
   binarizationThreshold: number;
-  /** Maximum allowed black pixel ratio (0-1) */
+  /** Maximum allowed black pixel ratio (0-1). Above this = too much fill */
   maxBlackRatio: number;
-  /** Maximum consecutive black pixels in a row before flagging */
-  maxBlackRunLength: number;
+  /** Maximum allowed single blob size as % of image (0-1). Above this = silhouette */
+  maxBlobPercent: number;
 }
 
-// More lenient defaults - DALL-E 3 line art typically has 15-25% black
+// Strict defaults to catch silhouettes and fills
 const DEFAULT_CONFIG: QualityConfig = {
-  binarizationThreshold: 200, // Less aggressive binarization
-  maxBlackRatio: 0.30,        // Allow up to 30% black (normal line art is 15-25%)
-  maxBlackRunLength: 200,     // Allow longer lines (thick outlines are expected)
+  binarizationThreshold: 200,
+  maxBlackRatio: 0.10,    // Max 10% black pixels
+  maxBlobPercent: 0.015,  // Max 1.5% for any single blob (catches silhouettes)
 };
 
 /**
@@ -48,6 +54,11 @@ export async function fetchImageAsBase64(url: string): Promise<string> {
 /**
  * Process image: binarize to pure B/W and validate
  * This is the main function - all images MUST go through this before display
+ * 
+ * GATES:
+ * 1. Fetch + binarize
+ * 2. Check black pixel ratio (<10%)
+ * 3. Check for large connected blobs (<1.5% each)
  */
 export async function processAndValidateImage(
   imageUrl: string,
@@ -62,7 +73,7 @@ export async function processAndValidateImage(
       console.error("[ImageProcessor] Failed to fetch image:", response.status, response.statusText);
       return {
         passed: false,
-        failureReason: "color",
+        failureReason: "fetch_error",
         details: `Failed to fetch image: ${response.status}`,
       };
     }
@@ -91,65 +102,87 @@ export async function processAndValidateImage(
         .png()
         .toBuffer();
 
-      // Step 3: Analyze the binarized image for black ratio
+      // Step 3: Analyze the binarized image
       const { data, info } = await sharp(binarizedBuffer)
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      let blackPixels = 0;
-      let maxRunLength = 0;
-      let currentRun = 0;
       const totalPixels = info.width * info.height;
+      let blackPixels = 0;
 
-      // Count black pixels and detect long runs
+      // Count black pixels
       for (let i = 0; i < data.length; i++) {
-        const isBlack = data[i] < 128;
-        
-        if (isBlack) {
+        if (data[i] < 128) {
           blackPixels++;
-          currentRun++;
-          maxRunLength = Math.max(maxRunLength, currentRun);
-        } else {
-          currentRun = 0;
-        }
-
-        // Reset at row boundaries
-        if ((i + 1) % info.width === 0) {
-          currentRun = 0;
         }
       }
 
       const blackRatio = blackPixels / totalPixels;
+      console.log(`[ImageProcessor] Black ratio: ${(blackRatio * 100).toFixed(1)}%`);
 
-      // Log stats for debugging
-      console.log(`Image stats: blackRatio=${(blackRatio * 100).toFixed(1)}%, maxRunLength=${maxRunLength}px`);
-
-      // LENIENT PASS: Always pass if binarization succeeded
-      // The main goal is ensuring B/W output, not rejecting images
-      // Only warn about high black ratios, don't fail
-      let warning: string | undefined;
-      
-      if (blackRatio > 0.40) {
-        // Only fail for extremely high black ratio (40%+) - likely a rendering error
+      // GATE 1: Check black pixel ratio
+      if (blackRatio > config.maxBlackRatio) {
+        console.log(`[ImageProcessor] FAILED: Black ratio ${(blackRatio * 100).toFixed(1)}% > ${config.maxBlackRatio * 100}%`);
         return {
           passed: false,
           binarizedBase64: binarizedBuffer.toString("base64"),
           failureReason: "blackfill",
           blackRatio,
-          details: `Very high black ratio ${(blackRatio * 100).toFixed(1)}% - image may have rendering issues`,
+          details: `Too much black: ${(blackRatio * 100).toFixed(1)}% (max ${config.maxBlackRatio * 100}%)`,
         };
       }
+
+      // GATE 2: Check for large connected blobs (silhouettes)
+      // Downsample to 128px for faster processing
+      const smallBuffer = await sharp(binarizedBuffer)
+        .resize(128, null, { fit: 'inside' })
+        .raw()
+        .toBuffer();
       
-      if (blackRatio > config.maxBlackRatio) {
-        warning = `Black ratio ${(blackRatio * 100).toFixed(1)}% is higher than ideal (${config.maxBlackRatio * 100}%)`;
+      const smallMeta = await sharp(binarizedBuffer)
+        .resize(128, null, { fit: 'inside' })
+        .metadata();
+      
+      const smallWidth = smallMeta.width || 128;
+      const smallHeight = Math.floor(smallBuffer.length / smallWidth);
+      const smallTotal = smallWidth * smallHeight;
+
+      // Simple blob detection: find largest connected black region
+      const visited = new Set<number>();
+      let largestBlobSize = 0;
+
+      for (let i = 0; i < smallBuffer.length; i++) {
+        if (smallBuffer[i] < 128 && !visited.has(i)) {
+          // Found unvisited black pixel - flood fill to find blob size
+          const blobSize = floodFillCount(smallBuffer, smallWidth, smallHeight, i, visited);
+          if (blobSize > largestBlobSize) {
+            largestBlobSize = blobSize;
+          }
+        }
       }
 
-      // Pass the image - binarization ensures B/W output
+      const largestBlobPercent = largestBlobSize / smallTotal;
+      console.log(`[ImageProcessor] Largest blob: ${(largestBlobPercent * 100).toFixed(2)}% of image`);
+
+      if (largestBlobPercent > config.maxBlobPercent) {
+        console.log(`[ImageProcessor] FAILED: Silhouette detected (${(largestBlobPercent * 100).toFixed(2)}% > ${config.maxBlobPercent * 100}%)`);
+        return {
+          passed: false,
+          binarizedBase64: binarizedBuffer.toString("base64"),
+          failureReason: "silhouette",
+          blackRatio,
+          largestBlobPercent,
+          details: `Silhouette/large fill detected: ${(largestBlobPercent * 100).toFixed(2)}% blob (max ${config.maxBlobPercent * 100}%)`,
+        };
+      }
+
+      // All checks passed
+      console.log("[ImageProcessor] PASSED all quality gates");
       return {
         passed: true,
         binarizedBase64: binarizedBuffer.toString("base64"),
         blackRatio,
-        details: warning,
+        largestBlobPercent,
       };
 
     } catch (sharpError) {
@@ -164,12 +197,50 @@ export async function processAndValidateImage(
     }
 
   } catch (error) {
+    console.error("[ImageProcessor] Error:", error);
     return {
       passed: false,
-      failureReason: "color",
+      failureReason: "fetch_error",
       details: error instanceof Error ? error.message : "Processing failed",
     };
   }
+}
+
+/**
+ * Flood fill to count connected black pixels (blob detection)
+ * Uses iterative approach to avoid stack overflow
+ */
+function floodFillCount(
+  data: Buffer,
+  width: number,
+  height: number,
+  startIdx: number,
+  visited: Set<number>
+): number {
+  const stack = [startIdx];
+  let count = 0;
+
+  while (stack.length > 0) {
+    const idx = stack.pop()!;
+    
+    if (visited.has(idx)) continue;
+    if (idx < 0 || idx >= data.length) continue;
+    if (data[idx] >= 128) continue; // Not black
+    
+    visited.add(idx);
+    count++;
+
+    const x = idx % width;
+    const y = Math.floor(idx / width);
+
+    // Add neighbors (4-connected)
+    if (x > 0) stack.push(idx - 1);           // left
+    if (x < width - 1) stack.push(idx + 1);   // right
+    if (y > 0) stack.push(idx - width);       // up
+    if (y < height - 1) stack.push(idx + width); // down
+  }
+
+  return count;
 }
 
 /**

@@ -17,6 +17,8 @@ export interface StyleContract {
   negativeText: string;
   eyeRules: string;
   fillRules: string;
+  antiFillRules: string; // NEW: Explicit anti-silhouette rules
+  compositionLimits: string; // NEW: Composition constraints
   complexityRules: Record<Complexity, string>;
   thicknessRules: Record<LineThickness, string>;
 }
@@ -24,6 +26,8 @@ export interface StyleContract {
 /**
  * The default Pandacorn Busy Day KDP Kids style contract
  * This is the LOCKED style applied to every generation
+ * 
+ * STRENGTHENED to prevent silhouettes and black fills
  */
 export const PANDACORN_STYLE_CONTRACT: StyleContract = {
   styleName: "Pandacorn Busy Day (KDP Kids)",
@@ -34,7 +38,7 @@ STYLE REQUIREMENTS:
 - PURE black-and-white line art ONLY (no color, no grayscale)
 - Very thick clean outlines with smooth continuous strokes
 - Simple rounded kawaii shapes with big heads and cute proportions
-- Big open areas for easy coloring
+- Big open WHITE areas for easy coloring
 - Centered main subject with wide safe margins (at least 0.5 inch from edges)
 - Portrait orientation
 
@@ -45,37 +49,56 @@ LINE QUALITY:
 - All shapes must be CLOSED (no open paths)
 - No textures, no crosshatching, no halftone dots, no stippling`,
 
-  eyeRules: `EYE RULES (CRITICAL - violations cause rejection):
-- Eyes must be drawn as OUTLINED shapes only
-- Tiny dot pupils allowed (max 2-3 pixels in final output)
-- Eye whites must be WHITE/empty (for coloring)
-- NO solid black filled eyes
-- NO large black circles for eyes
-- NO heavy shadows around eyes`,
+  eyeRules: `EYE RULES (CRITICAL - violations cause automatic rejection):
+- Eyes must be drawn as OUTLINED CIRCLES/OVALS only
+- Tiny dot pupils allowed (max 2-3 pixels) OR leave empty for coloring
+- Eye whites must be COMPLETELY WHITE/empty inside
+- NEVER fill eyes with solid black
+- NEVER draw large black circles for eyes
+- NO heavy black areas around eyes`,
 
-  fillRules: `FILL RULES (CRITICAL - violations cause rejection):
-- NO solid black filled regions anywhere
-- Hair/fur: outline individual strands only, NEVER solid black fill
-- Shadows: DO NOT draw any shadows at all
-- Dark objects (shoes, hats, etc.): outline only, interior WHITE
-- Maximum 10% of image pixels should be black after binarization`,
+  fillRules: `FILL RULES (CRITICAL - violations cause automatic rejection):
+- EVERY area inside outlines must be WHITE (empty for coloring)
+- NO solid black filled regions anywhere in the image
+- Hair/fur: draw individual strand OUTLINES only, interior WHITE
+- Clothing: draw seams and edges as OUTLINES only, interior WHITE
+- NO shadows at all - this is a coloring page`,
 
-  negativeText: `FORBIDDEN (will cause automatic rejection):
+  antiFillRules: `ANTI-SILHOUETTE RULES (MANDATORY):
+- NO silhouettes of any kind
+- NO solid black shapes (even small ones)
+- NO filled black clothing, hats, shoes, or accessories
+- NO sticker-like solid shapes
+- If something looks like a dark silhouette, draw it as OUTLINE ONLY
+- Dark objects (black cat, dark hat): draw as WHITE interior with BLACK outline
+- Test: if you removed the white background, would any shape be a solid blob? If yes, FIX IT.`,
+
+  compositionLimits: `COMPOSITION LIMITS (MANDATORY):
+- Maximum 8 props/objects total (including background items)
+- NO repeating patterns (no fields of flowers, no rows of butterflies)
+- NO tiny repeated decorations scattered everywhere
+- Background: 1-2 clouds maximum, simple horizon line, maybe 1 sun
+- Keep 70%+ of the page as large open WHITE coloring areas
+- NO borders or frames around the page`,
+
+  negativeText: `FORBIDDEN (automatic rejection):
 - Any color or grayscale shading
-- Gradients or shadows
+- Gradients, shadows, or shading of any kind
 - Realistic rendering style
-- Intricate tiny patterns
-- Dense/busy backgrounds
+- Intricate tiny patterns or textures
+- Dense/busy/cluttered backgrounds
 - Text, letters, numbers, logos, watermarks
 - Borders or frames
-- Solid black eyes
-- Large filled black areas
-- Halftone or stipple patterns`,
+- Solid black eyes or large black pupils
+- Large filled black areas or silhouettes
+- Halftone, stipple, or crosshatch patterns
+- Repeating small elements (many flowers, many butterflies)
+- More than 8 objects in the scene`,
 
   complexityRules: {
-    simple: "SIMPLE: 1 main character + 2-4 props only. Minimal background (1-2 elements max). Very large coloring areas.",
-    medium: "MEDIUM: 1 main character + 4-6 props. Light background with 2-4 simple elements. Balanced coloring areas.",
-    detailed: "DETAILED: 1 main character + 6-8 props. Background with 3-5 elements. Still clean and uncluttered.",
+    simple: "SIMPLE (ages 3-5): 1 main subject + 2-4 large props only. Almost no background. Very large coloring areas. Maximum simplicity.",
+    medium: "MEDIUM (ages 5-8): 1 main subject + 4-6 props. Simple background with 1-2 elements. Large coloring areas.",
+    detailed: "DETAILED (ages 8+): 1 main subject + 6-8 props. Background with 2-3 elements. Still uncluttered.",
   },
 
   thicknessRules: {
@@ -113,10 +136,10 @@ export function getAnchorReferenceText(): string {
 You MUST match the EXACT style of the provided anchor/reference image:
 - Same character design (species, face, body proportions)
 - Same line thickness and weight
-- Same eye style (outlined with tiny pupils)
-- Same level of detail
-- Same background simplicity
-Do NOT deviate from the anchor style in any way.`;
+- Same eye style (outlined with tiny pupils or empty)
+- Same level of simplicity
+- Same background emptiness
+Do NOT add more detail than the anchor has.`;
 }
 
 /**
@@ -129,7 +152,9 @@ Do NOT deviate from the anchor style in any way.`;
  * 3. Character lock (series mode)
  * 4. Anchor match instruction
  * 5. Style contract (Pandacorn rules)
- * 6. Negative rules
+ * 6. Anti-fill rules (CRITICAL)
+ * 7. Composition limits
+ * 8. Negative rules
  */
 export function buildFinalPrompt(params: {
   scenePrompt: string;
@@ -187,42 +212,50 @@ export function buildFinalPrompt(params: {
   // 7. Main style contract
   parts.push(styleContract.contractText);
 
-  // 8. Eye rules
+  // 8. Eye rules (CRITICAL)
   parts.push(styleContract.eyeRules);
 
-  // 9. Fill rules
+  // 9. Fill rules (CRITICAL)
   parts.push(styleContract.fillRules);
 
-  // 10. Forbidden items (merge with ThemePack forbidden)
+  // 10. Anti-fill/anti-silhouette rules (NEW - CRITICAL)
+  parts.push(styleContract.antiFillRules);
+
+  // 11. Composition limits (NEW)
+  parts.push(styleContract.compositionLimits);
+
+  // 12. Forbidden items (merge with ThemePack forbidden)
   let forbiddenText = styleContract.negativeText;
   if (themePack && themePack.forbidden.length > 0) {
     forbiddenText += `\nALSO FORBIDDEN: ${themePack.forbidden.join(", ")}`;
   }
   parts.push(forbiddenText);
 
-  // 11. Retry-specific strictness
+  // 13. Retry-specific strictness
   if (retryAttempt >= 1) {
     parts.push(`
 === STRICT RETRY (attempt ${retryAttempt + 1}) ===
-Previous attempt failed quality check. This time:
-- Reduce background elements to absolute minimum
-- Eyes: OUTLINE ONLY with TINY dot pupils
-- NO solid black areas anywhere
-- Simplify the scene further if needed`);
+Previous attempt had too much black/silhouettes. This time:
+- OUTLINES ONLY - every interior must be WHITE
+- Remove any solid black shapes completely
+- Reduce props to maximum 5
+- Simplify background to almost nothing
+- If any area looks filled, make it an outline instead`);
   }
 
   if (retryAttempt >= 2) {
     parts.push(`
 === MAXIMUM STRICTNESS ===
 - Draw ONLY the main character and 2-3 essential props
-- Remove ALL background details
-- Make all shapes very simple and large
-- Ensure every area is large enough to color easily`);
+- ZERO background elements
+- Every single shape must be OUTLINE with WHITE interior
+- If previous attempt had silhouettes, REMOVE those objects entirely
+- Ultra-simple like a basic coloring page for 3-year-olds`);
   }
 
   // Final instruction
   parts.push(`
-Now generate this coloring page following ALL rules above exactly.`);
+Generate this coloring page now. Remember: OUTLINES ONLY, all interiors WHITE.`);
 
   return parts.join("\n\n");
 }
@@ -242,25 +275,51 @@ export function buildNegativePrompt(characterType?: CharacterType): string {
     "grayscale", "gray", "shading", "shaded",
     "gradient", "shadow", "shadows",
     "texture", "halftone", "stipple",
-    "filled black", "solid black eyes", "black eyes",
+    "filled black", "solid black", "silhouette",
+    "solid black eyes", "black eyes", "filled eyes",
     "realistic", "photo", "photograph", "3d",
     "text", "letters", "words", "watermark", "logo",
     "border", "frame",
+    "many flowers", "many butterflies", "repeating pattern",
+    "cluttered", "busy", "dense",
     ...speciesExclusions,
   ].join(", ");
 }
 
 /**
  * Simplify a scene prompt for retry attempts
+ * Removes complex elements that might cause silhouettes
  */
 export function simplifyScenePrompt(scenePrompt: string): string {
-  // Remove excess details by keeping only essential parts
-  // This is a simple heuristic - could be improved with AI
-  const sentences = scenePrompt.split(/[.;]/);
-  if (sentences.length <= 1) return scenePrompt;
+  let simplified = scenePrompt;
   
-  // Keep first sentence (usually the main action)
-  return sentences[0].trim() + ".";
+  // Remove phrases that often cause cluttered output
+  const clutterPhrases = [
+    /many flowers?/gi,
+    /lots of flowers?/gi,
+    /flowers? everywhere/gi,
+    /many butterfl(y|ies)/gi,
+    /surrounded by/gi,
+    /filled with/gi,
+    /covered in/gi,
+    /rows of/gi,
+    /fields? of/gi,
+  ];
+  
+  for (const phrase of clutterPhrases) {
+    simplified = simplified.replace(phrase, "");
+  }
+  
+  // Keep only first sentence if multiple
+  const sentences = simplified.split(/[.;]/);
+  if (sentences.length > 2) {
+    simplified = sentences.slice(0, 2).join(". ").trim();
+  }
+  
+  // Add simplification instruction
+  simplified += " [SIMPLIFIED: minimal props, simple background]";
+  
+  return simplified.trim();
 }
 
 /**
@@ -269,11 +328,11 @@ export function simplifyScenePrompt(scenePrompt: string): string {
 export function getStyleContractSummary(): string {
   return `Style: ${PANDACORN_STYLE_CONTRACT.styleName}
 
-• Pure black & white line art only
+• Pure black & white LINE ART only
 • Thick clean outlines, kawaii shapes
-• Eyes outlined only (tiny dot pupils max)
-• No filled black areas, no shading
-• Simple backgrounds with 3-8 props
-• Large coloring areas for kids`;
+• ALL interiors must be WHITE (for coloring)
+• Eyes: outlined only, tiny dot pupils max
+• NO silhouettes, NO filled black areas
+• Maximum 8 props, simple backgrounds
+• Large open coloring areas for kids`;
 }
-

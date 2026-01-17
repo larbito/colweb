@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
+import { openai, isOpenAIConfigured, TEXT_MODEL, logModelUsage } from "@/lib/openai";
 import { z } from "zod";
 import { themePackSchema } from "@/lib/themePack";
 
@@ -38,11 +38,11 @@ const responseSchema = z.object({
 
 export type RegenerateSceneResponse = z.infer<typeof responseSchema>;
 
-// Props count by complexity
+// Props count by complexity - kept strict
 const COMPLEXITY_PROPS = {
-  simple: { min: 3, max: 5 },
-  medium: { min: 5, max: 7 },
-  detailed: { min: 6, max: 8 },
+  simple: { min: 2, max: 4 },
+  medium: { min: 4, max: 6 },
+  detailed: { min: 5, max: 8 },
 };
 
 export async function POST(request: NextRequest) {
@@ -86,13 +86,11 @@ export async function POST(request: NextRequest) {
 THEME PACK (use consistently):
 - Setting: ${themePack.setting}
 - Mood: ${themePack.artMood}
-- Allowed subjects: ${themePack.allowedSubjects.join(", ")}
-- Recurring props (MUST reuse): ${themePack.recurringProps.join(", ")}
-- Background motifs: ${themePack.backgroundMotifs.join(", ")}
+- Recurring props (choose from): ${themePack.recurringProps.slice(0, 10).join(", ")}
 - FORBIDDEN: ${themePack.forbidden.join(", ")}`;
     }
 
-    const systemPrompt = `You are a scene designer for a children's coloring book.
+    const systemPrompt = `You are a scene designer for a children's coloring book. Design SIMPLE, UNCLUTTERED scenes.
 
 THEME: ${theme}
 MAIN CHARACTER/SUBJECT: ${characterDesc}${characterType ? ` (a ${characterType})` : ""}
@@ -103,19 +101,31 @@ The previous scene was:
 Title: "${previousSceneTitle}"
 Scene: "${previousScenePrompt}"
 
-Generate a NEW, DIFFERENT structured scene for page ${pageNumber}.
+Generate a NEW, DIFFERENT scene for page ${pageNumber}.
 
-STRUCTURED SCENE FORMAT (use EXACTLY):
-"SUBJECT: [main subject with pose/emotion]
-ACTION: [what subject is doing]
-SETTING: ${themePack?.setting || "[same setting as other pages]"}
-FOREGROUND: [items in front]
-MIDGROUND: [main subject area]
-BACKGROUND: [far elements, keep simple]
-PROPS (${propsRange.min}-${propsRange.max}): [list from recurring props]
-COMPOSITION: centered, wide margins, large open areas"
+CRITICAL SIMPLICITY RULES:
+- ONE main subject only
+- MAXIMUM ${propsRange.max} props total (count them!)
+- NO repeating items (no "many flowers", no "lots of butterflies")
+- Background: almost nothing (1 horizon line, 0-1 cloud)
+- 70% of the image should be empty white space
 
-DO NOT include style instructions.
+STRUCTURED SCENE FORMAT:
+"SUBJECT: [ONE main character with pose]
+ACTION: [simple action]
+SETTING: ${themePack?.setting || "[consistent setting]"}
+FOREGROUND: [1-2 items max]
+MIDGROUND: [subject + 1-2 props]
+BACKGROUND: [almost empty - 1 cloud max]
+PROPS (${propsRange.min}-${propsRange.max} TOTAL): [list each prop ONCE]
+COMPOSITION: centered, wide margins, 70% white space"
+
+FORBIDDEN PATTERNS:
+- "surrounded by many..."
+- "covered in..."
+- "field of..."
+- "lots of..."
+- More than 3 of any item
 
 Return ONLY this JSON:
 {
@@ -124,11 +134,13 @@ Return ONLY this JSON:
   "scenePrompt": "Full structured scene"
 }`;
 
+    logModelUsage(`Regenerate scene ${pageNumber}`, "text", TEXT_MODEL);
+
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: TEXT_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate a new structured scene for page ${pageNumber}.` },
+        { role: "user", content: `Generate a new simple, uncluttered scene for page ${pageNumber}. Maximum ${propsRange.max} props.` },
       ],
       temperature: 0.85,
       max_tokens: 500,

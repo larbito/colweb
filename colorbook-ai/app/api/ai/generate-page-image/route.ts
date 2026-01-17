@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
+import { openai, isOpenAIConfigured, IMAGE_MODEL, logModelUsage } from "@/lib/openai";
 import { z } from "zod";
 import { buildFinalPrompt, simplifyScenePrompt } from "@/lib/styleContract";
-import { processAndValidateImage, checkCharacterMatch, fetchImageAsBase64 } from "@/lib/imageProcessor";
+import { processAndValidateImage, fetchImageAsBase64 } from "@/lib/imageProcessor";
 import type { CharacterType, Complexity, LineThickness } from "@/lib/generationSpec";
 import { themePackSchema } from "@/lib/themePack";
 
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
     const pixelSize = TRIM_TO_PIXELS[trimSize] || "1024x1326";
     const imageSize = SIZE_MAP[pixelSize] || "1024x1792";
 
-    // Fetch anchor as base64 if needed
+    // Fetch anchor as base64 if needed (for future reference-based generation)
     let anchorBase64 = anchorImageBase64;
     if (anchorImageUrl && !anchorBase64) {
       try {
@@ -113,18 +113,24 @@ export async function POST(request: NextRequest) {
     let finalImageBase64: string | undefined;
     let retryCount = 0;
     let lastError: string = "Unknown error";
+    let lastFailureReason: string | undefined;
     let currentScenePrompt = scenePrompt;
     let currentComplexity = complexity;
 
     console.log(`[Page ${pageNumber}] Starting image generation...`);
+    console.log(`[Page ${pageNumber}] imageModel=${IMAGE_MODEL}`);
 
     while (retryCount <= MAX_RETRIES) {
       // Smart retry: simplify on attempt 2+
-      if (retryCount >= 2) {
+      if (retryCount >= 1) {
         currentScenePrompt = simplifyScenePrompt(scenePrompt);
+        console.log(`[Page ${pageNumber}] Retry ${retryCount}: simplified scene`);
+      }
+      if (retryCount >= 2) {
         // Downgrade complexity for difficult pages
         if (currentComplexity === "detailed") currentComplexity = "medium";
         else if (currentComplexity === "medium") currentComplexity = "simple";
+        console.log(`[Page ${pageNumber}] Retry ${retryCount}: reduced complexity to ${currentComplexity}`);
       }
 
       // BUILD FINAL PROMPT SERVER-SIDE (style contract + theme pack always applied)
@@ -142,11 +148,12 @@ export async function POST(request: NextRequest) {
       });
 
       console.log(`[Page ${pageNumber}] Attempt ${retryCount + 1}/${MAX_RETRIES + 1}`);
+      logModelUsage(`Page ${pageNumber} image`, "image", IMAGE_MODEL);
 
       try {
-        // Generate image with DALL-E 3
+        // Generate image with DALL-E 3 (the IMAGE model, not text model)
         const response = await openai.images.generate({
-          model: "dall-e-3",
+          model: IMAGE_MODEL, // dall-e-3
           prompt: finalPrompt,
           n: 1,
           size: imageSize,
@@ -160,31 +167,30 @@ export async function POST(request: NextRequest) {
           throw new Error(lastError);
         }
 
-        console.log(`[Page ${pageNumber}] Got image URL, processing...`);
+        console.log(`[Page ${pageNumber}] Got image URL, processing with quality gates...`);
 
-        // === MANDATORY POST-PROCESSING (binarization to B/W) ===
+        // === MANDATORY POST-PROCESSING + QUALITY GATES ===
         const processResult = await processAndValidateImage(rawImageUrl);
 
-        // If we have a binarized image, use it (even with warnings)
-        if (processResult.binarizedBase64) {
-          console.log(`[Page ${pageNumber}] Image processed successfully! BlackRatio: ${processResult.blackRatio}`);
+        // If we have a binarized image and it passed all gates
+        if (processResult.passed && processResult.binarizedBase64) {
+          console.log(`[Page ${pageNumber}] PASSED all quality gates!`);
+          console.log(`[Page ${pageNumber}] - Black ratio: ${((processResult.blackRatio || 0) * 100).toFixed(1)}%`);
+          console.log(`[Page ${pageNumber}] - Largest blob: ${((processResult.largestBlobPercent || 0) * 100).toFixed(2)}%`);
           
-          // Skip character match check for now - it adds latency and often fails
-          // Users can manually regenerate if character doesn't match
-          
-          // Success!
           finalImageUrl = rawImageUrl;
           finalImageBase64 = processResult.binarizedBase64;
           break;
         }
         
-        // Processing failed - retry
-        lastError = processResult.details || "Image processing failed";
-        console.log(`[Page ${pageNumber}] Processing failed: ${lastError}`);
-        retryCount++;
+        // Quality gate failed
+        lastError = processResult.details || "Quality check failed";
+        lastFailureReason = processResult.failureReason;
+        console.log(`[Page ${pageNumber}] FAILED quality gate: ${lastError}`);
         
+        retryCount++;
         if (retryCount <= MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 1500));
           continue;
         }
 
@@ -210,7 +216,7 @@ export async function POST(request: NextRequest) {
         retryCount++;
         
         if (retryCount <= MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, 2000)); // Wait longer on API errors
+          await new Promise(r => setTimeout(r, 2000));
           continue;
         }
       }
@@ -218,10 +224,20 @@ export async function POST(request: NextRequest) {
 
     if (!finalImageBase64) {
       console.error(`[Page ${pageNumber}] All ${MAX_RETRIES + 1} attempts failed. Last error: ${lastError}`);
+      
+      // Provide helpful error message based on failure reason
+      let suggestion = "Try simplifying the scene description.";
+      if (lastFailureReason === "blackfill") {
+        suggestion = "The image had too much solid black. Try removing dark objects or simplifying the scene.";
+      } else if (lastFailureReason === "silhouette") {
+        suggestion = "A silhouette/large filled area was detected. Try removing filled objects like solid hats or clothing.";
+      }
+      
       return NextResponse.json({
-        error: `Failed to generate image: ${lastError}`,
+        error: `Failed to generate valid image: ${lastError}`,
         failedPrintSafe: true,
-        suggestion: "Try simplifying the scene description or try again in a moment.",
+        failureReason: lastFailureReason,
+        suggestion,
         scenePrompt: currentScenePrompt,
       }, { status: 500 });
     }
@@ -234,6 +250,7 @@ export async function POST(request: NextRequest) {
       retries: retryCount,
       isAnchor: isAnchorGeneration || false,
       pageNumber,
+      modelUsed: IMAGE_MODEL,
     });
 
   } catch (error) {
@@ -250,20 +267,5 @@ export async function POST(request: NextRequest) {
       { error: error instanceof Error ? error.message : "Failed to generate image" },
       { status: 500 }
     );
-  }
-}
-
-/**
- * Get helpful suggestion for quality failures
- */
-function getSuggestionForFailure(reason?: "color" | "species" | "blackfill"): string {
-  switch (reason) {
-    case "blackfill":
-      return "The image has too much solid black. Try: remove dark objects, simplify the scene, or specify 'eyes outlined only'.";
-    case "species":
-      return "The character doesn't match the selected species. Try regenerating or simplifying the scene.";
-    case "color":
-    default:
-      return "Try regenerating the image or simplifying the scene description.";
   }
 }

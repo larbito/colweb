@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
+import { openai, isOpenAIConfigured, TEXT_MODEL, logModelUsage } from "@/lib/openai";
 import { z } from "zod";
 import { characterLockSchema } from "@/lib/schemas";
 import { themePackSchema } from "@/lib/themePack";
@@ -96,33 +96,44 @@ ${themeContext}
 YOUR TASK:
 Generate ${spec.pageCount} STRUCTURED scene descriptions that form a cohesive book.
 
-CRITICAL RULES:
+CRITICAL RULES FOR SIMPLE, CLEAN SCENES:
 1. ALL pages must use the SAME setting/world (${themePack?.setting || "a consistent cheerful world"})
-2. REUSE props from the recurring props list - don't invent random props
-3. Each scene is VISUAL INSTRUCTIONS, not a story paragraph
-4. Props count: ${propsRange.min}-${propsRange.max} per page
+2. ONE main subject per page (never more than 2)
+3. MAXIMUM ${propsRange.max} props total - count them!
+4. NO repeating patterns (NO "many flowers", NO "rows of butterflies", NO "field of stars")
+5. Background must be VERY simple: 1-2 clouds max, simple horizon, maybe 1 sun
+6. Each scene is VISUAL INSTRUCTIONS, not a story
+
+ANTI-CLUTTER RULES:
+- Never say "surrounded by many..." or "covered in..." or "field of..."
+- Never have more than 3 of the same item type
+- Keep 70% of the image as empty white space
+- Background = almost nothing (1 horizon line, 0-2 clouds)
 
 STRUCTURED SCENE FORMAT (use this EXACT structure):
-"SUBJECT: [main subject description with pose/emotion]
-ACTION: [what the subject is doing]
-SETTING: ${themePack?.setting || "[consistent setting for all pages]"}
-FOREGROUND: [items in front, closest to viewer]
-MIDGROUND: [main subject area]
-BACKGROUND: [far elements, keep simple]
-PROPS (${propsRange.min}-${propsRange.max}): [list specific props from recurring list]
-COMPOSITION: centered, wide margins, large open coloring areas"
+"SUBJECT: [ONE main character with pose/emotion]
+ACTION: [simple action]
+SETTING: ${themePack?.setting || "[same setting every page]"}
+FOREGROUND: [1-2 items only]
+MIDGROUND: [main subject + 1-2 props]
+BACKGROUND: [almost nothing - 1 cloud or sun max]
+PROPS (${propsRange.min}-${propsRange.max} TOTAL): [list each prop ONCE - no multiples]
+COMPOSITION: centered, wide margins, 70% white space"
 
-EXAMPLE OUTPUT:
-"SUBJECT: Happy bunny with big smile, sitting pose, ears up
-ACTION: Holding a watering can, watering flowers
-SETTING: Sunny Meadow Garden with white picket fence
-FOREGROUND: 3 tulips, grass tufts
-MIDGROUND: Bunny character with watering can
-BACKGROUND: 2 fluffy clouds, sun in corner
-PROPS (5): watering can, 3 tulips, grass tuft, 2 clouds, sun
-COMPOSITION: centered, wide margins, large open coloring areas"
+GOOD EXAMPLE:
+"SUBJECT: Happy bunny with big smile, sitting pose
+ACTION: Holding a carrot
+SETTING: Sunny Garden
+FOREGROUND: 2 flowers, grass tuft
+MIDGROUND: Bunny with carrot
+BACKGROUND: 1 cloud, sun
+PROPS (5): carrot, 2 flowers, grass tuft, 1 cloud, sun
+COMPOSITION: centered, wide margins, 70% white space"
 
-DO NOT include style instructions (no "black and white", "line art", etc).
+BAD EXAMPLE (TOO CLUTTERED - AVOID):
+"SUBJECT: Bunny surrounded by many butterflies
+ACTION: Playing in a field of flowers with lots of decorations
+BACKGROUND: Many clouds, birds everywhere, trees all around"
 
 Return JSON:
 {
@@ -135,11 +146,13 @@ Return JSON:
   ]
 }`;
 
+    logModelUsage("Generate scene prompts", "text", TEXT_MODEL);
+    
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: TEXT_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate ${spec.pageCount} structured scene descriptions for this coloring book.` },
+        { role: "user", content: `Generate ${spec.pageCount} structured scene descriptions for this coloring book. Remember: simple, uncluttered, maximum ${propsRange.max} props per page.` },
       ],
       temperature: 0.7,
       max_tokens: 4000,
