@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
 import { characterLockSchema } from "@/lib/schemas";
-import { buildPrompt, buildStricterSuffix, ANCHOR_REFERENCE_SUFFIX } from "@/lib/promptBuilder";
-import type { GenerationSpec } from "@/lib/generationSpec";
+import { buildImagePrompt, buildStricterSuffix, buildNegativePrompt } from "@/lib/promptBuilder";
+import { processAndValidateImage, checkCharacterMatch, fetchImageAsBase64 } from "@/lib/imageProcessor";
+import type { GenerationSpec, CharacterType } from "@/lib/generationSpec";
 
-// Accept GenerationSpec with anchor support
+// GenerationSpec schema
 const generationSpecSchema = z.object({
   bookMode: z.enum(["series", "collection"]),
   trimSize: z.string(),
@@ -24,16 +25,18 @@ const requestSchema = z.object({
   prompt: z.string().min(1),
   pageNumber: z.number().int().min(1).optional(),
   characterLock: characterLockSchema.optional().nullable(),
-  characterSheetImageUrl: z.string().optional().nullable(),
+  characterType: z.enum(["cat", "dog", "bunny", "bear", "panda", "unicorn", "dragon", "custom"]).optional().nullable(),
+  characterName: z.string().optional().nullable(),
   spec: generationSpecSchema,
-  // Anchor-first workflow
+  // Anchor-first workflow - REQUIRED for non-anchor pages
   anchorImageUrl: z.string().optional().nullable(),
+  anchorImageBase64: z.string().optional().nullable(),
   isAnchorGeneration: z.boolean().optional(),
 });
 
 export type GeneratePageImageRequest = z.infer<typeof requestSchema>;
 
-// Image size mapping - all portrait
+// Image sizes - all portrait
 const SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = {
   "1024x1326": "1024x1792",
   "1024x1280": "1024x1792",
@@ -41,16 +44,7 @@ const SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = {
   "1024x1448": "1024x1792",
 };
 
-// Strict eye and style rules to append
-const STRICT_STYLE_RULES = `
-
-CRITICAL DRAWING RULES:
-1. EYES: Draw as outlines only. Pupils must be TINY dots (2-3px max) or empty. NEVER solid black filled eyes.
-2. HAIR/FUR: Outline individual strands. NEVER fill with solid black.
-3. SHADOWS: Do NOT draw any shadows.
-4. DARK OBJECTS: Outline only, interior must be WHITE for coloring.
-5. LINE CONSISTENCY: All outlines must have consistent thickness throughout.
-6. CLOSED SHAPES: Every shape must be fully closed for coloring.`;
+const MAX_RETRIES = 2;
 
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
@@ -74,44 +68,62 @@ export async function POST(request: NextRequest) {
 
     const { 
       prompt, 
-      pageNumber,
+      pageNumber = 1,
       characterLock, 
+      characterType,
+      characterName,
       spec, 
       anchorImageUrl,
+      anchorImageBase64,
       isAnchorGeneration,
     } = parseResult.data;
 
-    // Build the full prompt with all rules injected
-    let fullPrompt = buildPrompt({
-      sceneDescription: prompt,
-      characterLock,
-      spec: spec as GenerationSpec,
-    });
-
-    // Add strict style rules
-    fullPrompt += STRICT_STYLE_RULES;
-
-    // If we have an anchor and this is NOT the anchor generation, add reference requirement
-    if (anchorImageUrl && !isAnchorGeneration) {
-      fullPrompt += ANCHOR_REFERENCE_SUFFIX;
-      fullPrompt += `\nThis is page ${pageNumber || "N"}. Match the anchor/reference image style EXACTLY.`;
+    // For non-anchor pages in series mode, require anchor
+    const hasAnchor = !!(anchorImageUrl || anchorImageBase64);
+    if (!isAnchorGeneration && spec.bookMode === "series" && !hasAnchor) {
+      return NextResponse.json(
+        { error: "Anchor image required for series mode. Generate and approve Page 1 first." },
+        { status: 400 }
+      );
     }
 
-    // Get the appropriate image size (always portrait)
+    // Build the prompt using the canonical builder
+    let fullPrompt = buildImagePrompt({
+      sceneDescription: prompt,
+      characterType: characterType as CharacterType || undefined,
+      characterName: characterName || undefined,
+      characterLock,
+      spec: spec as GenerationSpec,
+      hasAnchor,
+      isAnchorGeneration,
+    });
+
+    // Get image size (always portrait)
     const imageSize = SIZE_MAP[spec.pixelSize] || "1024x1792";
 
-    let imageUrl: string | undefined;
-    let retryCount = 0;
-    const maxRetries = 2;
-    let lastError: string | undefined;
+    // Fetch anchor as base64 if needed for character matching later
+    let anchorBase64 = anchorImageBase64;
+    if (anchorImageUrl && !anchorBase64) {
+      try {
+        anchorBase64 = await fetchImageAsBase64(anchorImageUrl);
+      } catch (e) {
+        console.warn("Could not fetch anchor image:", e);
+      }
+    }
 
-    while (retryCount <= maxRetries) {
+    let finalImageUrl: string | undefined;
+    let finalImageBase64: string | undefined;
+    let retryCount = 0;
+    let lastFailureReason: "color" | "species" | "blackfill" | undefined;
+
+    while (retryCount <= MAX_RETRIES) {
       try {
         // Add stricter suffix on retries
-        const attemptPrompt = retryCount > 0 
-          ? `${fullPrompt}${buildStricterSuffix()}\n\nSTRICT: Eyes must be OUTLINED only with TINY dot pupils. No solid black eyes!`
+        const attemptPrompt = retryCount > 0 && lastFailureReason
+          ? `${fullPrompt}${buildStricterSuffix(lastFailureReason)}`
           : fullPrompt;
 
+        // Generate image with DALL-E 3
         const response = await openai.images.generate({
           model: "dall-e-3",
           prompt: attemptPrompt,
@@ -121,45 +133,103 @@ export async function POST(request: NextRequest) {
           style: "natural",
         });
 
-        imageUrl = response.data?.[0]?.url;
-
-        if (imageUrl) {
-          break;
+        const rawImageUrl = response.data?.[0]?.url;
+        if (!rawImageUrl) {
+          throw new Error("No image URL in response");
         }
+
+        // === MANDATORY POST-PROCESSING ===
+        // Step 1: Binarize and validate
+        const processResult = await processAndValidateImage(rawImageUrl);
+
+        if (!processResult.passed) {
+          console.log(`Image failed quality check (attempt ${retryCount + 1}):`, processResult.details);
+          lastFailureReason = processResult.failureReason;
+          retryCount++;
+          
+          if (retryCount <= MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, 1500));
+            continue;
+          }
+          
+          // Max retries exceeded
+          return NextResponse.json({
+            error: "Image failed quality check after multiple attempts",
+            failedPrintSafe: true,
+            failureReason: processResult.failureReason,
+            details: processResult.details,
+          }, { status: 422 });
+        }
+
+        // Step 2: Character match check (for series mode, non-anchor pages)
+        if (spec.bookMode === "series" && !isAnchorGeneration && anchorBase64 && characterType) {
+          const matchResult = await checkCharacterMatch(
+            anchorBase64,
+            processResult.binarizedBase64!,
+            characterType,
+            process.env.OPENAI_API_KEY || ""
+          );
+
+          if (!matchResult.sameSpecies) {
+            console.log(`Character species mismatch (attempt ${retryCount + 1}):`, matchResult.notes);
+            lastFailureReason = "species";
+            retryCount++;
+            
+            if (retryCount <= MAX_RETRIES) {
+              await new Promise(r => setTimeout(r, 1500));
+              continue;
+            }
+            
+            // Max retries exceeded
+            return NextResponse.json({
+              error: "Character species mismatch after multiple attempts",
+              failedPrintSafe: true,
+              failureReason: "species",
+              details: matchResult.notes,
+            }, { status: 422 });
+          }
+        }
+
+        // All checks passed!
+        finalImageUrl = rawImageUrl;
+        finalImageBase64 = processResult.binarizedBase64;
+        break;
+
       } catch (genError) {
         console.error(`Image generation attempt ${retryCount + 1} failed:`, genError);
-        lastError = genError instanceof Error ? genError.message : "Generation failed";
-
+        
         if (genError instanceof Error && genError.message.includes("content_policy")) {
           return NextResponse.json(
             { error: "Content policy violation. Please modify the prompt." },
             { status: 400 }
           );
         }
-      }
 
-      retryCount++;
-      if (retryCount <= maxRetries) {
-        await new Promise((r) => setTimeout(r, 1500));
+        retryCount++;
+        if (retryCount <= MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, 1500));
+        }
       }
     }
 
-    if (!imageUrl) {
-      return NextResponse.json(
-        { 
-          error: lastError || "Failed to generate image after multiple attempts",
-          failedPrintSafe: true,
-        },
-        { status: 500 }
-      );
+    if (!finalImageBase64) {
+      return NextResponse.json({
+        error: "Failed to generate valid image after multiple attempts",
+        failedPrintSafe: true,
+      }, { status: 500 });
     }
 
+    // Return the BINARIZED image (guaranteed B/W)
     return NextResponse.json({
-      imageUrl,
+      // Return both URL (for display) and base64 (for storage/processing)
+      imageUrl: finalImageUrl,
+      imageBase64: finalImageBase64,
+      binarized: true,
       retries: retryCount,
       isAnchor: isAnchorGeneration || false,
-      pageNumber: pageNumber || 1,
+      pageNumber,
     });
+
   } catch (error) {
     console.error("Generate page image error:", error);
 

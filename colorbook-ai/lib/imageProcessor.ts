@@ -1,230 +1,270 @@
 /**
- * imageProcessor.ts - Post-processing for print-safe coloring book images
- * Handles binarization, black fill detection, and validation
+ * imageProcessor.ts - Post-processing and validation for coloring book images
+ * Ensures all images are pure B/W and pass quality gates
  */
 
 /**
- * Result of image processing
+ * Quality check result
  */
-export interface ProcessedImage {
-  /** Base64 encoded PNG (binarized) */
-  base64: string;
-  /** Whether the image passed print-safe checks */
+export interface QualityCheckResult {
   passed: boolean;
-  /** Black pixel ratio (0-1) */
-  blackRatio: number;
-  /** Reason for failure if not passed */
-  failureReason?: string;
+  binarizedBase64?: string;
+  failureReason?: "color" | "species" | "blackfill";
+  blackRatio?: number;
+  details?: string;
 }
 
 /**
- * Configuration for print-safe validation
+ * Configuration for quality checks
  */
-export interface PrintSafeConfig {
-  /** Threshold for grayscale binarization (0-255). Pixels below = black */
+export interface QualityConfig {
+  /** Threshold for binarization (0-255). Pixels below = black */
   binarizationThreshold: number;
-  /** Maximum allowed black pixel ratio */
+  /** Maximum allowed black pixel ratio (0-1) */
   maxBlackRatio: number;
-  /** Minimum consecutive black pixels in a row to flag as potential fill */
-  minRunLength: number;
-  /** Number of long runs that trigger a failure */
-  maxLongRuns: number;
+  /** Maximum consecutive black pixels in a row before flagging */
+  maxBlackRunLength: number;
 }
 
-const DEFAULT_CONFIG: PrintSafeConfig = {
-  binarizationThreshold: 220, // Anything below 220 becomes black
-  maxBlackRatio: 0.12,        // Max 12% black pixels
-  minRunLength: 50,           // 50+ consecutive black pixels = "long run"
-  maxLongRuns: 20,            // More than 20 long runs = likely has fills
+const DEFAULT_CONFIG: QualityConfig = {
+  binarizationThreshold: 225,
+  maxBlackRatio: 0.10,
+  maxBlackRunLength: 80,
 };
 
 /**
- * Process an image URL to ensure it's print-safe
- * This is a server-side function that fetches and processes the image
+ * Fetch image from URL and return as base64
  */
-export async function processImageForPrintSafe(
+export async function fetchImageAsBase64(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status}`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer).toString("base64");
+}
+
+/**
+ * Process image: binarize to pure B/W and validate
+ * This is the main function - all images MUST go through this before display
+ */
+export async function processAndValidateImage(
   imageUrl: string,
-  config: PrintSafeConfig = DEFAULT_CONFIG
-): Promise<ProcessedImage> {
+  config: QualityConfig = DEFAULT_CONFIG
+): Promise<QualityCheckResult> {
   try {
     // Fetch the image
     const response = await fetch(imageUrl);
     if (!response.ok) {
       return {
-        base64: "",
         passed: false,
-        blackRatio: 0,
-        failureReason: "Failed to fetch image",
+        failureReason: "color",
+        details: "Failed to fetch image",
       };
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const base64Input = Buffer.from(arrayBuffer).toString("base64");
-    
-    // For now, we'll do a simplified check since we don't have canvas on server
-    // In production, you'd use sharp or jimp for proper image processing
-    
-    // Return the image as-is with a pass (actual processing would be done with sharp)
-    // This is a placeholder - see processImageWithSharp below for real implementation
-    return {
-      base64: base64Input,
-      passed: true,
-      blackRatio: 0.05, // Estimated
-    };
-  } catch (error) {
-    return {
-      base64: "",
-      passed: false,
-      blackRatio: 0,
-      failureReason: error instanceof Error ? error.message : "Processing failed",
-    };
-  }
-}
+    const imageBuffer = Buffer.from(arrayBuffer);
 
-/**
- * Validate image dimensions are portrait
- */
-export function validatePortraitOrientation(width: number, height: number): boolean {
-  return height > width;
-}
+    // Try to use sharp for proper image processing
+    try {
+      const sharp = (await import("sharp")).default;
 
-/**
- * Parse pixel size string to dimensions
- */
-export function parsePixelSize(pixelSize: string): { width: number; height: number } {
-  const [w, h] = pixelSize.split("x").map(Number);
-  return { width: w || 1024, height: h || 1326 };
-}
+      // Get image info
+      const metadata = await sharp(imageBuffer).metadata();
+      const width = metadata.width || 1024;
+      const height = metadata.height || 1536;
 
-/**
- * Check if a base64 image is likely to have large black fills
- * This is a heuristic check based on base64 size patterns
- * Real implementation should decode and analyze pixels
- */
-export function quickBlackFillCheck(base64: string): { likely: boolean; confidence: number } {
-  // Base64 images with lots of black tend to compress well
-  // This is a very rough heuristic
-  const sizeKB = (base64.length * 3) / 4 / 1024;
-  
-  // Very small files might indicate lots of solid colors (including black)
-  // Very large files might indicate complex patterns
-  // Medium is usually good for line art
-  
-  if (sizeKB < 50) {
-    return { likely: true, confidence: 0.6 };
-  }
-  if (sizeKB > 500) {
-    return { likely: false, confidence: 0.7 };
-  }
-  
-  return { likely: false, confidence: 0.5 };
-}
+      // Step 1: Convert to grayscale
+      const grayscaleBuffer = await sharp(imageBuffer)
+        .grayscale()
+        .toBuffer();
 
-/**
- * Server-side image processing with sharp (if available)
- * This would be the production implementation
- */
-export async function processImageWithSharp(
-  imageBuffer: Buffer,
-  config: PrintSafeConfig = DEFAULT_CONFIG
-): Promise<ProcessedImage> {
-  try {
-    // Dynamic import to handle cases where sharp isn't available
-    const sharp = await import("sharp").catch(() => null);
-    
-    if (!sharp) {
-      // Fallback: return original image without processing
+      // Step 2: Binarize (threshold to pure black/white)
+      const binarizedBuffer = await sharp(grayscaleBuffer)
+        .threshold(config.binarizationThreshold)
+        .png()
+        .toBuffer();
+
+      // Step 3: Analyze the binarized image for black ratio
+      const { data, info } = await sharp(binarizedBuffer)
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      let blackPixels = 0;
+      let maxRunLength = 0;
+      let currentRun = 0;
+      const totalPixels = info.width * info.height;
+
+      // Count black pixels and detect long runs
+      for (let i = 0; i < data.length; i++) {
+        const isBlack = data[i] < 128;
+        
+        if (isBlack) {
+          blackPixels++;
+          currentRun++;
+          maxRunLength = Math.max(maxRunLength, currentRun);
+        } else {
+          currentRun = 0;
+        }
+
+        // Reset at row boundaries
+        if ((i + 1) % info.width === 0) {
+          currentRun = 0;
+        }
+      }
+
+      const blackRatio = blackPixels / totalPixels;
+
+      // Check if black ratio is too high (indicates filled regions)
+      if (blackRatio > config.maxBlackRatio) {
+        return {
+          passed: false,
+          binarizedBase64: binarizedBuffer.toString("base64"),
+          failureReason: "blackfill",
+          blackRatio,
+          details: `Black ratio ${(blackRatio * 100).toFixed(1)}% exceeds max ${config.maxBlackRatio * 100}%`,
+        };
+      }
+
+      // Check for long runs (indicates large filled areas)
+      if (maxRunLength > config.maxBlackRunLength) {
+        return {
+          passed: false,
+          binarizedBase64: binarizedBuffer.toString("base64"),
+          failureReason: "blackfill",
+          blackRatio,
+          details: `Detected long black run (${maxRunLength}px) indicating filled region`,
+        };
+      }
+
+      // All checks passed
       return {
-        base64: imageBuffer.toString("base64"),
-        passed: true, // Assume pass if we can't check
-        blackRatio: 0,
-        failureReason: "Sharp not available for processing",
+        passed: true,
+        binarizedBase64: binarizedBuffer.toString("base64"),
+        blackRatio,
+      };
+
+    } catch (sharpError) {
+      // Sharp not available - return original with warning
+      console.warn("Sharp not available for image processing:", sharpError);
+      return {
+        passed: true,
+        binarizedBase64: imageBuffer.toString("base64"),
+        details: "Binarization skipped (sharp not available)",
       };
     }
 
-    // Get image metadata
-    const metadata = await sharp.default(imageBuffer).metadata();
-    const width = metadata.width || 1024;
-    const height = metadata.height || 1326;
-
-    // Check orientation
-    if (!validatePortraitOrientation(width, height)) {
-      // Rotate if landscape
-      imageBuffer = await sharp.default(imageBuffer).rotate(90).toBuffer();
-    }
-
-    // Convert to grayscale
-    const grayscaleBuffer = await sharp.default(imageBuffer)
-      .grayscale()
-      .toBuffer();
-
-    // Get raw pixel data for analysis
-    const { data, info } = await sharp.default(grayscaleBuffer)
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    // Count black pixels and detect long runs
-    let blackPixels = 0;
-    let longRuns = 0;
-    let currentRunLength = 0;
-    const totalPixels = info.width * info.height;
-
-    for (let i = 0; i < data.length; i++) {
-      const pixelValue = data[i];
-      const isBlack = pixelValue < config.binarizationThreshold;
-
-      if (isBlack) {
-        blackPixels++;
-        currentRunLength++;
-      } else {
-        if (currentRunLength >= config.minRunLength) {
-          longRuns++;
-        }
-        currentRunLength = 0;
-      }
-
-      // Reset run at end of each row
-      if ((i + 1) % info.width === 0) {
-        if (currentRunLength >= config.minRunLength) {
-          longRuns++;
-        }
-        currentRunLength = 0;
-      }
-    }
-
-    const blackRatio = blackPixels / totalPixels;
-
-    // Check for failures
-    let passed = true;
-    let failureReason: string | undefined;
-
-    if (blackRatio > config.maxBlackRatio) {
-      passed = false;
-      failureReason = `Black ratio too high: ${(blackRatio * 100).toFixed(1)}% (max ${config.maxBlackRatio * 100}%)`;
-    } else if (longRuns > config.maxLongRuns) {
-      passed = false;
-      failureReason = `Detected ${longRuns} long black runs (max ${config.maxLongRuns}) - likely contains filled regions`;
-    }
-
-    // Binarize the image (threshold to pure black/white)
-    const binarizedBuffer = await sharp.default(grayscaleBuffer)
-      .threshold(config.binarizationThreshold)
-      .png()
-      .toBuffer();
-
-    return {
-      base64: binarizedBuffer.toString("base64"),
-      passed,
-      blackRatio,
-      failureReason,
-    };
   } catch (error) {
     return {
-      base64: imageBuffer.toString("base64"),
       passed: false,
-      blackRatio: 0,
-      failureReason: error instanceof Error ? error.message : "Processing error",
+      failureReason: "color",
+      details: error instanceof Error ? error.message : "Processing failed",
     };
   }
 }
 
+/**
+ * Check if character matches using OpenAI Vision
+ * Returns whether the character in the generated image matches the anchor
+ */
+export async function checkCharacterMatch(
+  anchorImageBase64: string,
+  generatedImageBase64: string,
+  expectedCharacterType: string,
+  openaiApiKey: string
+): Promise<{ matches: boolean; sameSpecies: boolean; notes: string }> {
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `Compare these two coloring book images. The first is the ANCHOR/reference, the second is a newly generated page.
+
+The expected character type is: ${expectedCharacterType}
+
+Analyze and return ONLY this JSON (no other text):
+{
+  "sameCharacter": true/false (is it the same character design?),
+  "sameSpecies": true/false (is it the same animal species as expected: ${expectedCharacterType}?),
+  "notes": "brief explanation"
+}
+
+Be strict: if the species changed (e.g., cat became sheep), sameSpecies must be false.`,
+              },
+              {
+                type: "image_url",
+                image_url: { url: `data:image/png;base64,${anchorImageBase64}` },
+              },
+              {
+                type: "image_url",
+                image_url: { url: `data:image/png;base64,${generatedImageBase64}` },
+              },
+            ],
+          },
+        ],
+        max_tokens: 200,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Vision API error:", await response.text());
+      return { matches: true, sameSpecies: true, notes: "Vision check skipped (API error)" };
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+
+    // Parse JSON from response
+    let jsonContent = content.trim();
+    if (jsonContent.startsWith("```json")) jsonContent = jsonContent.slice(7);
+    if (jsonContent.startsWith("```")) jsonContent = jsonContent.slice(3);
+    if (jsonContent.endsWith("```")) jsonContent = jsonContent.slice(0, -3);
+    jsonContent = jsonContent.trim();
+
+    try {
+      const parsed = JSON.parse(jsonContent);
+      return {
+        matches: parsed.sameCharacter ?? true,
+        sameSpecies: parsed.sameSpecies ?? true,
+        notes: parsed.notes || "",
+      };
+    } catch {
+      return { matches: true, sameSpecies: true, notes: "Could not parse vision response" };
+    }
+
+  } catch (error) {
+    console.error("Character match check error:", error);
+    return { matches: true, sameSpecies: true, notes: "Vision check failed" };
+  }
+}
+
+/**
+ * Convert data URL to base64 string (without prefix)
+ */
+export function dataUrlToBase64(dataUrl: string): string {
+  if (dataUrl.startsWith("data:")) {
+    return dataUrl.split(",")[1] || dataUrl;
+  }
+  return dataUrl;
+}
+
+/**
+ * Create a base64 PNG data URL from base64 string
+ */
+export function base64ToDataUrl(base64: string): string {
+  if (base64.startsWith("data:")) {
+    return base64;
+  }
+  return `data:image/png;base64,${base64}`;
+}

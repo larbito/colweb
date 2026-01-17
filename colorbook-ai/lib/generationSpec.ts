@@ -6,6 +6,19 @@
 export type Complexity = "simple" | "medium" | "detailed";
 export type LineThickness = "thin" | "medium" | "bold";
 export type BookMode = "series" | "collection";
+export type CharacterType = "cat" | "dog" | "bunny" | "bear" | "panda" | "unicorn" | "dragon" | "custom";
+
+/** Character type labels for UI */
+export const CHARACTER_TYPES: { value: CharacterType; label: string; traits: string }[] = [
+  { value: "cat", label: "Cat", traits: "cat ears, whiskers, cat nose, cat tail, paws" },
+  { value: "dog", label: "Dog", traits: "floppy or pointed dog ears, dog nose, dog tail, paws" },
+  { value: "bunny", label: "Bunny", traits: "long bunny ears, small round nose, fluffy tail, paws" },
+  { value: "bear", label: "Bear", traits: "round bear ears, bear nose, small tail, paws" },
+  { value: "panda", label: "Panda", traits: "round panda ears with black patches, panda eye patches, panda nose" },
+  { value: "unicorn", label: "Unicorn", traits: "horn on forehead, horse ears, flowing mane, horse tail, hooves" },
+  { value: "dragon", label: "Dragon", traits: "dragon horns, dragon wings, dragon tail with spikes, scales" },
+  { value: "custom", label: "Custom", traits: "" },
+];
 
 export interface GenerationSpec {
   /** Book mode: series (same character) or collection (varied pages) */
