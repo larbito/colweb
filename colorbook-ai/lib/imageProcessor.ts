@@ -32,11 +32,12 @@ export interface QualityConfig {
   maxBlobPercent: number;
 }
 
-// Strict defaults to catch silhouettes and fills
+// Realistic defaults for coloring book line art
+// Line art typically has 15-40% black pixels for outlines
 const DEFAULT_CONFIG: QualityConfig = {
   binarizationThreshold: 200,
-  maxBlackRatio: 0.10,    // Max 10% black pixels
-  maxBlobPercent: 0.015,  // Max 1.5% for any single blob (catches silhouettes)
+  maxBlackRatio: 0.45,    // Max 45% black pixels (line art is usually 20-35%)
+  maxBlobPercent: 0.05,   // Max 5% for any single blob (catches large silhouettes)
 };
 
 /**
