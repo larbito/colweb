@@ -20,7 +20,7 @@ const generationSpecSchema = z.object({
 const requestSchema = z.object({
   pageNumber: z.number().int().min(1),
   theme: z.string().min(1),
-  characterLock: characterLockSchema.optional(),
+  characterLock: characterLockSchema.optional().nullable(),
   spec: generationSpecSchema,
   previousSceneTitle: z.string(),
   previousPrompt: z.string(),

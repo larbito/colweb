@@ -21,8 +21,8 @@ const generationSpecSchema = z.object({
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
-  characterLock: characterLockSchema.optional(),
-  characterSheetImageUrl: z.string().optional(),
+  characterLock: characterLockSchema.optional().nullable(),
+  characterSheetImageUrl: z.string().optional().nullable(),
   spec: generationSpecSchema,
 });
 

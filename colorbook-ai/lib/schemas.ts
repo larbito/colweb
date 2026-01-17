@@ -12,7 +12,7 @@ export const MAX_PAGES = 80;
 
 export const themeSuggestionRequestSchema = z.object({
   pageGoal: z.enum(["coloring-pages", "book"]).optional(),
-  complexity: z.enum(["kids", "medium", "detailed"]),
+  complexity: z.enum(["simple", "medium", "detailed"]),
   optionalKeywords: z.string().optional(),
 });
 
@@ -61,7 +61,7 @@ export const lockCharacterRequestSchema = z.object({
   theme: z.string().min(1),
   mainCharacterName: z.string().min(1),
   mainCharacterDescription: z.string().min(1),
-  stylePreset: z.enum(["kids", "medium", "detailed"]),
+  stylePreset: z.enum(["simple", "medium", "detailed"]),
   lineThickness: z.enum(["thin", "medium", "bold"]),
 });
 
@@ -100,7 +100,7 @@ export const generatePromptsRequestSchema = z.object({
   theme: z.string().min(1, "Theme is required"),
   mainCharacter: z.string().min(1, "Main character is required"),
   pageCount: z.number().int().min(1).max(MAX_PAGES, `Maximum ${MAX_PAGES} pages allowed`),
-  complexity: z.enum(["kids", "medium", "detailed"]),
+  complexity: z.enum(["simple", "medium", "detailed"]),
   lineThickness: z.enum(["thin", "medium", "bold"]),
   trimSize: z.string().min(1),
   extraNotes: z.string().optional(),
@@ -129,7 +129,7 @@ export type PromptListResponse = z.infer<typeof promptListResponseSchema>;
 
 export const generateImageRequestSchema = z.object({
   prompt: z.string().min(1),
-  complexity: z.enum(["kids", "medium", "detailed"]),
+  complexity: z.enum(["simple", "medium", "detailed"]),
   lineThickness: z.enum(["thin", "medium", "bold"]),
   aspect: z.enum(["portrait", "landscape", "square"]).default("portrait"),
   sizePreset: z.string(),

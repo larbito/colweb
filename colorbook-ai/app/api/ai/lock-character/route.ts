@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     };
 
     const complexityRules = {
-      kids: "Very simple shapes, minimal details, large areas to color, ages 3-6",
+      simple: "Very simple shapes, minimal details, large areas to color, ages 3-6",
       medium: "Moderate detail, balanced complexity, ages 6-12",
       detailed: "Intricate patterns, complex scenes, for teens and adults",
     };

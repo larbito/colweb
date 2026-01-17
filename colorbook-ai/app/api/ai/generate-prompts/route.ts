@@ -21,7 +21,7 @@ const generationSpecSchema = z.object({
 const requestSchema = z.object({
   theme: z.string().min(1),
   mainCharacter: z.string().optional(),
-  characterLock: characterLockSchema.optional(),
+  characterLock: characterLockSchema.optional().nullable(),
   spec: generationSpecSchema,
 });
 
@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
     const parseResult = requestSchema.safeParse(body);
 
     if (!parseResult.success) {
+      console.error("Validation error:", JSON.stringify(parseResult.error.flatten(), null, 2));
       return NextResponse.json(
         { error: "Invalid request", details: parseResult.error.flatten() },
         { status: 400 }

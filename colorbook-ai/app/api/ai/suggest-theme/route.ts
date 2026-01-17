@@ -41,7 +41,7 @@ You MUST return a JSON object with EXACTLY these fields:
 }
 
 RULES:
-- Theme should be suitable for ${complexity === "kids" ? "young children (ages 3-8)" : complexity === "medium" ? "older children and families" : "detailed adult coloring"}
+- Theme should be suitable for ${complexity === "simple" ? "young children (ages 3-8)" : complexity === "medium" ? "older children and families" : "detailed adult coloring"}
 - AVOID any copyrighted or trademarked characters, franchises, or brand names
 - Keep themes friendly, safe, and positive
 - Be creative and unique - avoid clichés
