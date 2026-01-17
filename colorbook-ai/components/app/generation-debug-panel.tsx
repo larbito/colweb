@@ -27,6 +27,9 @@ export interface GenerationDebugInfo {
   binarized?: boolean;
   blackRatio?: number;
   largestBlobPercent?: number;
+  microBlobCount?: number;
+  uniqueColors?: number;
+  complexityUsed?: string;
   
   // Retries
   retryCount?: number;
@@ -121,17 +124,24 @@ export function GenerationDebugPanel({ title = "Generation Debug", debug, classN
           </div>
 
           {/* Post-processing */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <DebugField label="Binarized" value={debug.binarized ? "Yes" : "No"} />
+            <DebugField label="Unique Colors" value={debug.uniqueColors?.toString()} />
+            <DebugField label="Complexity" value={debug.complexityUsed} />
             <DebugField 
               label="Black Ratio" 
               value={debug.blackRatio !== undefined ? `${(debug.blackRatio * 100).toFixed(1)}%` : undefined}
-              warn={debug.blackRatio !== undefined && debug.blackRatio > 0.40}
+              warn={debug.blackRatio !== undefined && debug.blackRatio > 0.25}
             />
             <DebugField 
               label="Largest Blob" 
               value={debug.largestBlobPercent !== undefined ? `${(debug.largestBlobPercent * 100).toFixed(2)}%` : undefined}
               warn={debug.largestBlobPercent !== undefined && debug.largestBlobPercent > 0.03}
+            />
+            <DebugField 
+              label="Micro-blobs" 
+              value={debug.microBlobCount?.toString()}
+              warn={debug.microBlobCount !== undefined && debug.microBlobCount > 1000}
             />
           </div>
 

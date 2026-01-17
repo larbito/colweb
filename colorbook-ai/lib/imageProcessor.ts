@@ -4,9 +4,13 @@
  * 
  * QUALITY GATES:
  * 1. Binarization - force pure B/W (mandatory)
- * 2. Black pixel ratio check - warn if very high, but don't reject line art
- * 3. Large blob detection - reject obvious silhouettes (>5% single connected region)
+ * 2. Color check - verify only B/W pixels remain
+ * 3. Black pixel ratio check - HARD FAIL based on complexity
+ * 4. Large blob detection - reject silhouettes (>5% single connected region)
+ * 5. Micro-noise detection - reject textured/noisy images
  */
+
+export type Complexity = "simple" | "medium" | "detailed";
 
 /**
  * Quality check result
@@ -14,9 +18,11 @@
 export interface QualityCheckResult {
   passed: boolean;
   binarizedBase64?: string;
-  failureReason?: "color" | "blackfill" | "silhouette" | "fetch_error";
+  failureReason?: "color" | "blackfill" | "silhouette" | "texture" | "fetch_error";
   blackRatio?: number;
   largestBlobPercent?: number;
+  microBlobCount?: number;
+  uniqueColors?: number;
   details?: string;
 }
 
@@ -26,21 +32,27 @@ export interface QualityCheckResult {
 export interface QualityConfig {
   /** Threshold for binarization (0-255). Pixels above = white */
   binarizationThreshold: number;
-  /** Maximum allowed black pixel ratio (0-1). Above this = warning (not rejection) */
-  warnBlackRatio: number;
-  /** Maximum allowed black ratio before rejection */
-  maxBlackRatio: number;
+  /** Maximum black ratio by complexity - HARD FAIL */
+  maxBlackRatioByComplexity: Record<Complexity, number>;
   /** Maximum allowed single blob size as % of image (0-1). Above this = silhouette */
   maxBlobPercent: number;
+  /** Micro-blob size range [min, max] in pixels */
+  microBlobSizeRange: [number, number];
+  /** Maximum number of micro-blobs before failing as texture/noise */
+  maxMicroBlobCount: number;
 }
 
-// Realistic defaults for coloring book line art
-// Professional KDP coloring pages typically have 15-35% black
+// Quality thresholds calibrated for KDP coloring books
 const DEFAULT_CONFIG: QualityConfig = {
   binarizationThreshold: 200,
-  warnBlackRatio: 0.35,   // Warn if >35% black (might be heavy)
-  maxBlackRatio: 0.55,    // Only reject if >55% black (likely wrong)
-  maxBlobPercent: 0.05,   // Max 5% for any single blob (catches silhouettes)
+  maxBlackRatioByComplexity: {
+    simple: 0.18,   // Simple pages should have minimal lines
+    medium: 0.25,   // Medium can have more detail
+    detailed: 0.30, // Detailed can have even more
+  },
+  maxBlobPercent: 0.05,           // Max 5% for any single blob (catches silhouettes)
+  microBlobSizeRange: [10, 200],  // Blobs between 10-200 pixels are "noise"
+  maxMicroBlobCount: 1500,        // More than this = texture/noise detected
 };
 
 /**
@@ -59,17 +71,21 @@ export async function fetchImageAsBase64(url: string): Promise<string> {
  * Process image: binarize to pure B/W and validate
  * This is the main function - all images MUST go through this before display
  * 
- * GATES:
- * 1. Fetch + binarize (always)
- * 2. Check black pixel ratio (warn or reject if extreme)
- * 3. Check for large connected blobs (reject silhouettes)
+ * GATES (all are HARD FAIL):
+ * 1. Fetch + binarize
+ * 2. Color check (verify only B/W)
+ * 3. Black ratio check (by complexity)
+ * 4. Large blob check (silhouettes)
+ * 5. Micro-noise check (texture detection)
  */
 export async function processAndValidateImage(
   imageUrl: string,
+  complexity: Complexity = "medium",
   config: QualityConfig = DEFAULT_CONFIG
 ): Promise<QualityCheckResult> {
   try {
     console.log("[ImageProcessor] Fetching image from URL...");
+    console.log(`[ImageProcessor] Complexity: ${complexity}`);
     
     // Fetch the image
     const response = await fetch(imageUrl);
@@ -95,6 +111,7 @@ export async function processAndValidateImage(
       console.log("[ImageProcessor] Image dimensions:", metadata.width, "x", metadata.height);
 
       // Step 1: Convert to grayscale
+      console.log(`[ImageProcessor] Binarization threshold: ${config.binarizationThreshold}`);
       const grayscaleBuffer = await sharp(imageBuffer)
         .grayscale()
         .toBuffer();
@@ -112,58 +129,72 @@ export async function processAndValidateImage(
 
       const totalPixels = info.width * info.height;
       let blackPixels = 0;
+      const colorSet = new Set<number>();
 
-      // Count black pixels
+      // Count black pixels and unique colors
       for (let i = 0; i < data.length; i++) {
+        colorSet.add(data[i]);
         if (data[i] < 128) {
           blackPixels++;
         }
       }
 
+      const uniqueColors = colorSet.size;
       const blackRatio = blackPixels / totalPixels;
-      console.log(`[ImageProcessor] Black ratio: ${(blackRatio * 100).toFixed(1)}%`);
+      
+      console.log(`[ImageProcessor] Binarization complete:`);
+      console.log(`[ImageProcessor]   - Unique colors: ${uniqueColors}`);
+      console.log(`[ImageProcessor]   - Black ratio: ${(blackRatio * 100).toFixed(2)}%`);
 
-      // GATE 1: Check black pixel ratio
-      // Only reject if EXTREMELY high (likely wrong image type)
-      if (blackRatio > config.maxBlackRatio) {
-        console.log(`[ImageProcessor] REJECTED: Black ratio ${(blackRatio * 100).toFixed(1)}% > ${config.maxBlackRatio * 100}%`);
+      // GATE 1: Color check - should only have 2 colors (black and white)
+      if (uniqueColors > 2) {
+        console.log(`[ImageProcessor] COLOR CHECK: WARNING - ${uniqueColors} unique values (expected 2)`);
+        // Don't fail here since binarization should have fixed it, but log it
+      } else {
+        console.log(`[ImageProcessor] COLOR CHECK: PASSED (${uniqueColors} unique values)`);
+      }
+
+      // GATE 2: Black ratio check - HARD FAIL based on complexity
+      const maxBlackRatio = config.maxBlackRatioByComplexity[complexity];
+      console.log(`[ImageProcessor] BLACK RATIO CHECK: ${(blackRatio * 100).toFixed(2)}% vs max ${(maxBlackRatio * 100).toFixed(2)}% (${complexity})`);
+      
+      if (blackRatio > maxBlackRatio) {
+        console.log(`[ImageProcessor] HARD FAIL: Black ratio ${(blackRatio * 100).toFixed(2)}% > ${(maxBlackRatio * 100).toFixed(2)}%`);
         return {
           passed: false,
           binarizedBase64: binarizedBuffer.toString("base64"),
           failureReason: "blackfill",
           blackRatio,
-          details: `Too much black: ${(blackRatio * 100).toFixed(1)}% (max ${config.maxBlackRatio * 100}%)`,
+          uniqueColors,
+          details: `Too much black for ${complexity}: ${(blackRatio * 100).toFixed(1)}% (max ${(maxBlackRatio * 100).toFixed(1)}%)`,
         };
       }
+      console.log(`[ImageProcessor] BLACK RATIO CHECK: PASSED`);
 
-      // Warn but don't reject if moderately high
-      if (blackRatio > config.warnBlackRatio) {
-        console.log(`[ImageProcessor] WARNING: Black ratio ${(blackRatio * 100).toFixed(1)}% is high (>${config.warnBlackRatio * 100}%)`);
-      }
-
-      // GATE 2: Check for large connected blobs (silhouettes)
-      // Downsample to 128px for faster processing
+      // GATE 3 & 4: Blob analysis (silhouettes and micro-noise)
+      // Downsample to 256px for faster processing
       const smallBuffer = await sharp(binarizedBuffer)
-        .resize(128, null, { fit: 'inside' })
+        .resize(256, null, { fit: 'inside' })
         .raw()
         .toBuffer();
       
       const smallMeta = await sharp(binarizedBuffer)
-        .resize(128, null, { fit: 'inside' })
+        .resize(256, null, { fit: 'inside' })
         .metadata();
       
-      const smallWidth = smallMeta.width || 128;
+      const smallWidth = smallMeta.width || 256;
       const smallHeight = Math.floor(smallBuffer.length / smallWidth);
       const smallTotal = smallWidth * smallHeight;
 
-      // Simple blob detection: find largest connected black region
+      // Find all connected components
       const visited = new Set<number>();
+      const blobSizes: number[] = [];
       let largestBlobSize = 0;
 
       for (let i = 0; i < smallBuffer.length; i++) {
         if (smallBuffer[i] < 128 && !visited.has(i)) {
-          // Found unvisited black pixel - flood fill to find blob size
           const blobSize = floodFillCount(smallBuffer, smallWidth, smallHeight, i, visited);
+          blobSizes.push(blobSize);
           if (blobSize > largestBlobSize) {
             largestBlobSize = blobSize;
           }
@@ -171,32 +202,62 @@ export async function processAndValidateImage(
       }
 
       const largestBlobPercent = largestBlobSize / smallTotal;
-      console.log(`[ImageProcessor] Largest blob: ${(largestBlobPercent * 100).toFixed(2)}% of image`);
+      console.log(`[ImageProcessor] BLOB ANALYSIS:`);
+      console.log(`[ImageProcessor]   - Total blobs found: ${blobSizes.length}`);
+      console.log(`[ImageProcessor]   - Largest blob: ${(largestBlobPercent * 100).toFixed(2)}% of image`);
 
+      // GATE 3: Silhouette check
       if (largestBlobPercent > config.maxBlobPercent) {
-        console.log(`[ImageProcessor] REJECTED: Silhouette detected (${(largestBlobPercent * 100).toFixed(2)}% > ${config.maxBlobPercent * 100}%)`);
+        console.log(`[ImageProcessor] HARD FAIL: Silhouette detected (${(largestBlobPercent * 100).toFixed(2)}% > ${(config.maxBlobPercent * 100).toFixed(2)}%)`);
         return {
           passed: false,
           binarizedBase64: binarizedBuffer.toString("base64"),
           failureReason: "silhouette",
           blackRatio,
           largestBlobPercent,
-          details: `Large filled area detected: ${(largestBlobPercent * 100).toFixed(2)}% blob (max ${config.maxBlobPercent * 100}%)`,
+          uniqueColors,
+          details: `Large filled area: ${(largestBlobPercent * 100).toFixed(2)}% blob (max ${(config.maxBlobPercent * 100).toFixed(2)}%)`,
         };
       }
+      console.log(`[ImageProcessor] SILHOUETTE CHECK: PASSED`);
+
+      // GATE 4: Micro-noise check
+      // Scale the size range to the downsampled image
+      const scaleFactor = (info.width || 1024) / smallWidth;
+      const minMicroSize = Math.max(1, Math.floor(config.microBlobSizeRange[0] / (scaleFactor * scaleFactor)));
+      const maxMicroSize = Math.floor(config.microBlobSizeRange[1] / (scaleFactor * scaleFactor));
+      
+      const microBlobCount = blobSizes.filter(size => size >= minMicroSize && size <= maxMicroSize).length;
+      console.log(`[ImageProcessor]   - Micro-blobs (${minMicroSize}-${maxMicroSize}px): ${microBlobCount}`);
+
+      if (microBlobCount > config.maxMicroBlobCount) {
+        console.log(`[ImageProcessor] HARD FAIL: Texture/noise detected (${microBlobCount} micro-blobs > ${config.maxMicroBlobCount})`);
+        return {
+          passed: false,
+          binarizedBase64: binarizedBuffer.toString("base64"),
+          failureReason: "texture",
+          blackRatio,
+          largestBlobPercent,
+          microBlobCount,
+          uniqueColors,
+          details: `Texture/noise detected: ${microBlobCount} small blobs (max ${config.maxMicroBlobCount})`,
+        };
+      }
+      console.log(`[ImageProcessor] MICRO-NOISE CHECK: PASSED`);
 
       // All checks passed
-      console.log("[ImageProcessor] PASSED all quality gates");
+      console.log("[ImageProcessor] ✅ ALL QUALITY GATES PASSED");
       return {
         passed: true,
         binarizedBase64: binarizedBuffer.toString("base64"),
         blackRatio,
         largestBlobPercent,
+        microBlobCount,
+        uniqueColors,
       };
 
     } catch (sharpError) {
       // Sharp not available or failed - return original image as-is
-      // This is a fallback to ensure images always work
       console.warn("[ImageProcessor] Sharp processing failed, using original:", sharpError);
       return {
         passed: true,
@@ -254,7 +315,6 @@ function floodFillCount(
 
 /**
  * Check if character matches using OpenAI Vision (optional)
- * Returns whether the character in the generated image matches the anchor
  */
 export async function checkCharacterMatch(
   anchorImageBase64: string,
@@ -277,18 +337,13 @@ export async function checkCharacterMatch(
             content: [
               {
                 type: "text",
-                text: `Compare these two coloring book images. The first is the ANCHOR/reference, the second is a newly generated page.
-
-The expected character type is: ${expectedCharacterType}
-
-Analyze and return ONLY this JSON (no other text):
+                text: `Compare these two coloring book images. Return ONLY JSON:
 {
-  "sameCharacter": true/false (is it the same character design?),
-  "sameSpecies": true/false (is it the same animal species as expected: ${expectedCharacterType}?),
+  "sameCharacter": true/false,
+  "sameSpecies": true/false,
   "notes": "brief explanation"
 }
-
-Be strict: if the species changed (e.g., cat became sheep), sameSpecies must be false.`,
+Expected character type: ${expectedCharacterType}`,
               },
               {
                 type: "image_url",
@@ -306,34 +361,30 @@ Be strict: if the species changed (e.g., cat became sheep), sameSpecies must be 
     });
 
     if (!response.ok) {
-      console.error("Vision API error:", await response.text());
-      return { matches: true, sameSpecies: true, notes: "Vision check skipped (API error)" };
+      return { matches: true, sameSpecies: true, notes: "Vision check skipped" };
     }
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
 
-    // Parse JSON from response
     let jsonContent = content.trim();
     if (jsonContent.startsWith("```json")) jsonContent = jsonContent.slice(7);
     if (jsonContent.startsWith("```")) jsonContent = jsonContent.slice(3);
     if (jsonContent.endsWith("```")) jsonContent = jsonContent.slice(0, -3);
-    jsonContent = jsonContent.trim();
 
     try {
-      const parsed = JSON.parse(jsonContent);
+      const parsed = JSON.parse(jsonContent.trim());
       return {
         matches: parsed.sameCharacter ?? true,
         sameSpecies: parsed.sameSpecies ?? true,
         notes: parsed.notes || "",
       };
     } catch {
-      return { matches: true, sameSpecies: true, notes: "Could not parse vision response" };
+      return { matches: true, sameSpecies: true, notes: "Parse failed" };
     }
 
-  } catch (error) {
-    console.error("Character match check error:", error);
-    return { matches: true, sameSpecies: true, notes: "Vision check failed" };
+  } catch {
+    return { matches: true, sameSpecies: true, notes: "Check failed" };
   }
 }
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured, IMAGE_MODEL, TEXT_MODEL, logModelUsage } from "@/lib/openai";
 import { z } from "zod";
 import { buildFinalPrompt, simplifyScenePrompt } from "@/lib/styleContract";
-import { processAndValidateImage, fetchImageAsBase64 } from "@/lib/imageProcessor";
+import { processAndValidateImage, fetchImageAsBase64, type Complexity as ImageComplexity } from "@/lib/imageProcessor";
 import type { CharacterType, Complexity, LineThickness } from "@/lib/generationSpec";
 import { themePackSchema } from "@/lib/themePack";
 
@@ -197,7 +197,11 @@ export async function POST(request: NextRequest) {
         console.log(`[Page ${pageNumber}] Got image URL, processing with quality gates...`);
 
         // === MANDATORY POST-PROCESSING + QUALITY GATES ===
-        const processResult = await processAndValidateImage(rawImageUrl);
+        // Pass complexity for black ratio threshold
+        const processResult = await processAndValidateImage(
+          rawImageUrl,
+          currentComplexity as ImageComplexity
+        );
         
         // Store metrics for debug
         blackRatio = processResult.blackRatio;
@@ -205,6 +209,9 @@ export async function POST(request: NextRequest) {
         debugInfo.binarized = true;
         debugInfo.blackRatio = blackRatio;
         debugInfo.largestBlobPercent = largestBlobPercent;
+        debugInfo.microBlobCount = processResult.microBlobCount;
+        debugInfo.uniqueColors = processResult.uniqueColors;
+        debugInfo.complexityUsed = currentComplexity;
 
         // If we have a binarized image and it passed all gates
         if (processResult.passed && processResult.binarizedBase64) {
