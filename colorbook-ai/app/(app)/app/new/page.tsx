@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -24,16 +25,25 @@ import {
   CheckCircle2,
   AlertCircle,
   Copy,
+  Eye,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { MAX_PAGES } from "@/lib/schemas";
 import type {
   ThemeSuggestionResponse,
-  PromptListResponse,
   CharacterLock,
 } from "@/lib/schemas";
 import { TrendingPanel } from "@/components/app/trending-panel";
+import { ImagePreviewModal } from "@/components/app/image-preview-modal";
 import type { TrendingSuggestionResponse } from "@/app/api/ai/suggest-trending/route";
+import {
+  type GenerationSpec,
+  type Complexity,
+  type LineThickness,
+  createSpec,
+  TRIM_TO_PIXELS,
+} from "@/lib/generationSpec";
 
 const steps = [
   { id: 1, label: "Size" },
@@ -50,20 +60,17 @@ const sizes = [
   { value: "A4", label: "A4", desc: "International" },
 ];
 
-const complexities = [
-  { value: "kids" as const, label: "Simple", desc: "Large shapes, easy for kids (ages 3-6)" },
-  { value: "medium" as const, label: "Medium", desc: "Balanced detail (ages 6-12)" },
-  { value: "detailed" as const, label: "Detailed", desc: "Intricate patterns for adults" },
+const complexities: { value: Complexity; label: string; desc: string }[] = [
+  { value: "simple", label: "Simple", desc: "1 subject + 2-4 props, ages 3-6" },
+  { value: "medium", label: "Medium", desc: "1-2 subjects + 4-8 props, ages 6-12" },
+  { value: "detailed", label: "Detailed", desc: "More intricate patterns, older kids/adults" },
 ];
 
-const thicknesses = [
-  { value: "thin" as const, label: "Thin", desc: "Delicate lines" },
-  { value: "medium" as const, label: "Medium", desc: "Standard weight" },
-  { value: "bold" as const, label: "Bold", desc: "Thick, forgiving lines" },
+const thicknesses: { value: LineThickness; label: string; desc: string }[] = [
+  { value: "thin", label: "Thin", desc: "Delicate lines" },
+  { value: "medium", label: "Medium", desc: "Standard weight" },
+  { value: "bold", label: "Bold", desc: "Thick, forgiving lines" },
 ];
-
-type Complexity = "kids" | "medium" | "detailed";
-type Thickness = "thin" | "medium" | "bold";
 
 // Extended PagePrompt with UI state
 interface PromptItem {
@@ -75,17 +82,35 @@ interface PromptItem {
   lastError?: string;
 }
 
+// Image generation state per page
+interface PageImageState {
+  imageUrl?: string;
+  isGenerating: boolean;
+  error?: string;
+  failedPrintSafe?: boolean;
+}
+
 interface FormState {
-  size: string;
+  // Basic settings
+  trimSize: string;
   theme: string;
   characterName: string;
   characterDescription: string;
   pageCount: number;
   complexity: Complexity;
-  thickness: Thickness;
+  lineThickness: LineThickness;
+  
+  // Book options
+  includeBlankBetween: boolean;
+  includeBelongsTo: boolean;
+  includePageNumbers: boolean;
+  includeCopyrightPage: boolean;
+  
+  // Generated content
   prompts: PromptItem[];
-  generatedImages: Record<number, string>;
-  imageErrors: Record<number, string>;
+  pageImages: Record<number, PageImageState>;
+  
+  // Character lock
   characterLock: CharacterLock | null;
   characterSheetUrl: string | null;
 }
@@ -100,30 +125,49 @@ export default function NewBookPage() {
   const [lockingCharacter, setLockingCharacter] = useState(false);
   const [generatingSheet, setGeneratingSheet] = useState(false);
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
-  const [generatingImage, setGeneratingImage] = useState<number | null>(null);
   const [bulkGenerating, setBulkGenerating] = useState(false);
 
-  // Suggestions from AI
+  // AI suggestions
   const [themeSuggestion, setThemeSuggestion] = useState<ThemeSuggestionResponse | null>(null);
   const [trendingSuggestion, setTrendingSuggestion] = useState<TrendingSuggestionResponse | null>(null);
   const [suggestingTrending, setSuggestingTrending] = useState(false);
   const [selectedTrendKeyword, setSelectedTrendKeyword] = useState<string | null>(null);
 
+  // Preview modal
+  const [previewPage, setPreviewPage] = useState<{ pageNumber: number; title: string; imageUrl: string } | null>(null);
+
   // Form state
   const [form, setForm] = useState<FormState>({
-    size: "8.5×11",
+    trimSize: "8.5×11",
     theme: "",
     characterName: "",
     characterDescription: "",
     pageCount: 12,
-    complexity: "kids",
-    thickness: "bold",
+    complexity: "simple",
+    lineThickness: "bold",
+    includeBlankBetween: false,
+    includeBelongsTo: true,
+    includePageNumbers: false,
+    includeCopyrightPage: true,
     prompts: [],
-    generatedImages: {},
-    imageErrors: {},
+    pageImages: {},
     characterLock: null,
     characterSheetUrl: null,
   });
+
+  // Build GenerationSpec from form state
+  const buildSpec = (): GenerationSpec => {
+    return createSpec({
+      trimSize: form.trimSize,
+      complexity: form.complexity,
+      lineThickness: form.lineThickness,
+      pageCount: form.pageCount,
+      includeBlankBetween: form.includeBlankBetween,
+      includeBelongsTo: form.includeBelongsTo,
+      includePageNumbers: form.includePageNumbers,
+      includeCopyrightPage: form.includeCopyrightPage,
+    });
+  };
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -196,7 +240,7 @@ export default function NewBookPage() {
 
       const data: TrendingSuggestionResponse = await response.json();
       setTrendingSuggestion(data);
-      
+
       updateForm("theme", data.theme);
       updateForm("characterName", data.mainCharacterName);
       updateForm("characterDescription", data.mainCharacterDescription);
@@ -230,7 +274,7 @@ export default function NewBookPage() {
           mainCharacterName: form.characterName,
           mainCharacterDescription: form.characterDescription,
           stylePreset: form.complexity,
-          lineThickness: form.thickness,
+          lineThickness: form.lineThickness,
         }),
       });
 
@@ -282,7 +326,7 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Generate All Prompts
+  // AI: Generate All Prompts (uses GenerationSpec)
   // =====================
   const generatePrompts = async () => {
     if (!form.theme || !form.characterName) {
@@ -292,17 +336,16 @@ export default function NewBookPage() {
 
     setGeneratingPrompts(true);
     try {
+      const spec = buildSpec();
+      
       const response = await fetch("/api/ai/generate-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           theme: form.theme,
           mainCharacter: `${form.characterName} - ${form.characterDescription}`,
-          pageCount: form.pageCount,
-          complexity: form.complexity,
-          lineThickness: form.thickness,
-          trimSize: form.size,
           characterLock: form.characterLock,
+          spec,
         }),
       });
 
@@ -311,9 +354,8 @@ export default function NewBookPage() {
         throw new Error(error.error || "Failed to generate prompts");
       }
 
-      const data: PromptListResponse = await response.json();
-      // Convert to PromptItem with unique IDs
-      const promptItems: PromptItem[] = data.pages.map((p) => ({
+      const data = await response.json();
+      const promptItems: PromptItem[] = data.pages.map((p: { pageNumber: number; sceneTitle: string; prompt: string }) => ({
         id: `prompt-${p.pageNumber}-${Date.now()}`,
         pageNumber: p.pageNumber,
         sceneTitle: p.sceneTitle,
@@ -330,13 +372,12 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Regenerate ONE Prompt
+  // AI: Regenerate ONE Prompt (uses GenerationSpec)
   // =====================
   const regenerateOnePrompt = async (pageNumber: number) => {
     const currentPrompt = form.prompts.find((p) => p.pageNumber === pageNumber);
     if (!currentPrompt) return;
 
-    // Set loading state for this row
     setForm((prev) => ({
       ...prev,
       prompts: prev.prompts.map((p) =>
@@ -345,20 +386,18 @@ export default function NewBookPage() {
     }));
 
     try {
+      const spec = buildSpec();
+      
       const response = await fetch("/api/ai/regenerate-one-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pageNumber,
           theme: form.theme,
-          mainCharacter: `${form.characterName} - ${form.characterDescription}`,
           characterLock: form.characterLock,
-          stylePreset: form.complexity,
-          lineThickness: form.thickness,
-          trimSize: form.size,
+          spec,
           previousSceneTitle: currentPrompt.sceneTitle,
           previousPrompt: currentPrompt.prompt,
-          totalPages: form.pageCount,
         }),
       });
 
@@ -368,23 +407,16 @@ export default function NewBookPage() {
       }
 
       const data = await response.json();
-      
-      // Update just this prompt
+
       setForm((prev) => ({
         ...prev,
         prompts: prev.prompts.map((p) =>
           p.pageNumber === pageNumber
-            ? {
-                ...p,
-                sceneTitle: data.sceneTitle,
-                prompt: data.prompt,
-                isRegenerating: false,
-                lastError: undefined,
-              }
+            ? { ...p, sceneTitle: data.sceneTitle, prompt: data.prompt, isRegenerating: false }
             : p
         ),
       }));
-      
+
       toast.success(`Page ${pageNumber} prompt updated!`);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Failed to regenerate";
@@ -399,25 +431,28 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Generate Single Image (using new endpoint)
+  // AI: Generate Single Image (uses GenerationSpec + print-safe pipeline)
   // =====================
   const generateImage = async (pageNumber: number, prompt: string) => {
-    // Require character lock for quality generation
     if (!form.characterLock) {
-      toast.error("Please lock your character first for consistent results", {
+      toast.error("Please lock your character first", {
         description: "Go back to Theme step and click 'Lock Character'",
       });
       return;
     }
 
-    setGeneratingImage(pageNumber);
-    // Clear any previous error
+    // Set loading state
     setForm((prev) => ({
       ...prev,
-      imageErrors: { ...prev.imageErrors, [pageNumber]: "" },
+      pageImages: {
+        ...prev.pageImages,
+        [pageNumber]: { isGenerating: true },
+      },
     }));
 
     try {
+      const spec = buildSpec();
+
       const response = await fetch("/api/ai/generate-page-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -425,9 +460,7 @@ export default function NewBookPage() {
           prompt,
           characterLock: form.characterLock,
           characterSheetImageUrl: form.characterSheetUrl,
-          stylePreset: form.complexity,
-          lineThickness: form.thickness,
-          trimSize: form.size,
+          spec,
         }),
       });
 
@@ -437,23 +470,38 @@ export default function NewBookPage() {
       }
 
       const data = await response.json();
+
       if (data.imageUrl) {
         setForm((prev) => ({
           ...prev,
-          generatedImages: { ...prev.generatedImages, [pageNumber]: data.imageUrl },
-          imageErrors: { ...prev.imageErrors, [pageNumber]: "" },
+          pageImages: {
+            ...prev.pageImages,
+            [pageNumber]: { imageUrl: data.imageUrl, isGenerating: false },
+          },
         }));
         toast.success(`Page ${pageNumber} generated!`);
+      } else if (data.failedPrintSafe) {
+        setForm((prev) => ({
+          ...prev,
+          pageImages: {
+            ...prev.pageImages,
+            [pageNumber]: { isGenerating: false, failedPrintSafe: true, error: "Failed print-safe check" },
+          },
+        }));
+        toast.error("Image failed print-safe check", {
+          description: "Click regenerate to try again",
+        });
       }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : `Failed to generate page ${pageNumber}`;
+      const errorMsg = error instanceof Error ? error.message : "Failed to generate";
       setForm((prev) => ({
         ...prev,
-        imageErrors: { ...prev.imageErrors, [pageNumber]: errorMsg },
+        pageImages: {
+          ...prev.pageImages,
+          [pageNumber]: { isGenerating: false, error: errorMsg },
+        },
       }));
       toast.error(errorMsg);
-    } finally {
-      setGeneratingImage(null);
     }
   };
 
@@ -477,9 +525,9 @@ export default function NewBookPage() {
     toast.info(`Starting generation of ${form.prompts.length} pages...`);
 
     for (const page of form.prompts) {
-      if (!form.generatedImages[page.pageNumber]) {
+      if (!form.pageImages[page.pageNumber]?.imageUrl) {
         await generateImage(page.pageNumber, page.prompt);
-        await new Promise((r) => setTimeout(r, 2000)); // Rate limit delay
+        await new Promise((r) => setTimeout(r, 2500)); // Rate limit
       }
     }
 
@@ -493,7 +541,7 @@ export default function NewBookPage() {
   const canProceed = () => {
     switch (step) {
       case 1:
-        return !!form.size;
+        return !!form.trimSize;
       case 2:
         return !!form.theme && !!form.characterName && !!form.characterDescription && form.pageCount >= 1 && form.pageCount <= MAX_PAGES;
       case 3:
@@ -525,10 +573,15 @@ export default function NewBookPage() {
 
   const copyPrompt = (prompt: string) => {
     navigator.clipboard.writeText(prompt);
-    toast.success("Prompt copied to clipboard!");
+    toast.success("Prompt copied!");
+  };
+
+  const openPreview = (pageNumber: number, title: string, imageUrl: string) => {
+    setPreviewPage({ pageNumber, title, imageUrl });
   };
 
   const isCharacterLocked = !!form.characterLock;
+  const generatedCount = Object.values(form.pageImages).filter((p) => p.imageUrl).length;
 
   return (
     <>
@@ -552,23 +605,28 @@ export default function NewBookPage() {
                       key={size.value}
                       className={cn(
                         "cursor-pointer border-2 transition-all hover:border-primary",
-                        form.size === size.value ? "border-primary bg-primary/5" : "border-border/50"
+                        form.trimSize === size.value ? "border-primary bg-primary/5" : "border-border/50"
                       )}
-                      onClick={() => updateForm("size", size.value)}
+                      onClick={() => updateForm("trimSize", size.value)}
                     >
                       <CardContent className="flex items-center gap-4 p-4">
                         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted font-mono text-xs">
-                          {size.value.split("×")[0]}
+                          {size.value.split("×")[0] || size.value.split("x")[0]}
                         </div>
                         <div className="flex-1">
                           <p className="font-semibold">{size.label}</p>
                           <p className="text-sm text-muted-foreground">{size.desc}</p>
                         </div>
-                        {form.size === size.value && <Check className="h-5 w-5 text-primary" />}
+                        {form.trimSize === size.value && <Check className="h-5 w-5 text-primary" />}
                       </CardContent>
                     </Card>
                   ))}
                 </div>
+                
+                {/* Pixel size info */}
+                <p className="text-center text-xs text-muted-foreground">
+                  Output: {TRIM_TO_PIXELS[form.trimSize] || "1024x1326"} pixels (portrait)
+                </p>
               </div>
             )}
 
@@ -596,26 +654,11 @@ export default function NewBookPage() {
                         <Badge key={i} variant="outline" className="text-xs border-green-500/30">{tag}</Badge>
                       ))}
                     </div>
-                    {trendingSuggestion.exampleScenes && trendingSuggestion.exampleScenes.length > 0 && (
-                      <div>
-                        <p className="mb-1 text-xs font-medium text-muted-foreground">Example Scenes:</p>
-                        <ul className="list-inside list-disc text-xs text-muted-foreground">
-                          {trendingSuggestion.exampleScenes.slice(0, 4).map((scene, i) => (
-                            <li key={i}>{scene}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
                   </div>
                 )}
 
                 <div className="flex justify-center">
-                  <Button
-                    variant="outline"
-                    onClick={suggestTheme}
-                    disabled={suggestingTheme}
-                    className="gap-2 rounded-full"
-                  >
+                  <Button variant="outline" onClick={suggestTheme} disabled={suggestingTheme} className="gap-2 rounded-full">
                     {suggestingTheme ? (
                       <><Loader2 className="h-4 w-4 animate-spin" /> Thinking...</>
                     ) : (
@@ -718,11 +761,7 @@ export default function NewBookPage() {
                     <div className="mt-4">
                       <p className="mb-2 text-xs font-medium text-muted-foreground">Character Reference Sheet:</p>
                       <div className="aspect-[2/3] max-w-xs overflow-hidden rounded-xl border border-border bg-white">
-                        <img
-                          src={form.characterSheetUrl}
-                          alt="Character Sheet"
-                          className="h-full w-full object-contain"
-                        />
+                        <img src={form.characterSheetUrl} alt="Character Sheet" className="h-full w-full object-contain" />
                       </div>
                     </div>
                   )}
@@ -778,9 +817,9 @@ export default function NewBookPage() {
                           key={t.value}
                           className={cn(
                             "cursor-pointer border-2 transition-all hover:border-primary",
-                            form.thickness === t.value ? "border-primary bg-primary/5" : "border-border/50"
+                            form.lineThickness === t.value ? "border-primary bg-primary/5" : "border-border/50"
                           )}
-                          onClick={() => updateForm("thickness", t.value)}
+                          onClick={() => updateForm("lineThickness", t.value)}
                         >
                           <CardContent className="p-4 text-center">
                             <p className="font-semibold">{t.label}</p>
@@ -788,6 +827,43 @@ export default function NewBookPage() {
                           </CardContent>
                         </Card>
                       ))}
+                    </div>
+                  </div>
+
+                  {/* Book Options */}
+                  <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+                    <h3 className="font-semibold">Book Options</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium">Blank pages between content</p>
+                          <p className="text-xs text-muted-foreground">Add separator pages</p>
+                        </div>
+                        <Switch
+                          checked={form.includeBlankBetween}
+                          onCheckedChange={(checked) => updateForm("includeBlankBetween", checked)}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium">"This book belongs to" page</p>
+                          <p className="text-xs text-muted-foreground">Personalization page</p>
+                        </div>
+                        <Switch
+                          checked={form.includeBelongsTo}
+                          onCheckedChange={(checked) => updateForm("includeBelongsTo", checked)}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium">Copyright page</p>
+                          <p className="text-xs text-muted-foreground">Standard KDP requirement</p>
+                        </div>
+                        <Switch
+                          checked={form.includeCopyrightPage}
+                          onCheckedChange={(checked) => updateForm("includeCopyrightPage", checked)}
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -811,7 +887,9 @@ export default function NewBookPage() {
               <div className="space-y-6">
                 <div className="text-center">
                   <h2 className="text-2xl font-semibold">Generate prompts 📝</h2>
-                  <p className="text-muted-foreground">AI will create story-driven prompts for each page</p>
+                  <p className="text-muted-foreground">
+                    AI creates prompts using <strong>{form.complexity}</strong> complexity + <strong>{form.lineThickness}</strong> lines
+                  </p>
                 </div>
 
                 {form.prompts.length === 0 ? (
@@ -826,7 +904,7 @@ export default function NewBookPage() {
                           {generatingPrompts ? (
                             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
                           ) : (
-                            <><Sparkles className="mr-2 h-4 w-4" /> Generate Prompts with AI</>
+                            <><Sparkles className="mr-2 h-4 w-4" /> Generate Prompts</>
                           )}
                         </Button>
                       </CardContent>
@@ -842,21 +920,13 @@ export default function NewBookPage() {
                 ) : (
                   <div className="space-y-3">
                     <div className="flex justify-end">
-                      <Button
-                        variant="outline"
-                        onClick={generatePrompts}
-                        disabled={generatingPrompts}
-                        className="rounded-xl"
-                      >
+                      <Button variant="outline" onClick={generatePrompts} disabled={generatingPrompts} className="rounded-xl">
                         {generatingPrompts ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                         Regenerate All
                       </Button>
                     </div>
                     {form.prompts.map((page) => (
-                      <Card key={page.id} className={cn(
-                        "border-border/50 bg-card/60",
-                        page.lastError && "border-red-500/50"
-                      )}>
+                      <Card key={page.id} className={cn("border-border/50 bg-card/60", page.lastError && "border-red-500/50")}>
                         <CardContent className="p-4">
                           <div className="mb-2 flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
@@ -869,13 +939,7 @@ export default function NewBookPage() {
                               />
                             </div>
                             <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => copyPrompt(page.prompt)}
-                                title="Copy prompt"
-                              >
+                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyPrompt(page.prompt)} title="Copy">
                                 <Copy className="h-3 w-3" />
                               </Button>
                               <Button
@@ -885,11 +949,7 @@ export default function NewBookPage() {
                                 onClick={() => regenerateOnePrompt(page.pageNumber)}
                                 disabled={page.isRegenerating}
                               >
-                                {page.isRegenerating ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <RefreshCw className="h-3 w-3" />
-                                )}
+                                {page.isRegenerating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                                 Regenerate
                               </Button>
                             </div>
@@ -900,9 +960,7 @@ export default function NewBookPage() {
                             className="min-h-[80px] resize-none rounded-xl text-sm"
                             disabled={page.isRegenerating}
                           />
-                          {page.lastError && (
-                            <p className="mt-2 text-xs text-red-500">{page.lastError}</p>
-                          )}
+                          {page.lastError && <p className="mt-2 text-xs text-red-500">{page.lastError}</p>}
                         </CardContent>
                       </Card>
                     ))}
@@ -916,24 +974,18 @@ export default function NewBookPage() {
               <div className="space-y-6">
                 <div className="text-center">
                   <h2 className="text-2xl font-semibold">Generate pages 🚀</h2>
-                  <p className="text-muted-foreground">Generate black & white coloring pages</p>
+                  <p className="text-muted-foreground">Pure black & white line art, portrait orientation</p>
                 </div>
 
-                {/* Character lock warning */}
                 {!isCharacterLocked && (
                   <div className="flex items-start gap-3 rounded-xl border border-red-500/50 bg-red-500/10 p-4">
                     <AlertCircle className="h-5 w-5 shrink-0 text-red-600" />
                     <div>
                       <p className="font-medium text-red-700 dark:text-red-400">Character Lock Required</p>
                       <p className="text-sm text-muted-foreground">
-                        You must lock your character before generating images. This ensures consistent black & white line art across all pages.
+                        Lock your character before generating to ensure consistent black & white line art.
                       </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-2"
-                        onClick={() => setStep(2)}
-                      >
+                      <Button variant="outline" size="sm" className="mt-2" onClick={() => setStep(2)}>
                         Go to Theme Step
                       </Button>
                     </div>
@@ -944,11 +996,11 @@ export default function NewBookPage() {
                   <CardContent className="grid gap-4 p-6 sm:grid-cols-2">
                     <div>
                       <p className="text-xs text-muted-foreground">Size</p>
-                      <p className="font-medium">{form.size}</p>
+                      <p className="font-medium">{form.trimSize} ({TRIM_TO_PIXELS[form.trimSize]})</p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground">Pages</p>
-                      <p className="font-medium">{form.prompts.length}</p>
+                      <p className="text-xs text-muted-foreground">Style</p>
+                      <p className="font-medium">{form.complexity} / {form.lineThickness} lines</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Theme</p>
@@ -967,7 +1019,7 @@ export default function NewBookPage() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-muted-foreground">
-                      Generated: {Object.keys(form.generatedImages).length} / {form.prompts.length}
+                      Generated: {generatedCount} / {form.prompts.length}
                     </p>
                     <Button
                       onClick={startBulkGeneration}
@@ -983,51 +1035,73 @@ export default function NewBookPage() {
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {form.prompts.map((page) => (
-                      <Card key={page.id} className={cn(
-                        "overflow-hidden border-border/50",
-                        form.imageErrors[page.pageNumber] && "border-red-500/50"
-                      )}>
-                        <div className="aspect-[8.5/11] bg-white">
-                          {form.generatedImages[page.pageNumber] ? (
-                            <img
-                              src={form.generatedImages[page.pageNumber]}
-                              alt={`Page ${page.pageNumber}`}
-                              className="h-full w-full object-contain"
-                            />
-                          ) : generatingImage === page.pageNumber ? (
-                            <div className="flex h-full flex-col items-center justify-center gap-2 bg-muted">
-                              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                              <p className="text-xs text-muted-foreground">Generating B&W line art...</p>
-                            </div>
-                          ) : (
-                            <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-muted">
-                              <ImageIcon className="mb-2 h-8 w-8 text-muted-foreground" />
-                              <p className="text-xs text-muted-foreground">Page {page.pageNumber}</p>
-                              {form.imageErrors[page.pageNumber] && (
-                                <p className="mt-2 text-xs text-red-500">{form.imageErrors[page.pageNumber]}</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <CardContent className="p-3">
-                          <p className="mb-2 truncate text-xs font-medium">{page.sceneTitle}</p>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full rounded-lg text-xs"
-                            onClick={() => generateImage(page.pageNumber, page.prompt)}
-                            disabled={generatingImage === page.pageNumber || bulkGenerating || !isCharacterLocked}
-                          >
-                            {form.generatedImages[page.pageNumber] ? (
-                              <><RefreshCw className="mr-1 h-3 w-3" /> Regenerate</>
+                    {form.prompts.map((page) => {
+                      const pageState = form.pageImages[page.pageNumber];
+                      const hasImage = !!pageState?.imageUrl;
+                      const isGenerating = pageState?.isGenerating;
+                      const hasError = !!pageState?.error;
+                      const failedPrintSafe = pageState?.failedPrintSafe;
+
+                      return (
+                        <Card key={page.id} className={cn("overflow-hidden border-border/50", hasError && "border-red-500/50")}>
+                          <div className="aspect-[2/3] bg-white relative" style={{ objectFit: "contain" }}>
+                            {hasImage ? (
+                              <img
+                                src={pageState.imageUrl}
+                                alt={`Page ${page.pageNumber}`}
+                                className="h-full w-full object-contain"
+                                style={{ imageRendering: "auto" }}
+                              />
+                            ) : isGenerating ? (
+                              <div className="flex h-full flex-col items-center justify-center gap-2 bg-muted">
+                                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                <p className="text-xs text-muted-foreground">Generating B&W line art...</p>
+                              </div>
+                            ) : failedPrintSafe ? (
+                              <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-red-50 dark:bg-red-900/10">
+                                <AlertTriangle className="mb-2 h-8 w-8 text-red-500" />
+                                <p className="text-xs font-medium text-red-600">Failed print-safe check</p>
+                                <p className="text-xs text-muted-foreground">Click regenerate</p>
+                              </div>
                             ) : (
-                              <><Sparkles className="mr-1 h-3 w-3" /> Generate</>
+                              <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-muted">
+                                <ImageIcon className="mb-2 h-8 w-8 text-muted-foreground" />
+                                <p className="text-xs text-muted-foreground">Page {page.pageNumber}</p>
+                                {pageState?.error && <p className="mt-2 text-xs text-red-500">{pageState.error}</p>}
+                              </div>
                             )}
-                          </Button>
-                        </CardContent>
-                      </Card>
-                    ))}
+                          </div>
+                          <CardContent className="p-3">
+                            <p className="mb-2 truncate text-xs font-medium">{page.sceneTitle}</p>
+                            <div className="flex gap-2">
+                              {hasImage && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="flex-1 rounded-lg text-xs"
+                                  onClick={() => openPreview(page.pageNumber, page.sceneTitle, pageState.imageUrl!)}
+                                >
+                                  <Eye className="mr-1 h-3 w-3" /> Preview
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="flex-1 rounded-lg text-xs"
+                                onClick={() => generateImage(page.pageNumber, page.prompt)}
+                                disabled={isGenerating || bulkGenerating || !isCharacterLocked}
+                              >
+                                {hasImage ? (
+                                  <><RefreshCw className="mr-1 h-3 w-3" /> Regen</>
+                                ) : (
+                                  <><Sparkles className="mr-1 h-3 w-3" /> Generate</>
+                                )}
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -1036,20 +1110,11 @@ export default function NewBookPage() {
 
           {/* Navigation */}
           <div className="flex items-center justify-between border-t border-border pt-6">
-            <Button
-              variant="outline"
-              onClick={() => setStep((s) => Math.max(1, s - 1))}
-              disabled={step === 1}
-              className="rounded-xl"
-            >
+            <Button variant="outline" onClick={() => setStep((s) => Math.max(1, s - 1))} disabled={step === 1} className="rounded-xl">
               <ArrowLeft className="mr-2 h-4 w-4" /> Back
             </Button>
             {step < 5 ? (
-              <Button
-                onClick={() => setStep((s) => Math.min(5, s + 1))}
-                disabled={!canProceed()}
-                className="rounded-xl"
-              >
+              <Button onClick={() => setStep((s) => Math.min(5, s + 1))} disabled={!canProceed()} className="rounded-xl">
                 Next <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             ) : (
@@ -1066,6 +1131,17 @@ export default function NewBookPage() {
           </div>
         </div>
       </main>
+
+      {/* Preview Modal */}
+      {previewPage && (
+        <ImagePreviewModal
+          isOpen={!!previewPage}
+          onClose={() => setPreviewPage(null)}
+          imageUrl={previewPage.imageUrl}
+          title={previewPage.title}
+          pageNumber={previewPage.pageNumber}
+        />
+      )}
     </>
   );
 }

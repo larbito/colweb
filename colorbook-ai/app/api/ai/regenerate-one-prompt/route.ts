@@ -3,17 +3,27 @@ import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
 import { characterLockSchema } from "@/lib/schemas";
 
+// Accept GenerationSpec directly
+const generationSpecSchema = z.object({
+  trimSize: z.string(),
+  pixelSize: z.string(),
+  complexity: z.enum(["simple", "medium", "detailed"]),
+  lineThickness: z.enum(["thin", "medium", "bold"]),
+  pageCount: z.number().int().min(1).max(80),
+  includeBlankBetween: z.boolean(),
+  includeBelongsTo: z.boolean(),
+  includePageNumbers: z.boolean(),
+  includeCopyrightPage: z.boolean(),
+  stylePreset: z.literal("kids-kdp"),
+});
+
 const requestSchema = z.object({
   pageNumber: z.number().int().min(1),
   theme: z.string().min(1),
-  mainCharacter: z.string().optional(),
   characterLock: characterLockSchema.optional(),
-  stylePreset: z.enum(["kids", "medium", "detailed"]),
-  lineThickness: z.enum(["thin", "medium", "bold"]),
-  trimSize: z.string(),
+  spec: generationSpecSchema,
   previousSceneTitle: z.string(),
   previousPrompt: z.string(),
-  totalPages: z.number().int().min(1).optional(),
 });
 
 const responseSchema = z.object({
@@ -22,7 +32,21 @@ const responseSchema = z.object({
   prompt: z.string(),
 });
 
+export type RegenerateOnePromptRequest = z.infer<typeof requestSchema>;
 export type RegenerateOnePromptResponse = z.infer<typeof responseSchema>;
+
+// Complexity guidelines
+const COMPLEXITY_GUIDE = {
+  simple: "1 main subject + 2-4 simple props, minimal/no background, very large coloring areas",
+  medium: "1-2 subjects + 4-8 props, light simple background, moderate detail",
+  detailed: "1-2 subjects + 8-12 props, more intricate patterns but still NO shading",
+};
+
+const LINE_GUIDE = {
+  thin: "medium outer lines, thin inner details",
+  medium: "thick outer lines, medium inner details",
+  bold: "very thick outer lines, thick inner details",
+};
 
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
@@ -46,30 +70,14 @@ export async function POST(request: NextRequest) {
     const {
       pageNumber,
       theme,
-      mainCharacter,
       characterLock,
-      stylePreset,
-      lineThickness,
-      trimSize,
+      spec,
       previousSceneTitle,
       previousPrompt,
-      totalPages,
     } = parseResult.data;
 
-    const complexityGuide = {
-      kids: "Very simple shapes, minimal details, large areas to color, ages 3-6",
-      medium: "Moderate detail, balanced complexity, ages 6-12",
-      detailed: "Intricate patterns, complex scenes, for teens and adults",
-    };
-
-    const lineGuide = {
-      thin: "delicate thin outlines",
-      medium: "standard medium-weight outlines",
-      bold: "thick bold outlines suitable for younger children",
-    };
-
     // Build character section
-    let characterSection = mainCharacter ? `MAIN CHARACTER: ${mainCharacter}` : "";
+    let characterSection = "";
     if (characterLock) {
       characterSection = `
 MAIN CHARACTER (LOCKED - MUST BE IDENTICAL):
@@ -80,39 +88,43 @@ Unique Features: ${characterLock.visualRules.uniqueFeatures.join(", ")}
 Outfit: ${characterLock.visualRules.outfit}`;
     }
 
-    const systemPrompt = `You are a coloring book prompt writer. Generate ONE replacement prompt for page ${pageNumber}.
+    const systemPrompt = `You are a coloring book prompt writer. Generate ONE replacement prompt for page ${pageNumber} of ${spec.pageCount}.
 
 THEME: ${theme}
 ${characterSection}
-STYLE: ${complexityGuide[stylePreset]}, ${lineGuide[lineThickness]}
-PAGE SIZE: ${trimSize}
-${totalPages ? `TOTAL PAGES IN BOOK: ${totalPages}` : ""}
 
-The previous prompt was:
+GENERATION SPEC:
+- Complexity: ${spec.complexity} - ${COMPLEXITY_GUIDE[spec.complexity]}
+- Line Thickness: ${spec.lineThickness} - ${LINE_GUIDE[spec.lineThickness]}
+- Trim Size: ${spec.trimSize}
+
+The previous prompt for this page was:
 Title: "${previousSceneTitle}"
 Prompt: "${previousPrompt}"
 
-Generate a NEW, DIFFERENT scene for this page number that:
-1. Fits the same theme and story arc
-2. Features the SAME main character with IDENTICAL visual appearance
-3. Is suitable for black & white line art coloring
-4. Has NO text, letters, numbers, or watermarks in the image
-5. Uses simple background appropriate for coloring
+Generate a NEW, DIFFERENT scene for page ${pageNumber} that:
+1. Is different from the previous prompt
+2. Fits the theme and story arc (page ${pageNumber} of ${spec.pageCount})
+3. Features the SAME main character with IDENTICAL appearance
+4. Matches complexity level: "${spec.complexity}"
+5. Suitable for black & white line art coloring
+6. NO text, letters, numbers in the image
+7. Portrait orientation composition
 
 Return ONLY this JSON:
 {
   "pageNumber": ${pageNumber},
-  "sceneTitle": "Short descriptive title",
-  "prompt": "Detailed scene description for the image generator..."
+  "sceneTitle": "Short 3-5 word title",
+  "prompt": "Detailed scene description..."
 }`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate a new prompt for page ${pageNumber}, different from the previous one.` },
+        { role: "user", content: `Generate a new, different prompt for page ${pageNumber}.` },
       ],
-      temperature: 0.8,
+      temperature: 0.85,
       max_tokens: 400,
     });
 
@@ -154,4 +166,3 @@ Return ONLY this JSON:
     );
   }
 }
-

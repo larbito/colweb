@@ -1,11 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
-import {
-  generatePromptsRequestSchema,
-  promptListResponseSchema,
-  type PromptListResponse,
-  MAX_PAGES,
-} from "@/lib/schemas";
+import { z } from "zod";
+import { characterLockSchema } from "@/lib/schemas";
+import type { GenerationSpec } from "@/lib/generationSpec";
+
+// Accept GenerationSpec directly
+const generationSpecSchema = z.object({
+  trimSize: z.string(),
+  pixelSize: z.string(),
+  complexity: z.enum(["simple", "medium", "detailed"]),
+  lineThickness: z.enum(["thin", "medium", "bold"]),
+  pageCount: z.number().int().min(1).max(80),
+  includeBlankBetween: z.boolean(),
+  includeBelongsTo: z.boolean(),
+  includePageNumbers: z.boolean(),
+  includeCopyrightPage: z.boolean(),
+  stylePreset: z.literal("kids-kdp"),
+});
+
+const requestSchema = z.object({
+  theme: z.string().min(1),
+  mainCharacter: z.string().optional(),
+  characterLock: characterLockSchema.optional(),
+  spec: generationSpecSchema,
+});
+
+const pagePromptSchema = z.object({
+  pageNumber: z.number(),
+  sceneTitle: z.string(),
+  prompt: z.string(),
+});
+
+const responseSchema = z.object({
+  pages: z.array(pagePromptSchema),
+});
+
+export type PromptGenerationRequest = z.infer<typeof requestSchema>;
+export type PromptListResponse = z.infer<typeof responseSchema>;
+
+// Complexity guidelines for prompt generation
+const COMPLEXITY_GUIDE = {
+  simple: "1 main subject + 2-4 simple props, minimal/no background, very large coloring areas",
+  medium: "1-2 subjects + 4-8 props, light simple background, moderate detail",
+  detailed: "1-2 subjects + 8-12 props, more intricate patterns but still NO shading",
+};
+
+const LINE_GUIDE = {
+  thin: "medium outer lines, thin inner details",
+  medium: "thick outer lines, medium inner details", 
+  bold: "very thick outer lines, thick inner details - forgiving for young children",
+};
 
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
@@ -17,8 +61,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
+    const parseResult = requestSchema.safeParse(body);
 
-    const parseResult = generatePromptsRequestSchema.safeParse(body);
     if (!parseResult.success) {
       return NextResponse.json(
         { error: "Invalid request", details: parseResult.error.flatten() },
@@ -26,76 +70,70 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { theme, mainCharacter, pageCount, complexity, lineThickness, trimSize, extraNotes, characterLock } =
-      parseResult.data;
+    const { theme, mainCharacter, characterLock, spec } = parseResult.data;
 
-    if (pageCount > MAX_PAGES) {
-      return NextResponse.json({ error: `Maximum ${MAX_PAGES} pages allowed` }, { status: 400 });
-    }
-
-    const complexityGuide = {
-      kids: "Simple shapes, minimal details, large areas to color, very basic backgrounds",
-      medium: "Moderate detail, balanced complexity, some background elements",
-      detailed: "Intricate patterns, complex scenes, detailed backgrounds suitable for adults",
-    };
-
-    const lineGuide = {
-      thin: "delicate thin outlines",
-      medium: "standard medium-weight outlines",
-      bold: "thick bold outlines suitable for younger children",
-    };
-
-    // Build character consistency section
-    let characterSection = `MAIN CHARACTER: ${mainCharacter}`;
+    // Build character section for system prompt
+    let characterSection = mainCharacter ? `MAIN CHARACTER: ${mainCharacter}` : "";
     if (characterLock) {
       characterSection = `
-MAIN CHARACTER (LOCKED - MUST BE IDENTICAL IN ALL SCENES):
+MAIN CHARACTER (LOCKED - ALL PAGES MUST SHOW THIS EXACT CHARACTER):
 Name: ${characterLock.canonicalName}
-Proportions: ${characterLock.visualRules.proportions}
+Body: ${characterLock.visualRules.proportions}
 Face: ${characterLock.visualRules.face}
 Unique Features: ${characterLock.visualRules.uniqueFeatures.join(", ")}
 Outfit: ${characterLock.visualRules.outfit}
 
-CRITICAL: The character MUST look EXACTLY the same in every scene - same proportions, same features, same outfit.`;
+IMPORTANT: The character MUST look IDENTICAL on every page - same face, same body proportions, same outfit, same features.`;
     }
 
-    const systemPrompt = `You are an expert coloring book prompt writer.
-Generate ${pageCount} sequential scene prompts for a cohesive coloring book story.
+    const systemPrompt = `You are a children's coloring book prompt writer creating a ${spec.pageCount}-page story series.
 
 THEME: ${theme}
 ${characterSection}
-STYLE: ${complexityGuide[complexity]}, ${lineGuide[lineThickness]}
-PAGE SIZE: ${trimSize}
-${extraNotes ? `ADDITIONAL NOTES: ${extraNotes}` : ""}
 
-CRITICAL RULES FOR EACH PROMPT:
-1. Black and white line art ONLY - no shading, no grayscale, no gradients
-2. NO text, letters, numbers, logos, or watermarks in the image
-3. Clean, closed outlines perfect for coloring
-4. Centered subject composition with print-friendly framing
-5. Keep the main character VISUALLY IDENTICAL across all pages
-6. Each prompt describes ONE clear scene/composition
-7. Include simple background elements appropriate to complexity level
-8. Make it a cohesive story with a beginning, middle, and end
+GENERATION SPEC:
+- Trim Size: ${spec.trimSize}
+- Complexity: ${spec.complexity} - ${COMPLEXITY_GUIDE[spec.complexity]}
+- Line Thickness: ${spec.lineThickness} - ${LINE_GUIDE[spec.lineThickness]}
 
-Return ONLY this JSON structure:
+YOUR TASK:
+Generate ${spec.pageCount} scene prompts that form a cohesive story arc. Each prompt describes ONE coloring page.
+
+RULES FOR EACH PROMPT:
+1. Feature the main character prominently
+2. Describe a SINGLE clear scene/moment
+3. Match the complexity level: "${spec.complexity}"
+4. Suitable for black & white LINE ART coloring page
+5. NO text, speech bubbles, or written words in the scene
+6. Include 1-2 simple background elements appropriate to complexity
+7. Keep scenes varied but connected (story progression)
+8. Portrait orientation - vertical composition
+
+COMPLEXITY "${spec.complexity}" MEANS:
+${COMPLEXITY_GUIDE[spec.complexity]}
+
+Return a JSON object with this exact structure:
 {
   "pages": [
-    { "pageNumber": 1, "sceneTitle": "Short title", "prompt": "Detailed scene description for the image generator..." },
+    {
+      "pageNumber": 1,
+      "sceneTitle": "Short 3-5 word title",
+      "prompt": "Detailed scene description for image generation..."
+    },
     ...
   ]
 }
 
-Generate exactly ${pageCount} pages starting at pageNumber 1.`;
+Each prompt should be 2-4 sentences describing exactly what appears in the scene.`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate ${pageCount} coloring page prompts for this story.` },
+        { role: "user", content: `Generate ${spec.pageCount} coloring page prompts for this coloring book.` },
       ],
       temperature: 0.7,
-      max_tokens: pageCount * 200,
+      max_tokens: 4000,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -118,17 +156,19 @@ Generate exactly ${pageCount} pages starting at pageNumber 1.`;
       if (jsonMatch) {
         parsed = JSON.parse(jsonMatch[0]);
       } else {
-        return NextResponse.json({ error: "Invalid JSON from AI" }, { status: 500 });
+        return NextResponse.json({ error: "Failed to parse AI response" }, { status: 500 });
       }
     }
 
-    const validationResult = promptListResponseSchema.safeParse(parsed);
+    const validationResult = responseSchema.safeParse(parsed);
     if (!validationResult.success) {
-      console.error("Prompts validation failed:", validationResult.error);
-      return NextResponse.json({ error: "AI response did not match expected format" }, { status: 500 });
+      return NextResponse.json(
+        { error: "AI response format invalid", details: validationResult.error.flatten() },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json(validationResult.data satisfies PromptListResponse);
+    return NextResponse.json(validationResult.data);
   } catch (error) {
     console.error("Generate prompts error:", error);
     return NextResponse.json(
