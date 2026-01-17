@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
-import { characterLockSchema } from "@/lib/schemas";
 
-// Accept GenerationSpec directly
+// GenerationSpec schema
 const generationSpecSchema = z.object({
   bookMode: z.enum(["series", "collection"]),
   trimSize: z.string(),
@@ -21,32 +20,27 @@ const generationSpecSchema = z.object({
 const requestSchema = z.object({
   pageNumber: z.number().int().min(1),
   theme: z.string().min(1),
-  characterLock: characterLockSchema.optional().nullable(),
+  mainCharacter: z.string().optional(),
+  characterType: z.string().optional(),
   spec: generationSpecSchema,
   previousSceneTitle: z.string(),
-  previousPrompt: z.string(),
+  previousScenePrompt: z.string(),
 });
 
+// Response returns scenePrompt only
 const responseSchema = z.object({
   pageNumber: z.number(),
   sceneTitle: z.string(),
-  prompt: z.string(),
+  scenePrompt: z.string(),
 });
 
-export type RegenerateOnePromptRequest = z.infer<typeof requestSchema>;
-export type RegenerateOnePromptResponse = z.infer<typeof responseSchema>;
+export type RegenerateSceneResponse = z.infer<typeof responseSchema>;
 
-// Complexity guidelines
-const COMPLEXITY_GUIDE = {
-  simple: "1 main subject + 2-4 simple props, minimal/no background, very large coloring areas",
-  medium: "1-2 subjects + 4-8 props, light simple background, moderate detail",
-  detailed: "1-2 subjects + 8-12 props, more intricate patterns but still NO shading",
-};
-
-const LINE_GUIDE = {
-  thin: "medium outer lines, thin inner details",
-  medium: "thick outer lines, medium inner details",
-  bold: "very thick outer lines, thick inner details",
+// Complexity guide
+const COMPLEXITY_PROPS = {
+  simple: "2-4 props",
+  medium: "4-6 props",
+  detailed: "6-8 props",
 };
 
 export async function POST(request: NextRequest) {
@@ -62,6 +56,7 @@ export async function POST(request: NextRequest) {
     const parseResult = requestSchema.safeParse(body);
 
     if (!parseResult.success) {
+      console.error("Validation error:", JSON.stringify(parseResult.error.flatten(), null, 2));
       return NextResponse.json(
         { error: "Invalid request", details: parseResult.error.flatten() },
         { status: 400 }
@@ -71,62 +66,51 @@ export async function POST(request: NextRequest) {
     const {
       pageNumber,
       theme,
-      characterLock,
+      mainCharacter,
+      characterType,
       spec,
       previousSceneTitle,
-      previousPrompt,
+      previousScenePrompt,
     } = parseResult.data;
 
-    // Build character section
-    let characterSection = "";
-    if (characterLock) {
-      characterSection = `
-MAIN CHARACTER (LOCKED - MUST BE IDENTICAL):
-Name: ${characterLock.canonicalName}
-Proportions: ${characterLock.visualRules.proportions}
-Face: ${characterLock.visualRules.face}
-Unique Features: ${characterLock.visualRules.uniqueFeatures.join(", ")}
-Outfit: ${characterLock.visualRules.outfit}`;
-    }
+    const propsGuide = COMPLEXITY_PROPS[spec.complexity];
+    const characterDesc = mainCharacter ? mainCharacter : "the main character";
 
-    const systemPrompt = `You are a coloring book prompt writer. Generate ONE replacement prompt for page ${pageNumber} of ${spec.pageCount}.
+    const systemPrompt = `You are a scene planner for a children's coloring book.
 
 THEME: ${theme}
-${characterSection}
+MAIN CHARACTER: ${characterDesc}${characterType ? ` (a ${characterType})` : ""}
+PAGE: ${pageNumber} of ${spec.pageCount}
+PROPS PER PAGE: ${propsGuide}
 
-GENERATION SPEC:
-- Complexity: ${spec.complexity} - ${COMPLEXITY_GUIDE[spec.complexity]}
-- Line Thickness: ${spec.lineThickness} - ${LINE_GUIDE[spec.lineThickness]}
-- Trim Size: ${spec.trimSize}
-
-The previous prompt for this page was:
+The previous scene idea was:
 Title: "${previousSceneTitle}"
-Prompt: "${previousPrompt}"
+Scene: "${previousScenePrompt}"
 
-Generate a NEW, DIFFERENT scene for page ${pageNumber} that:
-1. Is different from the previous prompt
-2. Fits the theme and story arc (page ${pageNumber} of ${spec.pageCount})
-3. Features the SAME main character with IDENTICAL appearance
-4. Matches complexity level: "${spec.complexity}"
-5. Suitable for black & white line art coloring
-6. NO text, letters, numbers in the image
-7. Portrait orientation composition
+Generate a NEW, DIFFERENT scene idea for page ${pageNumber}.
+
+SCENE IDEA FORMAT (STRICT):
+- 1-2 sentences MAXIMUM
+- Describe: character + action + setting + ${propsGuide}
+- List specific props by name and count
+- NO style language (no "black and white", "line art", etc.)
+- Make it different from the previous scene
 
 Return ONLY this JSON:
 {
   "pageNumber": ${pageNumber},
   "sceneTitle": "Short 3-5 word title",
-  "prompt": "Detailed scene description..."
+  "scenePrompt": "1-2 sentence scene idea with props list"
 }`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate a new, different prompt for page ${pageNumber}.` },
+        { role: "user", content: `Generate a new scene idea for page ${pageNumber}.` },
       ],
       temperature: 0.85,
-      max_tokens: 400,
+      max_tokens: 300,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -160,9 +144,9 @@ Return ONLY this JSON:
 
     return NextResponse.json(validationResult.data);
   } catch (error) {
-    console.error("Regenerate one prompt error:", error);
+    console.error("Regenerate scene error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to regenerate prompt" },
+      { error: error instanceof Error ? error.message : "Failed to regenerate scene" },
       { status: 500 }
     );
   }

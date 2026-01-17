@@ -50,6 +50,7 @@ import {
   TRIM_TO_PIXELS,
   CHARACTER_TYPES,
 } from "@/lib/generationSpec";
+import { getStyleContractSummary, PANDACORN_STYLE_CONTRACT } from "@/lib/styleContract";
 
 const steps = [
   { id: 1, label: "Setup" },
@@ -78,12 +79,14 @@ const thicknesses: { value: LineThickness; label: string; desc: string }[] = [
   { value: "bold", label: "Bold", desc: "Thick, forgiving lines" },
 ];
 
-// Prompt item with UI state
-interface PromptItem {
+// Scene item with UI state
+// scenePrompt = user-editable scene idea (short)
+// finalPrompt = not stored here - built server-side with style contract
+interface SceneItem {
   id: string;
   pageNumber: number;
   sceneTitle: string;
-  prompt: string;
+  scenePrompt: string; // Short scene idea, NOT full prompt
   isRegenerating?: boolean;
   lastError?: string;
 }
@@ -127,8 +130,11 @@ interface FormState {
   includeCopyrightPage: boolean;
   
   // Generated content
-  prompts: PromptItem[];
+  scenes: SceneItem[];
   pageImages: Record<number, PageImageState>;
+  
+  // Advanced: allow editing style contract (off by default)
+  advancedStyleEdit: boolean;
   
   // Character lock
   characterLock: CharacterLock | null;
@@ -174,11 +180,12 @@ export default function NewBookPage() {
     includeBelongsTo: true,
     includePageNumbers: false,
     includeCopyrightPage: true,
-    prompts: [],
+    scenes: [],
     pageImages: {},
     characterLock: null,
     characterSheetUrl: null,
     anchor: null,
+    advancedStyleEdit: false,
   });
 
   // Build GenerationSpec from form state
@@ -367,9 +374,9 @@ export default function NewBookPage() {
   };
 
   // =====================
-  // AI: Generate All Prompts
+  // AI: Generate All Scenes
   // =====================
-  const generatePrompts = async () => {
+  const generateScenes = async () => {
     if (!form.theme) {
       toast.error("Please fill in theme first");
       return;
@@ -391,6 +398,7 @@ export default function NewBookPage() {
           mainCharacter: form.bookMode === "series" 
             ? `${form.characterName} (${form.characterType}) - ${form.characterDescription}` 
             : undefined,
+          characterType: form.bookMode === "series" ? form.characterType : undefined,
           characterLock: form.characterLock,
           spec,
         }),
@@ -398,38 +406,39 @@ export default function NewBookPage() {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to generate prompts");
+        throw new Error(error.error || "Failed to generate scenes");
       }
 
       const data = await response.json();
-      const promptItems: PromptItem[] = data.pages.map((p: { pageNumber: number; sceneTitle: string; prompt: string }) => ({
-        id: `prompt-${p.pageNumber}-${Date.now()}`,
+      // API now returns scenePrompt (short scene ideas, NOT full prompts)
+      const sceneItems: SceneItem[] = data.pages.map((p: { pageNumber: number; sceneTitle: string; scenePrompt: string }) => ({
+        id: `scene-${p.pageNumber}-${Date.now()}`,
         pageNumber: p.pageNumber,
         sceneTitle: p.sceneTitle,
-        prompt: p.prompt,
+        scenePrompt: p.scenePrompt,
         isRegenerating: false,
       }));
-      updateForm("prompts", promptItems);
+      updateForm("scenes", sceneItems);
       updateForm("anchor", null);
       updateForm("pageImages", {});
-      toast.success(`Generated ${data.pages.length} prompts!`);
+      toast.success(`Generated ${data.pages.length} scene ideas!`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to generate prompts");
+      toast.error(error instanceof Error ? error.message : "Failed to generate scenes");
     } finally {
       setGeneratingPrompts(false);
     }
   };
 
   // =====================
-  // AI: Regenerate ONE Prompt
+  // AI: Regenerate ONE Scene
   // =====================
-  const regenerateOnePrompt = async (pageNumber: number) => {
-    const currentPrompt = form.prompts.find((p) => p.pageNumber === pageNumber);
-    if (!currentPrompt) return;
+  const regenerateOneScene = async (pageNumber: number) => {
+    const currentScene = form.scenes.find((p) => p.pageNumber === pageNumber);
+    if (!currentScene) return;
 
     setForm((prev) => ({
       ...prev,
-      prompts: prev.prompts.map((p) =>
+      scenes: prev.scenes.map((p) =>
         p.pageNumber === pageNumber ? { ...p, isRegenerating: true, lastError: undefined } : p
       ),
     }));
@@ -443,35 +452,38 @@ export default function NewBookPage() {
         body: JSON.stringify({
           pageNumber,
           theme: form.theme,
-          characterLock: form.characterLock,
+          mainCharacter: form.bookMode === "series" 
+            ? `${form.characterName} (${form.characterType})` 
+            : undefined,
+          characterType: form.bookMode === "series" ? form.characterType : undefined,
           spec,
-          previousSceneTitle: currentPrompt.sceneTitle,
-          previousPrompt: currentPrompt.prompt,
+          previousSceneTitle: currentScene.sceneTitle,
+          previousScenePrompt: currentScene.scenePrompt,
         }),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to regenerate prompt");
+        throw new Error(error.error || "Failed to regenerate scene");
       }
 
       const data = await response.json();
 
       setForm((prev) => ({
         ...prev,
-        prompts: prev.prompts.map((p) =>
+        scenes: prev.scenes.map((p) =>
           p.pageNumber === pageNumber
-            ? { ...p, sceneTitle: data.sceneTitle, prompt: data.prompt, isRegenerating: false }
+            ? { ...p, sceneTitle: data.sceneTitle, scenePrompt: data.scenePrompt, isRegenerating: false }
             : p
         ),
       }));
 
-      toast.success(`Page ${pageNumber} prompt updated!`);
+      toast.success(`Page ${pageNumber} scene updated!`);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Failed to regenerate";
       setForm((prev) => ({
         ...prev,
-        prompts: prev.prompts.map((p) =>
+        scenes: prev.scenes.map((p) =>
           p.pageNumber === pageNumber ? { ...p, isRegenerating: false, lastError: errorMsg } : p
         ),
       }));
@@ -483,12 +495,12 @@ export default function NewBookPage() {
   // AI: Generate Anchor Image (Page 1)
   // =====================
   const generateAnchor = async () => {
-    if (form.prompts.length === 0) {
-      toast.error("Generate prompts first");
+    if (form.scenes.length === 0) {
+      toast.error("Generate scene ideas first");
       return;
     }
 
-    const firstPrompt = form.prompts[0];
+    const firstScene = form.scenes[0];
     setGeneratingAnchor(true);
     updateForm("anchor", null);
 
@@ -502,19 +514,19 @@ export default function NewBookPage() {
     }));
 
     try {
-      const spec = buildSpec();
-
+      // API builds finalPrompt server-side using scene + style contract
       const response = await fetch("/api/ai/generate-page-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: firstPrompt.prompt,
+          scenePrompt: firstScene.scenePrompt, // Short scene idea
           pageNumber: 1,
-          characterLock: form.characterLock,
+          bookMode: form.bookMode,
           characterType: form.bookMode === "series" ? form.characterType : null,
           characterName: form.bookMode === "series" ? form.characterName : null,
-          characterSheetImageUrl: form.characterSheetUrl,
-          spec,
+          complexity: form.complexity,
+          lineThickness: form.lineThickness,
+          trimSize: form.trimSize,
           isAnchorGeneration: true,
         }),
       });
@@ -538,7 +550,7 @@ export default function NewBookPage() {
             },
           },
         }));
-        toast.success("Sample page generated (B/W binarized)! Review and approve the style.");
+        toast.success("Sample page generated! Review and approve the style.");
       } else if (data.failedPrintSafe) {
         setForm((prev) => ({
           ...prev,
@@ -548,7 +560,7 @@ export default function NewBookPage() {
               isGenerating: false,
               failedPrintSafe: true,
               failureReason: data.failureReason,
-              error: data.details || "Failed quality check"
+              error: data.suggestion || data.details || "Failed quality check"
             },
           },
         }));
@@ -578,13 +590,13 @@ export default function NewBookPage() {
       return;
     }
 
-    const firstPrompt = form.prompts[0];
+    const firstScene = form.scenes[0];
     setForm((prev) => ({
       ...prev,
       anchor: {
         imageUrl: page1Image.imageUrl || `data:image/png;base64,${page1Image.imageBase64}`,
         imageBase64: page1Image.imageBase64!,
-        prompt: firstPrompt?.prompt || "",
+        prompt: firstScene?.scenePrompt || "",
         approvedAt: new Date(),
       },
     }));
@@ -597,7 +609,7 @@ export default function NewBookPage() {
   // =====================
   // AI: Generate Single Image (with anchor reference)
   // =====================
-  const generateImage = async (pageNumber: number, prompt: string) => {
+  const generateImage = async (pageNumber: number, scenePrompt: string) => {
     // For pages > 1, require anchor approval
     if (pageNumber > 1 && !form.anchor) {
       toast.error("Approve the sample page style first");
@@ -613,19 +625,19 @@ export default function NewBookPage() {
     }));
 
     try {
-      const spec = buildSpec();
-
+      // API builds finalPrompt server-side using scene + style contract
       const response = await fetch("/api/ai/generate-page-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt,
+          scenePrompt, // Short scene idea - style contract applied server-side
           pageNumber,
-          characterLock: form.characterLock,
+          bookMode: form.bookMode,
           characterType: form.bookMode === "series" ? form.characterType : null,
           characterName: form.bookMode === "series" ? form.characterName : null,
-          characterSheetImageUrl: form.characterSheetUrl,
-          spec,
+          complexity: form.complexity,
+          lineThickness: form.lineThickness,
+          trimSize: form.trimSize,
           anchorImageUrl: form.anchor?.imageUrl || null,
           anchorImageBase64: form.anchor?.imageBase64 || null,
           isAnchorGeneration: pageNumber === 1 && !form.anchor,
@@ -660,7 +672,7 @@ export default function NewBookPage() {
               isGenerating: false, 
               failedPrintSafe: true,
               failureReason: data.failureReason,
-              error: data.details || "Quality check failed"
+              error: data.suggestion || data.details || "Quality check failed"
             },
           },
         }));
@@ -683,8 +695,8 @@ export default function NewBookPage() {
   // Bulk Generation
   // =====================
   const startBulkGeneration = async () => {
-    if (form.prompts.length === 0) {
-      toast.error("No prompts to generate.");
+    if (form.scenes.length === 0) {
+      toast.error("No scenes to generate.");
       return;
     }
 
@@ -694,11 +706,11 @@ export default function NewBookPage() {
     }
 
     setBulkGenerating(true);
-    toast.info(`Generating ${form.prompts.length - 1} remaining pages...`);
+    toast.info(`Generating ${form.scenes.length - 1} remaining pages...`);
 
-    for (const page of form.prompts.slice(1)) {
-      if (!form.pageImages[page.pageNumber]?.imageBase64) {
-        await generateImage(page.pageNumber, page.prompt);
+    for (const scene of form.scenes.slice(1)) {
+      if (!form.pageImages[scene.pageNumber]?.imageBase64) {
+        await generateImage(scene.pageNumber, scene.scenePrompt);
         await new Promise((r) => setTimeout(r, 3000));
       }
     }
@@ -722,17 +734,17 @@ export default function NewBookPage() {
       case 3:
         return true;
       case 4:
-        return form.prompts.length > 0;
+        return form.scenes.length > 0;
       default:
         return true;
     }
   };
 
-  const updatePrompt = (pageNumber: number, newPrompt: string) => {
+  const updateScenePrompt = (pageNumber: number, newScenePrompt: string) => {
     setForm((prev) => ({
       ...prev,
-      prompts: prev.prompts.map((p) =>
-        p.pageNumber === pageNumber ? { ...p, prompt: newPrompt } : p
+      scenes: prev.scenes.map((p) =>
+        p.pageNumber === pageNumber ? { ...p, scenePrompt: newScenePrompt } : p
       ),
     }));
   };
@@ -740,15 +752,15 @@ export default function NewBookPage() {
   const updateSceneTitle = (pageNumber: number, newTitle: string) => {
     setForm((prev) => ({
       ...prev,
-      prompts: prev.prompts.map((p) =>
+      scenes: prev.scenes.map((p) =>
         p.pageNumber === pageNumber ? { ...p, sceneTitle: newTitle } : p
       ),
     }));
   };
 
-  const copyPrompt = (prompt: string) => {
-    navigator.clipboard.writeText(prompt);
-    toast.success("Prompt copied!");
+  const copyScene = (scenePrompt: string) => {
+    navigator.clipboard.writeText(scenePrompt);
+    toast.success("Scene copied!");
   };
 
   const openPreview = (pageNumber: number, title: string, imageUrl: string) => {
@@ -760,6 +772,9 @@ export default function NewBookPage() {
   const page1Image = form.pageImages[1];
   const page1DisplayUrl = getImageDisplayUrl(page1Image);
   const generatedCount = Object.values(form.pageImages).filter((p) => p.imageBase64).length;
+  
+  // Style contract summary for display
+  const styleContractSummary = getStyleContractSummary();
 
   // Get character type label
   const selectedCharacterType = CHARACTER_TYPES.find(c => c.value === form.characterType);
@@ -1063,74 +1078,103 @@ export default function NewBookPage() {
               </div>
             )}
 
-            {/* =============== STEP 4: PROMPTS =============== */}
+            {/* =============== STEP 4: SCENE IDEAS =============== */}
             {step === 4 && (
               <div className="space-y-6">
                 <div className="text-center">
-                  <h2 className="text-2xl font-semibold">Generate prompts 📝</h2>
+                  <h2 className="text-2xl font-semibold">Scene Ideas 📝</h2>
                   <p className="text-muted-foreground">
                     {form.bookMode === "series" 
                       ? `${form.characterName} (${selectedCharacterType?.label}) adventures`
-                      : "Themed prompts"}
+                      : "Themed scene ideas"}
                   </p>
                 </div>
 
-                {form.prompts.length === 0 ? (
+                {/* Style Contract Info */}
+                <details className="rounded-xl border border-blue-500/30 bg-blue-500/5">
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-blue-600 dark:text-blue-400">
+                    🔒 Locked Style: {PANDACORN_STYLE_CONTRACT.styleName}
+                  </summary>
+                  <div className="border-t border-blue-500/20 px-4 py-3">
+                    <pre className="whitespace-pre-wrap text-xs text-muted-foreground font-mono">
+{styleContractSummary}
+                    </pre>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Style rules are applied automatically when generating images. Edit only the <strong>scene idea</strong> (what to draw), not style instructions.
+                    </p>
+                  </div>
+                </details>
+
+                {form.scenes.length === 0 ? (
                   <Card className="border-dashed border-border/50 bg-muted/30">
                     <CardContent className="flex flex-col items-center justify-center p-8 text-center">
                       <Sparkles className="mb-3 h-8 w-8 text-muted-foreground" />
-                      <p className="mb-4 text-muted-foreground">
-                        Generate {form.pageCount} prompts
+                      <p className="mb-2 text-muted-foreground">
+                        Generate {form.pageCount} scene ideas
                       </p>
-                      <Button onClick={generatePrompts} disabled={generatingPrompts} className="rounded-xl">
+                      <p className="mb-4 text-xs text-muted-foreground">
+                        Short descriptions of what to draw on each page
+                      </p>
+                      <Button onClick={generateScenes} disabled={generatingPrompts} className="rounded-xl">
                         {generatingPrompts ? (
                           <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
                         ) : (
-                          <><Sparkles className="mr-2 h-4 w-4" /> Generate Prompts</>
+                          <><Sparkles className="mr-2 h-4 w-4" /> Generate Scene Ideas</>
                         )}
                       </Button>
                     </CardContent>
                   </Card>
                 ) : (
                   <div className="space-y-3">
-                    <div className="flex justify-end">
-                      <Button variant="outline" onClick={generatePrompts} disabled={generatingPrompts} className="rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        Edit scene ideas below. Style rules are added automatically.
+                      </p>
+                      <Button variant="outline" onClick={generateScenes} disabled={generatingPrompts} className="rounded-xl">
                         {generatingPrompts ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                         Regenerate All
                       </Button>
                     </div>
-                    {form.prompts.map((page) => (
-                      <Card key={page.id} className="border-border/50 bg-card/60">
+                    {form.scenes.map((scene) => (
+                      <Card key={scene.id} className={cn(
+                        "border-border/50 bg-card/60",
+                        scene.lastError && "border-red-500/50"
+                      )}>
                         <CardContent className="p-4">
                           <div className="mb-2 flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
-                              <Badge variant="secondary">{page.pageNumber}</Badge>
+                              <Badge variant="secondary">{scene.pageNumber}</Badge>
                               <Input
-                                value={page.sceneTitle}
-                                onChange={(e) => updateSceneTitle(page.pageNumber, e.target.value)}
+                                value={scene.sceneTitle}
+                                onChange={(e) => updateSceneTitle(scene.pageNumber, e.target.value)}
                                 className="h-7 w-48 rounded-lg text-sm font-medium"
+                                placeholder="Scene title"
                               />
                             </div>
                             <div className="flex items-center gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyPrompt(page.prompt)}>
+                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyScene(scene.scenePrompt)}>
                                 <Copy className="h-3 w-3" />
                               </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
                                 className="h-7 rounded-lg text-xs"
-                                onClick={() => regenerateOnePrompt(page.pageNumber)}
-                                disabled={page.isRegenerating}
+                                onClick={() => regenerateOneScene(scene.pageNumber)}
+                                disabled={scene.isRegenerating}
                               >
-                                {page.isRegenerating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                                {scene.isRegenerating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                               </Button>
                             </div>
                           </div>
                           <Textarea
-                            value={page.prompt}
-                            onChange={(e) => updatePrompt(page.pageNumber, e.target.value)}
+                            value={scene.scenePrompt}
+                            onChange={(e) => updateScenePrompt(scene.pageNumber, e.target.value)}
                             className="min-h-[60px] resize-none rounded-xl text-sm"
+                            placeholder="Describe the scene: character + action + setting + 2-6 props"
                           />
+                          {scene.lastError && (
+                            <p className="mt-2 text-xs text-red-500">{scene.lastError}</p>
+                          )}
                         </CardContent>
                       </Card>
                     ))}
@@ -1201,7 +1245,7 @@ export default function NewBookPage() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => openPreview(1, form.prompts[0]?.sceneTitle || "Page 1", page1DisplayUrl)}
+                                  onClick={() => openPreview(1, form.scenes[0]?.sceneTitle || "Page 1", page1DisplayUrl)}
                                   className="rounded-xl"
                                 >
                                   <Eye className="mr-1 h-3 w-3" /> Preview
@@ -1230,7 +1274,7 @@ export default function NewBookPage() {
                         {!page1DisplayUrl && !generatingAnchor && !page1Image?.failedPrintSafe && (
                           <Button
                             onClick={generateAnchor}
-                            disabled={form.prompts.length === 0}
+                            disabled={form.scenes.length === 0}
                             className="mt-4 rounded-xl"
                           >
                             <Sparkles className="mr-2 h-4 w-4" /> Generate Sample
@@ -1266,11 +1310,11 @@ export default function NewBookPage() {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <p className="text-sm text-muted-foreground">
-                        Generated: {generatedCount} / {form.prompts.length}
+                        Generated: {generatedCount} / {form.scenes.length}
                       </p>
                       <Button
                         onClick={startBulkGeneration}
-                        disabled={bulkGenerating || form.prompts.length === 0}
+                        disabled={bulkGenerating || form.scenes.length === 0}
                         className="rounded-xl"
                       >
                         {bulkGenerating ? (
@@ -1282,15 +1326,15 @@ export default function NewBookPage() {
                     </div>
 
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {form.prompts.map((page) => {
-                        const pageState = form.pageImages[page.pageNumber];
+                      {form.scenes.map((scene) => {
+                        const pageState = form.pageImages[scene.pageNumber];
                         const displayUrl = getImageDisplayUrl(pageState);
                         const hasImage = !!displayUrl;
                         const isGenerating = pageState?.isGenerating;
                         const hasFailed = pageState?.failedPrintSafe;
 
                         return (
-                          <Card key={page.id} className={cn(
+                          <Card key={scene.id} className={cn(
                             "overflow-hidden border-border/50",
                             hasFailed && "border-red-500/50"
                           )}>
@@ -1298,7 +1342,7 @@ export default function NewBookPage() {
                               {hasImage ? (
                                 <img
                                   src={displayUrl}
-                                  alt={`Page ${page.pageNumber}`}
+                                  alt={`Page ${scene.pageNumber}`}
                                   className="h-full w-full object-contain"
                                 />
                               ) : isGenerating ? (
@@ -1315,24 +1359,24 @@ export default function NewBookPage() {
                               ) : (
                                 <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-muted">
                                   <ImageIcon className="mb-2 h-8 w-8 text-muted-foreground" />
-                                  <p className="text-xs text-muted-foreground">Page {page.pageNumber}</p>
+                                  <p className="text-xs text-muted-foreground">Page {scene.pageNumber}</p>
                                 </div>
                               )}
-                              {page.pageNumber === 1 && isAnchorApproved && (
+                              {scene.pageNumber === 1 && isAnchorApproved && (
                                 <Badge className="absolute top-2 left-2 bg-green-500 text-white text-[10px]">
                                   <Anchor className="mr-1 h-3 w-3" /> Anchor
                                 </Badge>
                               )}
                             </div>
                             <CardContent className="p-3">
-                              <p className="mb-2 truncate text-xs font-medium">{page.sceneTitle}</p>
+                              <p className="mb-2 truncate text-xs font-medium">{scene.sceneTitle}</p>
                               <div className="flex gap-2">
                                 {hasImage && (
                                   <Button
                                     size="sm"
                                     variant="ghost"
                                     className="flex-1 rounded-lg text-xs"
-                                    onClick={() => openPreview(page.pageNumber, page.sceneTitle, displayUrl)}
+                                    onClick={() => openPreview(scene.pageNumber, scene.sceneTitle, displayUrl)}
                                   >
                                     <Eye className="mr-1 h-3 w-3" /> Preview
                                   </Button>
@@ -1341,8 +1385,8 @@ export default function NewBookPage() {
                                   size="sm"
                                   variant="outline"
                                   className="flex-1 rounded-lg text-xs"
-                                  onClick={() => generateImage(page.pageNumber, page.prompt)}
-                                  disabled={isGenerating || bulkGenerating || (page.pageNumber > 1 && !isAnchorApproved)}
+                                  onClick={() => generateImage(scene.pageNumber, scene.scenePrompt)}
+                                  disabled={isGenerating || bulkGenerating || (scene.pageNumber > 1 && !isAnchorApproved)}
                                 >
                                   {hasImage || hasFailed ? (
                                     <><RefreshCw className="mr-1 h-3 w-3" /> Regen</>

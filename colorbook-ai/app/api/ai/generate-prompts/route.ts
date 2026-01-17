@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
 import { characterLockSchema } from "@/lib/schemas";
-import type { GenerationSpec } from "@/lib/generationSpec";
 
-// Accept GenerationSpec directly
+// GenerationSpec schema
 const generationSpecSchema = z.object({
   bookMode: z.enum(["series", "collection"]),
   trimSize: z.string(),
@@ -22,34 +21,29 @@ const generationSpecSchema = z.object({
 const requestSchema = z.object({
   theme: z.string().min(1),
   mainCharacter: z.string().optional(),
+  characterType: z.string().optional(),
   characterLock: characterLockSchema.optional().nullable(),
   spec: generationSpecSchema,
 });
 
-const pagePromptSchema = z.object({
+// Response returns scenePrompt only (NOT final prompt with style rules)
+const pageSchema = z.object({
   pageNumber: z.number(),
   sceneTitle: z.string(),
-  prompt: z.string(),
+  scenePrompt: z.string(), // Short scene idea, NOT full prompt
 });
 
 const responseSchema = z.object({
-  pages: z.array(pagePromptSchema),
+  pages: z.array(pageSchema),
 });
 
-export type PromptGenerationRequest = z.infer<typeof requestSchema>;
-export type PromptListResponse = z.infer<typeof responseSchema>;
+export type ScenePromptResponse = z.infer<typeof responseSchema>;
 
-// Complexity guidelines for prompt generation
-const COMPLEXITY_GUIDE = {
-  simple: "1 main subject + 2-4 simple props, minimal/no background, very large coloring areas",
-  medium: "1-2 subjects + 4-8 props, light simple background, moderate detail",
-  detailed: "1-2 subjects + 8-12 props, more intricate patterns but still NO shading",
-};
-
-const LINE_GUIDE = {
-  thin: "medium outer lines, thin inner details",
-  medium: "thick outer lines, medium inner details", 
-  bold: "very thick outer lines, thick inner details - forgiving for young children",
+// Complexity guide for scene generation
+const COMPLEXITY_PROPS = {
+  simple: "2-4 props",
+  medium: "4-6 props", 
+  detailed: "6-8 props",
 };
 
 export async function POST(request: NextRequest) {
@@ -72,70 +66,52 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { theme, mainCharacter, characterLock, spec } = parseResult.data;
+    const { theme, mainCharacter, characterType, spec } = parseResult.data;
 
-    // Build character section for system prompt
-    let characterSection = mainCharacter ? `MAIN CHARACTER: ${mainCharacter}` : "";
-    if (characterLock) {
-      characterSection = `
-MAIN CHARACTER (LOCKED - ALL PAGES MUST SHOW THIS EXACT CHARACTER):
-Name: ${characterLock.canonicalName}
-Body: ${characterLock.visualRules.proportions}
-Face: ${characterLock.visualRules.face}
-Unique Features: ${characterLock.visualRules.uniqueFeatures.join(", ")}
-Outfit: ${characterLock.visualRules.outfit}
+    const propsGuide = COMPLEXITY_PROPS[spec.complexity];
+    const characterDesc = mainCharacter ? mainCharacter : "the main character";
 
-IMPORTANT: The character MUST look IDENTICAL on every page - same face, same body proportions, same outfit, same features.`;
-    }
-
-    const systemPrompt = `You are a children's coloring book prompt writer creating a ${spec.pageCount}-page story series.
+    const systemPrompt = `You are a scene planner for a ${spec.pageCount}-page children's coloring book.
 
 THEME: ${theme}
-${characterSection}
-
-GENERATION SPEC:
-- Trim Size: ${spec.trimSize}
-- Complexity: ${spec.complexity} - ${COMPLEXITY_GUIDE[spec.complexity]}
-- Line Thickness: ${spec.lineThickness} - ${LINE_GUIDE[spec.lineThickness]}
+MAIN CHARACTER: ${characterDesc}${characterType ? ` (a ${characterType})` : ""}
+PROPS PER PAGE: ${propsGuide}
 
 YOUR TASK:
-Generate ${spec.pageCount} scene prompts that form a cohesive story arc. Each prompt describes ONE coloring page.
+Generate ${spec.pageCount} SHORT scene ideas that form a cohesive story arc.
 
-RULES FOR EACH PROMPT:
-1. Feature the main character prominently
-2. Describe a SINGLE clear scene/moment
-3. Match the complexity level: "${spec.complexity}"
-4. Suitable for black & white LINE ART coloring page
-5. NO text, speech bubbles, or written words in the scene
-6. Include 1-2 simple background elements appropriate to complexity
-7. Keep scenes varied but connected (story progression)
-8. Portrait orientation - vertical composition
+SCENE IDEA FORMAT (STRICT):
+- 1-2 sentences MAXIMUM
+- Describe: character + action + setting + ${propsGuide}
+- List specific props by name and count
+- NO style language (no "black and white", "line art", "coloring page", etc.)
+- NO descriptions of line weight, shading, or artistic style
 
-COMPLEXITY "${spec.complexity}" MEANS:
-${COMPLEXITY_GUIDE[spec.complexity]}
+GOOD EXAMPLE:
+"Benny the bunny waters carrots in a garden; include: 1 watering can, 5 carrots, 3 flowers, 1 wooden fence, 2 clouds."
 
-Return a JSON object with this exact structure:
+BAD EXAMPLE (too long, has style language):
+"A beautiful black and white line art coloring page showing Benny the bunny in a detailed garden scene..."
+
+Return JSON:
 {
   "pages": [
     {
       "pageNumber": 1,
       "sceneTitle": "Short 3-5 word title",
-      "prompt": "Detailed scene description for image generation..."
-    },
-    ...
+      "scenePrompt": "1-2 sentence scene idea with props list"
+    }
   ]
-}
-
-Each prompt should be 2-4 sentences describing exactly what appears in the scene.`;
+}`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate ${spec.pageCount} coloring page prompts for this coloring book.` },
+        { role: "user", content: `Generate ${spec.pageCount} scene ideas for this coloring book.` },
       ],
       temperature: 0.7,
-      max_tokens: 4000,
+      max_tokens: 3000,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -143,7 +119,7 @@ Each prompt should be 2-4 sentences describing exactly what appears in the scene
       return NextResponse.json({ error: "No response from AI" }, { status: 500 });
     }
 
-    // Parse JSON from response
+    // Parse JSON
     let jsonContent = content.trim();
     if (jsonContent.startsWith("```json")) jsonContent = jsonContent.slice(7);
     else if (jsonContent.startsWith("```")) jsonContent = jsonContent.slice(3);
@@ -164,6 +140,7 @@ Each prompt should be 2-4 sentences describing exactly what appears in the scene
 
     const validationResult = responseSchema.safeParse(parsed);
     if (!validationResult.success) {
+      console.error("Response validation failed:", validationResult.error);
       return NextResponse.json(
         { error: "AI response format invalid", details: validationResult.error.flatten() },
         { status: 500 }
