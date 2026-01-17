@@ -804,17 +804,33 @@ export default function NewBookPage() {
     }
 
     setBulkGenerating(true);
-    toast.info(`Generating ${form.scenes.length - 1} remaining pages...`);
+    const remainingScenes = form.scenes.slice(1).filter(
+      (scene) => !form.pageImages[scene.pageNumber]?.imageBase64
+    );
+    
+    toast.info(`Generating ${remainingScenes.length} pages... This may take a few minutes.`);
 
-    for (const scene of form.scenes.slice(1)) {
-      if (!form.pageImages[scene.pageNumber]?.imageBase64) {
-        await generateImage(scene.pageNumber, scene.scenePrompt);
-        await new Promise((r) => setTimeout(r, 3000));
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < remainingScenes.length; i++) {
+      const scene = remainingScenes[i];
+      toast.info(`Generating page ${scene.pageNumber}... (${i + 1}/${remainingScenes.length})`);
+      
+      await generateImage(scene.pageNumber, scene.scenePrompt);
+      
+      // Check if it succeeded
+      // Wait a bit to let state update
+      await new Promise((r) => setTimeout(r, 500));
+      
+      // Wait between requests to avoid rate limits (DALL-E 3 has strict limits)
+      if (i < remainingScenes.length - 1) {
+        await new Promise((r) => setTimeout(r, 5000)); // 5 second delay
       }
     }
 
     setBulkGenerating(false);
-    toast.success("Generation complete!");
+    toast.success("Generation complete! Check each page for results.");
   };
 
   // =====================

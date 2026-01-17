@@ -54,18 +54,22 @@ export async function processAndValidateImage(
   config: QualityConfig = DEFAULT_CONFIG
 ): Promise<QualityCheckResult> {
   try {
+    console.log("[ImageProcessor] Fetching image from URL...");
+    
     // Fetch the image
     const response = await fetch(imageUrl);
     if (!response.ok) {
+      console.error("[ImageProcessor] Failed to fetch image:", response.status, response.statusText);
       return {
         passed: false,
         failureReason: "color",
-        details: "Failed to fetch image",
+        details: `Failed to fetch image: ${response.status}`,
       };
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const imageBuffer = Buffer.from(arrayBuffer);
+    console.log("[ImageProcessor] Image fetched, size:", imageBuffer.length, "bytes");
 
     // Try to use sharp for proper image processing
     try {
@@ -149,12 +153,13 @@ export async function processAndValidateImage(
       };
 
     } catch (sharpError) {
-      // Sharp not available - return original with warning
-      console.warn("Sharp not available for image processing:", sharpError);
+      // Sharp not available or failed - return original image as-is
+      // This is a fallback to ensure images always work
+      console.warn("[ImageProcessor] Sharp processing failed, using original:", sharpError);
       return {
         passed: true,
         binarizedBase64: imageBuffer.toString("base64"),
-        details: "Binarization skipped (sharp not available)",
+        details: "Binarization skipped (using original)",
       };
     }
 

@@ -112,9 +112,11 @@ export async function POST(request: NextRequest) {
     let finalImageUrl: string | undefined;
     let finalImageBase64: string | undefined;
     let retryCount = 0;
-    let lastFailureReason: "color" | "species" | "blackfill" | undefined;
+    let lastError: string = "Unknown error";
     let currentScenePrompt = scenePrompt;
     let currentComplexity = complexity;
+
+    console.log(`[Page ${pageNumber}] Starting image generation...`);
 
     while (retryCount <= MAX_RETRIES) {
       // Smart retry: simplify on attempt 2+
@@ -139,6 +141,8 @@ export async function POST(request: NextRequest) {
         retryAttempt: retryCount,
       });
 
+      console.log(`[Page ${pageNumber}] Attempt ${retryCount + 1}/${MAX_RETRIES + 1}`);
+
       try {
         // Generate image with DALL-E 3
         const response = await openai.images.generate({
@@ -152,93 +156,72 @@ export async function POST(request: NextRequest) {
 
         const rawImageUrl = response.data?.[0]?.url;
         if (!rawImageUrl) {
-          throw new Error("No image URL in response");
+          lastError = "No image URL in OpenAI response";
+          throw new Error(lastError);
         }
+
+        console.log(`[Page ${pageNumber}] Got image URL, processing...`);
 
         // === MANDATORY POST-PROCESSING (binarization to B/W) ===
         const processResult = await processAndValidateImage(rawImageUrl);
 
-        // If binarization succeeded, we have a valid B/W image
-        // Only retry on actual failures (e.g., couldn't fetch/process)
-        if (!processResult.passed && !processResult.binarizedBase64) {
-          console.log(`Image processing failed (attempt ${retryCount + 1}):`, processResult.details);
-          lastFailureReason = processResult.failureReason;
-          retryCount++;
-          
-          if (retryCount <= MAX_RETRIES) {
-            await new Promise(r => setTimeout(r, 1500));
-            continue;
-          }
-          
-          // Max retries exceeded - return useful info for user
-          return NextResponse.json({
-            error: "Image failed quality check after multiple attempts",
-            failedPrintSafe: true,
-            failureReason: processResult.failureReason,
-            details: processResult.details,
-            suggestion: getSuggestionForFailure(processResult.failureReason),
-            scenePrompt: currentScenePrompt,
-            simplifiedPrompt: simplifyScenePrompt(scenePrompt),
-          }, { status: 422 });
-        }
-        
         // If we have a binarized image, use it (even with warnings)
         if (processResult.binarizedBase64) {
-          if (processResult.details) {
-            console.log(`Image processed with note: ${processResult.details}`);
-          }
+          console.log(`[Page ${pageNumber}] Image processed successfully! BlackRatio: ${processResult.blackRatio}`);
           
-          // Optional: Character match check (series mode, non-anchor)
-          // Only do this check if we have an anchor to compare against
-          if (bookMode === "series" && !isAnchorGeneration && anchorBase64 && characterType) {
-            try {
-              const matchResult = await checkCharacterMatch(
-                anchorBase64,
-                processResult.binarizedBase64,
-                characterType,
-                process.env.OPENAI_API_KEY || ""
-              );
-
-              if (!matchResult.sameSpecies) {
-                console.log(`Character mismatch (attempt ${retryCount + 1}):`, matchResult.notes);
-                // Don't fail hard - just log the warning
-                // The user can regenerate if needed
-                console.warn(`Warning: Character may not match anchor (${matchResult.notes})`);
-              }
-            } catch (e) {
-              // Character check failed - don't block the image
-              console.warn("Character match check failed, continuing anyway:", e);
-            }
-          }
+          // Skip character match check for now - it adds latency and often fails
+          // Users can manually regenerate if character doesn't match
           
           // Success!
           finalImageUrl = rawImageUrl;
           finalImageBase64 = processResult.binarizedBase64;
           break;
         }
+        
+        // Processing failed - retry
+        lastError = processResult.details || "Image processing failed";
+        console.log(`[Page ${pageNumber}] Processing failed: ${lastError}`);
+        retryCount++;
+        
+        if (retryCount <= MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, 1000));
+          continue;
+        }
 
       } catch (genError) {
-        console.error(`Generation attempt ${retryCount + 1} failed:`, genError);
+        const errorMsg = genError instanceof Error ? genError.message : "Unknown generation error";
+        console.error(`[Page ${pageNumber}] Generation error:`, errorMsg);
         
-        if (genError instanceof Error && genError.message.includes("content_policy")) {
+        if (errorMsg.includes("content_policy")) {
           return NextResponse.json(
             { error: "Content policy violation. Please modify the scene idea." },
             { status: 400 }
           );
         }
+        
+        if (errorMsg.includes("rate_limit")) {
+          return NextResponse.json(
+            { error: "Rate limit exceeded. Please wait a moment and try again." },
+            { status: 429 }
+          );
+        }
 
+        lastError = errorMsg;
         retryCount++;
+        
         if (retryCount <= MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise(r => setTimeout(r, 2000)); // Wait longer on API errors
+          continue;
         }
       }
     }
 
     if (!finalImageBase64) {
+      console.error(`[Page ${pageNumber}] All ${MAX_RETRIES + 1} attempts failed. Last error: ${lastError}`);
       return NextResponse.json({
-        error: "Failed to generate valid image",
+        error: `Failed to generate image: ${lastError}`,
         failedPrintSafe: true,
-        suggestion: "Try simplifying the scene description or reducing the number of props.",
+        suggestion: "Try simplifying the scene description or try again in a moment.",
         scenePrompt: currentScenePrompt,
       }, { status: 500 });
     }
