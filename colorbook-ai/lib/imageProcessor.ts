@@ -3,9 +3,9 @@
  * Ensures all images are pure B/W and pass quality gates
  * 
  * QUALITY GATES:
- * 1. Binarization - force pure B/W
- * 2. Black pixel ratio check - reject if >10% black
- * 3. Large blob detection - reject silhouettes
+ * 1. Binarization - force pure B/W (mandatory)
+ * 2. Black pixel ratio check - warn if very high, but don't reject line art
+ * 3. Large blob detection - reject obvious silhouettes (>5% single connected region)
  */
 
 /**
@@ -26,18 +26,21 @@ export interface QualityCheckResult {
 export interface QualityConfig {
   /** Threshold for binarization (0-255). Pixels above = white */
   binarizationThreshold: number;
-  /** Maximum allowed black pixel ratio (0-1). Above this = too much fill */
+  /** Maximum allowed black pixel ratio (0-1). Above this = warning (not rejection) */
+  warnBlackRatio: number;
+  /** Maximum allowed black ratio before rejection */
   maxBlackRatio: number;
   /** Maximum allowed single blob size as % of image (0-1). Above this = silhouette */
   maxBlobPercent: number;
 }
 
 // Realistic defaults for coloring book line art
-// Line art typically has 15-40% black pixels for outlines
+// Professional KDP coloring pages typically have 15-35% black
 const DEFAULT_CONFIG: QualityConfig = {
   binarizationThreshold: 200,
-  maxBlackRatio: 0.45,    // Max 45% black pixels (line art is usually 20-35%)
-  maxBlobPercent: 0.05,   // Max 5% for any single blob (catches large silhouettes)
+  warnBlackRatio: 0.35,   // Warn if >35% black (might be heavy)
+  maxBlackRatio: 0.55,    // Only reject if >55% black (likely wrong)
+  maxBlobPercent: 0.05,   // Max 5% for any single blob (catches silhouettes)
 };
 
 /**
@@ -57,9 +60,9 @@ export async function fetchImageAsBase64(url: string): Promise<string> {
  * This is the main function - all images MUST go through this before display
  * 
  * GATES:
- * 1. Fetch + binarize
- * 2. Check black pixel ratio (<10%)
- * 3. Check for large connected blobs (<1.5% each)
+ * 1. Fetch + binarize (always)
+ * 2. Check black pixel ratio (warn or reject if extreme)
+ * 3. Check for large connected blobs (reject silhouettes)
  */
 export async function processAndValidateImage(
   imageUrl: string,
@@ -89,8 +92,7 @@ export async function processAndValidateImage(
 
       // Get image info
       const metadata = await sharp(imageBuffer).metadata();
-      const width = metadata.width || 1024;
-      const height = metadata.height || 1536;
+      console.log("[ImageProcessor] Image dimensions:", metadata.width, "x", metadata.height);
 
       // Step 1: Convert to grayscale
       const grayscaleBuffer = await sharp(imageBuffer)
@@ -122,8 +124,9 @@ export async function processAndValidateImage(
       console.log(`[ImageProcessor] Black ratio: ${(blackRatio * 100).toFixed(1)}%`);
 
       // GATE 1: Check black pixel ratio
+      // Only reject if EXTREMELY high (likely wrong image type)
       if (blackRatio > config.maxBlackRatio) {
-        console.log(`[ImageProcessor] FAILED: Black ratio ${(blackRatio * 100).toFixed(1)}% > ${config.maxBlackRatio * 100}%`);
+        console.log(`[ImageProcessor] REJECTED: Black ratio ${(blackRatio * 100).toFixed(1)}% > ${config.maxBlackRatio * 100}%`);
         return {
           passed: false,
           binarizedBase64: binarizedBuffer.toString("base64"),
@@ -131,6 +134,11 @@ export async function processAndValidateImage(
           blackRatio,
           details: `Too much black: ${(blackRatio * 100).toFixed(1)}% (max ${config.maxBlackRatio * 100}%)`,
         };
+      }
+
+      // Warn but don't reject if moderately high
+      if (blackRatio > config.warnBlackRatio) {
+        console.log(`[ImageProcessor] WARNING: Black ratio ${(blackRatio * 100).toFixed(1)}% is high (>${config.warnBlackRatio * 100}%)`);
       }
 
       // GATE 2: Check for large connected blobs (silhouettes)
@@ -166,14 +174,14 @@ export async function processAndValidateImage(
       console.log(`[ImageProcessor] Largest blob: ${(largestBlobPercent * 100).toFixed(2)}% of image`);
 
       if (largestBlobPercent > config.maxBlobPercent) {
-        console.log(`[ImageProcessor] FAILED: Silhouette detected (${(largestBlobPercent * 100).toFixed(2)}% > ${config.maxBlobPercent * 100}%)`);
+        console.log(`[ImageProcessor] REJECTED: Silhouette detected (${(largestBlobPercent * 100).toFixed(2)}% > ${config.maxBlobPercent * 100}%)`);
         return {
           passed: false,
           binarizedBase64: binarizedBuffer.toString("base64"),
           failureReason: "silhouette",
           blackRatio,
           largestBlobPercent,
-          details: `Silhouette/large fill detected: ${(largestBlobPercent * 100).toFixed(2)}% blob (max ${config.maxBlobPercent * 100}%)`,
+          details: `Large filled area detected: ${(largestBlobPercent * 100).toFixed(2)}% blob (max ${config.maxBlobPercent * 100}%)`,
         };
       }
 
@@ -245,7 +253,7 @@ function floodFillCount(
 }
 
 /**
- * Check if character matches using OpenAI Vision
+ * Check if character matches using OpenAI Vision (optional)
  * Returns whether the character in the generated image matches the anchor
  */
 export async function checkCharacterMatch(

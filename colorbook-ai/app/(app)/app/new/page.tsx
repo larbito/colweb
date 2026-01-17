@@ -39,6 +39,7 @@ import type {
 } from "@/lib/schemas";
 import { TrendingPanel } from "@/components/app/trending-panel";
 import { ImagePreviewModal } from "@/components/app/image-preview-modal";
+import { GenerationDebugPanel } from "@/components/app/generation-debug-panel";
 import type { TrendingSuggestionResponse } from "@/app/api/ai/suggest-trending/route";
 import {
   type GenerationSpec,
@@ -92,6 +93,9 @@ interface SceneItem {
   lastError?: string;
 }
 
+// Import debug info type from component
+import type { GenerationDebugInfo } from "@/components/app/generation-debug-panel";
+
 // Image generation state per page - now uses base64 for binarized images
 interface PageImageState {
   imageUrl?: string;
@@ -100,6 +104,7 @@ interface PageImageState {
   error?: string;
   failedPrintSafe?: boolean;
   failureReason?: string;
+  debug?: GenerationDebugInfo; // Debug info for troubleshooting
 }
 
 // Anchor state with base64 for reference
@@ -756,7 +761,8 @@ export default function NewBookPage() {
             [pageNumber]: { 
               imageUrl: data.imageUrl,
               imageBase64: data.imageBase64,
-              isGenerating: false 
+              isGenerating: false,
+              debug: data.debug, // Store debug info
             },
           },
         }));
@@ -770,7 +776,8 @@ export default function NewBookPage() {
               isGenerating: false, 
               failedPrintSafe: true,
               failureReason: data.failureReason,
-              error: data.suggestion || data.details || "Quality check failed"
+              error: data.suggestion || data.details || "Quality check failed",
+              debug: data.debug, // Store debug info even on failure
             },
           },
         }));
@@ -1457,6 +1464,15 @@ export default function NewBookPage() {
                           </div>
                         )}
                         
+                        {/* Debug Panel for Sample/Anchor */}
+                        {page1Image?.debug && (
+                          <GenerationDebugPanel
+                            title="Sample Generation Debug"
+                            debug={page1Image.debug}
+                            className="mt-4"
+                          />
+                        )}
+                        
                         {!page1DisplayUrl && !generatingAnchor && !page1Image?.failedPrintSafe && (
                           <Button
                             onClick={generateAnchor}
@@ -1554,8 +1570,8 @@ export default function NewBookPage() {
                                 </Badge>
                               )}
                             </div>
-                            <CardContent className="p-3">
-                              <p className="mb-2 truncate text-xs font-medium">{scene.sceneTitle}</p>
+                            <CardContent className="p-3 space-y-2">
+                              <p className="truncate text-xs font-medium">{scene.sceneTitle}</p>
                               <div className="flex gap-2">
                                 {hasImage && (
                                   <Button
@@ -1581,6 +1597,13 @@ export default function NewBookPage() {
                                   )}
                                 </Button>
                               </div>
+                              {/* Debug Panel */}
+                              {pageState?.debug && (
+                                <GenerationDebugPanel
+                                  title={`Page ${scene.pageNumber} Debug`}
+                                  debug={pageState.debug}
+                                />
+                              )}
                             </CardContent>
                           </Card>
                         );
