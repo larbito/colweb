@@ -38,8 +38,8 @@ export interface QualityGateResult {
 
 /**
  * Black ratio thresholds by complexity
- * Note: DALL-E typically produces 30-60% dark content even with strict prompts.
- * We use higher limits to allow images through, relying on B&W conversion.
+ * DALL-E 3 typically produces 40-60% black after B&W conversion
+ * These limits are set realistically for what DALL-E can produce
  */
 export const BLACK_RATIO_LIMITS: Record<Complexity, number> = {
   simple: 0.35,   // Max 35% black for simple pages
@@ -49,33 +49,34 @@ export const BLACK_RATIO_LIMITS: Record<Complexity, number> = {
 
 /**
  * Maximum single blob size (as ratio of total image)
- * Note: DALL-E creates larger filled areas than ideal
+ * Prevents large solid black fills
  */
-export const MAX_BLOB_RATIO = 0.05; // 5% of image area
+export const MAX_BLOB_RATIO = 0.025; // 2.5% of image area
 
 /**
  * Maximum number of tiny blobs (10-200 pixels)
- * Higher limit since B&W conversion creates more small regions
+ * Prevents texture/noise patterns
  */
-export const MAX_TINY_BLOBS = 1000;
+export const MAX_TINY_BLOBS = 800;
 
 /**
  * FORCE convert an image to pure black and white
  * This is essential because DALL-E often returns colored images
+ * Uses HIGH threshold (230) so only very dark areas become black
  */
 export async function forceConvertToBlackWhite(imageBuffer: Buffer): Promise<Buffer> {
   try {
     const sharp = await import("sharp").catch(() => null);
     if (!sharp) return imageBuffer;
 
-    // Step 1: Flatten to white background
-    // Step 2: Convert to grayscale
-    // Step 3: Apply threshold - HIGHER value = LESS black (only darkest pixels become black)
-    // Threshold 220 means only pixels darker than 220/255 become black
+    // HIGH threshold (230) = only very dark pixels become black
+    // This helps reduce the black ratio significantly
+    // Most mid-tones and light colors will become white
     return sharp.default(imageBuffer)
       .flatten({ background: { r: 255, g: 255, b: 255 } }) // Remove transparency, white bg
       .grayscale() // Convert to grayscale
-      .threshold(220) // Higher = less black. Only very dark pixels become black
+      .normalize() // Normalize contrast
+      .threshold(230) // HIGH threshold - only very dark (< 230) becomes black
       .png({ compressionLevel: 9 })
       .toBuffer();
   } catch (error) {
