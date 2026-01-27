@@ -1,146 +1,54 @@
 /**
  * styleClonePromptBuilder.ts - Prompt builder for Style Clone generation
- * Builds FINAL prompts with strict style contract injection
+ * IMPORTANT: DALL-E 3 has a 4000 character limit! Keep prompts SHORT.
  */
 
 import type { GenerationSpec, Complexity, LineThickness } from "./generationSpec";
 import type { StyleContract, ThemePack } from "./styleClone";
 
-/**
- * Complexity rules for prompt injection
- */
-const COMPLEXITY_RULES: Record<Complexity, string> = {
-  simple: `
-COMPLEXITY LEVEL: SIMPLE (Ages 3-6)
-- ONE main subject only, large and clear
-- 2-4 simple props maximum
-- Very simple or EMPTY background
-- Large open areas for easy coloring
-- Big, chunky shapes - no tiny details`,
-  
-  medium: `
-COMPLEXITY LEVEL: MEDIUM (Ages 6-12)
-- 1-2 subjects maximum
-- 4-6 props and simple background elements
-- Moderate detail level
-- Clear separation between elements
-- Some small details but still easy to color`,
-  
-  detailed: `
-COMPLEXITY LEVEL: DETAILED (Older kids/Adults)
-- 1-2 main subjects with more detail
-- 6-10 props and background elements
-- More intricate patterns allowed
-- Still NO shading or gradients - only outlines
-- Complex but clean compositions`,
+/** Short complexity hints */
+const COMPLEXITY_HINTS: Record<Complexity, string> = {
+  simple: "SIMPLE: 1 subject, 2-4 props, empty background, big shapes",
+  medium: "MEDIUM: 1-2 subjects, 4-6 props, light background",
+  detailed: "DETAILED: 1-2 subjects, 6-8 props, richer background",
+};
+
+/** Short line hints */
+const LINE_HINTS: Record<LineThickness, string> = {
+  thin: "THIN lines (2-3pt)",
+  medium: "MEDIUM lines (4-5pt)", 
+  bold: "BOLD thick lines (6-8pt)",
 };
 
 /**
- * Line thickness rules for prompt injection
+ * COMPACT mandatory suffix - fits in ~500 chars
  */
-const LINE_THICKNESS_RULES: Record<LineThickness, string> = {
-  thin: `
-LINE WEIGHT: THIN
-- Outer contours: 2-3pt weight
-- Inner details: 1-2pt weight  
-- Delicate, fine lines throughout
-- Good for detailed work`,
-  
-  medium: `
-LINE WEIGHT: MEDIUM
-- Outer contours: 4-5pt weight
-- Inner details: 2-3pt weight
-- Balanced line weights
-- Standard coloring book style`,
-  
-  bold: `
-LINE WEIGHT: BOLD
-- Outer contours: 6-8pt weight
-- Inner details: 4-5pt weight
-- Thick, forgiving lines
-- Easy for young children to color inside`,
-};
+const MANDATORY_SUFFIX = `
+
+OUTPUT: Black-and-white COLORING BOOK PAGE.
+- BLACK LINES on WHITE background ONLY
+- NO colors, NO gray, NO shading, NO gradients
+- NO solid black fills anywhere
+- Eyes = outline only, tiny dot pupils
+- Hair = line strokes, NOT solid black
+- All shapes CLOSED for coloring
+- Centered, 10% margins`;
 
 /**
- * MANDATORY KDP print-safe suffix - ALWAYS appended to EVERY prompt
- * ULTRA-AGGRESSIVE about black and white because DALL-E tends to ignore these instructions
- */
-const MANDATORY_KDP_SUFFIX = `
-
-=== CRITICAL: THIS MUST BE A COLORING BOOK PAGE ===
-
-***** BLACK AND WHITE LINE ART ONLY *****
-***** NO COLORS WHATSOEVER *****
-***** NO SHADING WHATSOEVER *****
-
-This is a COLORING BOOK PAGE for children to color in with crayons.
-The image MUST be BLACK LINES on WHITE PAPER - nothing else.
-
-VISUAL STYLE - EXACTLY LIKE A PRINTED COLORING BOOK:
-- Draw ONLY black outlines/lines on white background
-- Lines should be like pen drawings - clean, crisp, black
-- Leave ALL interior areas EMPTY WHITE for coloring
-- Think of it as a line drawing that will be photocopied
-
-ABSOLUTELY REQUIRED:
-✓ ONLY black lines (#000000) on pure white (#FFFFFF)
-✓ Outline-only style - like a rubber stamp or line drawing
-✓ ALL shapes are closed outlines with WHITE interiors
-✓ Medium-thick lines that print clearly
-✓ Centered composition with margins
-
-***** FORBIDDEN - DO NOT INCLUDE *****:
-✗ ANY COLOR AT ALL - no blue, red, yellow, green, pink, orange, purple, etc.
-✗ ANY GRAY - no light gray, dark gray, silver, or any gray tones
-✗ ANY SHADING - no soft shadows, gradients, or tonal variations
-✗ ANY FILLS - no solid black areas, no filled shapes
-✗ ANY TEXTURES - no crosshatching, stippling, dots, patterns
-✗ ANY BACKGROUNDS - no colored backgrounds, no gray backgrounds
-
-EYES - VERY IMPORTANT:
-- Draw eyes as SIMPLE CIRCLES or OVALS - outline only
-- Pupil = TINY DOT (almost invisible), NOT a filled circle
-- NO solid black in eyes
-- NO detailed irises
-- Think: cartoon eyes, just outlines
-
-HAIR:
-- Draw hair as individual LINE STROKES - not solid shapes
-- Hair interior must be WHITE
-- NO filled/solid black hair
-
-The output MUST look like a page from a Dollar Store coloring book - 
-simple black outlines on white paper that a child will color in.`;
-
-/**
- * Build CHARACTER BIBLE for Series mode
+ * Build CHARACTER BIBLE for Series mode (compact)
  */
 export function buildCharacterBible(params: {
   characterName?: string;
   characterDescription?: string;
   styleContract: StyleContract;
 }): string {
-  const { characterName, characterDescription, styleContract } = params;
-  
+  const { characterName, characterDescription } = params;
   if (!characterName) return "";
-  
-  return `
-=== CHARACTER BIBLE (MUST MATCH EXACTLY ON EVERY PAGE) ===
-Character Name: ${characterName}
-${characterDescription ? `Description: ${characterDescription}` : ""}
-
-Visual Rules from Reference:
-- Line style: ${styleContract.outlineRules}
-- Eye treatment: ${styleContract.eyeRules}
-- Proportions and features must remain IDENTICAL across all pages
-- The character must be IMMEDIATELY recognizable as the same individual
-
-This character appears in EVERY scene. Do not alter their appearance.`;
+  return `CHARACTER: ${characterName}${characterDescription ? ` - ${characterDescription.substring(0, 100)}` : ""}. Same character every page.`;
 }
 
 /**
- * Build the COMPLETE FINAL prompt for image generation
- * This is what actually gets sent to the image model
+ * Build COMPACT final prompt for DALL-E 3 (must be under 4000 chars!)
  */
 export function buildFinalImagePrompt(params: {
   scenePrompt: string;
@@ -151,117 +59,59 @@ export function buildFinalImagePrompt(params: {
   isAnchor?: boolean;
   retryAttempt?: number;
 }): string {
-  const { scenePrompt, themePack, styleContract, characterBible, spec, isAnchor, retryAttempt = 0 } = params;
+  const { scenePrompt, themePack, styleContract, characterBible, spec, retryAttempt = 0 } = params;
   
   const parts: string[] = [];
   
-  // 1. WORLD/THEME CONSISTENCY (from themePack or styleContract)
+  // 1. Core instruction (SHORT)
+  parts.push("Create a children's COLORING BOOK PAGE (black line art on white).");
+  
+  // 2. Theme context (SHORT - max 200 chars)
   if (themePack) {
-    parts.push(`=== WORLD & THEME CONSISTENCY ===
-Setting: ${themePack.setting}
-Visual motifs: ${themePack.motifs.join(", ")}
-Recurring elements: ${themePack.recurringProps.join(", ")}
-Stay within this world - all elements must fit the established theme.`);
+    parts.push(`THEME: ${themePack.setting.substring(0, 150)}`);
   } else if (styleContract?.extractedThemeGuess) {
-    parts.push(`=== THEME FROM REFERENCE ===
-${styleContract.extractedThemeGuess}
-Generate a scene that fits within this same world/theme.`);
+    parts.push(`THEME: ${styleContract.extractedThemeGuess.substring(0, 150)}`);
   }
   
-  // 2. CHARACTER BIBLE (for Series mode)
+  // 3. Character (if series mode)
   if (characterBible) {
     parts.push(characterBible);
   }
   
-  // 3. SCENE DESCRIPTION (user/AI generated)
-  parts.push(`=== SCENE TO DRAW ===
-${scenePrompt}`);
+  // 4. Scene (the main content - limit to 500 chars)
+  parts.push(`SCENE: ${scenePrompt.substring(0, 500)}`);
   
-  // 4. MATCH REFERENCE STYLE
+  // 5. Style rules (SHORT - only key rules)
   if (styleContract) {
-    parts.push(`=== MATCH REFERENCE STYLE PRECISELY ===
-Style Summary: ${styleContract.styleSummary}
-
-STYLE RULES TO FOLLOW:
-${styleContract.styleContractText}
-
-Composition: ${styleContract.compositionRules}
-Background: ${styleContract.backgroundRules}
-Lines: ${styleContract.outlineRules}
-Eyes/Face: ${styleContract.eyeRules}`);
+    parts.push(`STYLE: ${styleContract.styleSummary.substring(0, 100)}. ${styleContract.outlineRules.substring(0, 100)}`);
   }
   
-  // 5. COMPLEXITY RULES
-  parts.push(COMPLEXITY_RULES[spec.complexity]);
+  // 6. Complexity + Lines
+  parts.push(COMPLEXITY_HINTS[spec.complexity]);
+  parts.push(LINE_HINTS[spec.lineThickness]);
   
-  // 6. LINE THICKNESS RULES
-  parts.push(LINE_THICKNESS_RULES[spec.lineThickness]);
-  
-  // 7. ANCHOR-SPECIFIC (first page)
-  if (isAnchor) {
-    parts.push(`
-=== ANCHOR IMAGE (PAGE 1) ===
-This is the ANCHOR/SAMPLE image that defines the style for all subsequent pages.
-It must be EXEMPLARY - perfect line work, perfect composition, zero fills.
-This will be used as a visual reference for style consistency.`);
+  // 7. Retry simplification
+  if (retryAttempt === 1) {
+    parts.push("SIMPLER: fewer props, thinner lines, more white space");
+  } else if (retryAttempt >= 2) {
+    parts.push("EXTREMELY SIMPLE: minimal props, thinnest lines, maximum white space, no patterns");
   }
   
-  // 8. RETRY-SPECIFIC (stricter rules on retries)
-  if (retryAttempt > 0) {
-    parts.push(buildRetryStricterRules(retryAttempt));
+  // 8. Mandatory B&W suffix
+  parts.push(MANDATORY_SUFFIX);
+  
+  const finalPrompt = parts.join("\n\n");
+  
+  // Safety check - truncate if still too long
+  if (finalPrompt.length > 3800) {
+    return finalPrompt.substring(0, 3800) + "\n\nBLACK LINES ON WHITE. NO COLOR. COLORING BOOK.";
   }
   
-  // 9. FORBIDDEN ELEMENTS
-  if (styleContract?.forbiddenList?.length) {
-    parts.push(`=== FORBIDDEN ELEMENTS (from reference analysis) ===
-DO NOT include any of these:
-${styleContract.forbiddenList.map(f => `- ${f}`).join("\n")}`);
-  }
-  
-  // 10. ALWAYS APPEND MANDATORY KDP SUFFIX
-  parts.push(MANDATORY_KDP_SUFFIX);
-  
-  return parts.join("\n\n");
+  return finalPrompt;
 }
 
 /**
- * Build stricter rules for retry attempts
- */
-function buildRetryStricterRules(attempt: number): string {
-  if (attempt === 1) {
-    return `
-=== RETRY #1 - PREVIOUS IMAGE HAD TOO MUCH BLACK ===
-The previous attempt was REJECTED due to excessive black areas.
-ADDITIONAL STRICT REQUIREMENTS:
-- Make ALL lines thinner than before
-- Eyes: ONLY tiny outline, pupils must be barely visible dots
-- Reduce props to 3-4 maximum
-- Leave more white space
-- NO decorative patterns
-- Simplify everything`;
-  }
-  
-  if (attempt >= 2) {
-    return `
-=== RETRY #${attempt} - STILL TOO MUCH BLACK ===
-Multiple attempts have failed print-safe checks.
-EXTREME SIMPLIFICATION REQUIRED:
-- Use the THINNEST possible lines
-- Eyes: simple circles, NO pupils at all
-- Only 2-3 props maximum
-- EMPTY background - no ground, no sky details
-- Remove ALL decorative elements
-- Maximum white space
-- The simplest possible version of this scene
-Target: UNDER 15% black pixels`;
-  }
-  
-  return "";
-}
-
-/**
- * Build prompt for generating scene prompts (Step 3)
- * Uses extracted theme to ensure consistency
+ * Build prompt for generating scene prompts
  */
 export function buildScenePromptsGenerationPrompt(params: {
   extractedThemeGuess: string;
@@ -274,68 +124,37 @@ export function buildScenePromptsGenerationPrompt(params: {
 }): string {
   const { extractedThemeGuess, userTheme, mode, pagesCount, complexity, characterName, characterDescription } = params;
   
-  const complexityGuide = {
-    simple: "2-4 props per scene, minimal/empty background, single clear subject, large shapes",
-    medium: "4-6 props, simple background elements, 1-2 subjects, moderate detail",
-    detailed: "6-10 props, richer backgrounds, more intricate compositions",
-  };
-  
   const modeInstructions = mode === "series"
-    ? `SERIES MODE: The character "${characterName || 'main character'}" MUST appear in EVERY scene as the primary subject. 
-       Character description: ${characterDescription || 'As shown in reference'}
-       Each scene shows this SAME character doing different activities in the same world.`
-    : `COLLECTION MODE: Pages share the same STYLE and THEME/WORLD but can feature different subjects.
-       All subjects should fit within the established world/setting.`;
+    ? `SERIES: "${characterName || 'main character'}" appears in EVERY scene. ${characterDescription || ''}`
+    : `COLLECTION: Same theme, different subjects allowed.`;
 
-  return `Generate ${pagesCount} unique scene prompts for a coloring book that MATCHES the reference image's theme.
+  return `Generate ${pagesCount} coloring book scene prompts.
 
-=== THEME EXTRACTED FROM REFERENCE IMAGE ===
-${extractedThemeGuess}
-${userTheme ? `\nUser's additional theme input: ${userTheme}` : ""}
+THEME: ${extractedThemeGuess.substring(0, 300)}
+${userTheme ? `Extra: ${userTheme}` : ""}
 
-=== MODE ===
-${modeInstructions}
+MODE: ${modeInstructions}
+COMPLEXITY: ${complexity} (${COMPLEXITY_HINTS[complexity]})
 
-=== COMPLEXITY ===
-${complexity.toUpperCase()}: ${complexityGuide[complexity]}
+Each prompt needs: SUBJECT + ACTION + SETTING + 3-6 PROPS
 
-=== WHAT EACH PROMPT MUST INCLUDE ===
-Every scene prompt must be 5-10 lines and include:
-1. SUBJECT: Who/what is the main focus (${mode === "series" ? `always ${characterName || "the main character"}` : "varies within theme"})
-2. ACTION: What they are doing (active, engaging pose)
-3. SETTING: Where specifically in this world (fits extracted theme)
-4. PROPS: 3-8 specific props that fit the theme (list them)
-5. COMPOSITION: "Centered subject with 15% margins, [foreground/background notes]"
-
-=== OUTPUT FORMAT ===
-Return a JSON object with this EXACT structure:
+OUTPUT JSON:
 {
   "prompts": [
-    {
-      "pageIndex": 1,
-      "title": "Short 3-5 word title",
-      "scenePrompt": "Detailed 5-10 line scene description following the structure above"
-    },
-    {
-      "pageIndex": 2,
-      "title": "Another title",
-      "scenePrompt": "Another detailed scene..."
-    }
+    {"pageIndex": 1, "title": "Short title", "scenePrompt": "Description with subject, action, setting, props"},
+    {"pageIndex": 2, "title": "Title", "scenePrompt": "Another scene..."}
   ]
 }
 
-=== RULES ===
-- Generate EXACTLY ${pagesCount} prompts
-- ALL scenes must feel like they belong in the SAME WORLD as the reference
-- NO references to color (this is a coloring book)
-- NO shading or lighting descriptions
-- Each scene must be UNIQUE and interesting
-- Progress through varied activities and settings within the theme
-- Keep descriptions specific but focused on WHAT to draw, not style`;
+Rules:
+- ${pagesCount} prompts total
+- Same world/theme
+- No color references
+- Each scene unique`;
 }
 
 /**
- * Build prompt for improving an existing scene prompt
+ * Build prompt for improving a scene prompt
  */
 export function buildImprovePromptPrompt(params: {
   currentPrompt: string;
@@ -345,32 +164,18 @@ export function buildImprovePromptPrompt(params: {
 }): string {
   const { currentPrompt, currentTitle, extractedThemeGuess, complexity } = params;
   
-  return `Improve this coloring book scene prompt while keeping its core idea and ensuring it matches the reference theme.
+  return `Improve this coloring book scene prompt.
 
-CURRENT TITLE: ${currentTitle}
-CURRENT PROMPT:
-${currentPrompt}
+CURRENT: ${currentTitle}
+${currentPrompt.substring(0, 300)}
 
-REFERENCE THEME TO MATCH:
-${extractedThemeGuess}
-
+THEME: ${extractedThemeGuess.substring(0, 200)}
 COMPLEXITY: ${complexity}
 
-IMPROVE BY:
-1. Adding more specific, vivid details
-2. Ensuring clear SUBJECT + ACTION + SETTING + PROPS + COMPOSITION structure
-3. Including 3-8 specific props that fit the theme
-4. Adding explicit composition notes (centered, margins, etc.)
-5. Making it more visually engaging while keeping it colorable
-6. Ensuring it fits the reference theme/world
+Make it better: more specific props, clearer composition, fits theme.
 
-OUTPUT FORMAT (JSON):
-{
-  "title": "Improved title (3-5 words)",
-  "scenePrompt": "Improved detailed prompt (5-10 lines)"
-}
-
-Keep the same general scene concept, just enhance it to be more detailed and theme-consistent.`;
+OUTPUT JSON:
+{"title": "Improved title", "scenePrompt": "Improved description"}`;
 }
 
 /**
@@ -382,60 +187,40 @@ export function buildThemePackPrompt(params: {
 }): string {
   const { userTheme, mode } = params;
 
-  const modeInstructions = mode === "series"
-    ? "Create a recurring main CHARACTER that will appear in every scene."
-    : "Create a collection of related subjects that share a common theme/world.";
+  return `Generate a coloring book theme.
 
-  return `Generate a detailed theme pack for a coloring book.
+${userTheme ? `THEME: ${userTheme}` : "Create a fun, kid-friendly theme."}
+MODE: ${mode}
 
-${userTheme ? `USER'S THEME REQUEST: ${userTheme}` : "GENERATE A CREATIVE THEME based on the reference image or suggest something fun."}
-
-MODE: ${mode.toUpperCase()}
-${modeInstructions}
-
-OUTPUT a JSON object with this structure:
+OUTPUT JSON:
 {
-  "setting": "Detailed description of the world/setting (e.g., 'A whimsical underwater kingdom with coral castles')",
-  "recurringProps": ["list", "of", "8-12", "props", "that", "appear", "throughout"],
-  "motifs": ["list", "of", "5-8", "visual", "motifs", "or", "patterns"],
-  "allowedSubjects": ["list", "of", "subjects", "that", "fit", "this", "theme"],
-  "forbiddenElements": ["things", "that", "dont", "fit", "this", "theme"]${mode === "series" ? `,
-  "characterName": "Name of the main character",
-  "characterDescription": "Detailed physical description of the main character that must remain consistent"` : ""}
-}
-
-Make the theme cohesive, imaginative, and suitable for a children's coloring book.`;
+  "setting": "World description",
+  "recurringProps": ["prop1", "prop2", "..."],
+  "motifs": ["motif1", "motif2"],
+  "allowedSubjects": ["subject1", "subject2"],
+  "forbiddenElements": ["avoid1", "avoid2"]${mode === "series" ? `,
+  "characterName": "Name",
+  "characterDescription": "Physical description"` : ""}
+}`;
 }
 
 /**
- * Build prompt for style extraction (vision analysis)
+ * Build prompt for style extraction
  */
 export function buildStyleExtractionPrompt(): string {
-  return `Analyze this reference coloring page image and extract a detailed style contract.
+  return `Analyze this coloring page image. Extract style rules.
 
-You must output a JSON object with the following structure:
-
+OUTPUT JSON:
 {
-  "styleSummary": "A brief 1-2 sentence human-readable description of the style",
-  "styleContractText": "Detailed rules (5-10 lines) that describe exactly how to recreate this style",
-  "forbiddenList": ["list", "of", "elements", "to", "avoid"],
+  "styleSummary": "1-2 sentence style description",
+  "styleContractText": "Key rules to recreate this style (3-5 lines)",
+  "forbiddenList": ["things", "to", "avoid"],
   "recommendedLineThickness": "thin" | "medium" | "bold",
   "recommendedComplexity": "simple" | "medium" | "detailed",
-  "outlineRules": "Description of outline thickness and style",
-  "backgroundRules": "Description of background density and treatment",
-  "compositionRules": "Description of how subjects are framed and composed",
-  "eyeRules": "Description of how eyes and facial features are drawn to avoid fills",
-  "extractedThemeGuess": "Detailed paragraph about the theme/world/setting depicted"
-}
-
-Focus on:
-1. Line weight and thickness patterns
-2. Level of detail and complexity
-3. How eyes, faces, and dark areas are handled (avoiding solid fills)
-4. Background treatment (empty vs. detailed)
-5. Overall composition style
-6. Theme/world/setting depicted
-7. Any distinctive artistic choices
-
-Be specific and actionable - these rules will be used to generate matching pages.`;
+  "outlineRules": "Line thickness rules",
+  "backgroundRules": "Background density",
+  "compositionRules": "How subjects are composed",
+  "eyeRules": "How eyes are drawn (avoid solid black)",
+  "extractedThemeGuess": "Theme/world depicted"
+}`;
 }
