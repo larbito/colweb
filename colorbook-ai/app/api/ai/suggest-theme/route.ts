@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured, TEXT_MODEL, logModelUsage } from "@/lib/openai";
+import { openai, isOpenAIConfigured } from "@/lib/openai";
 import {
   themeSuggestionRequestSchema,
   type ThemeSuggestionResponse,
@@ -52,10 +52,8 @@ RULES:
       ? `Suggest a coloring ${pageGoal === "book" ? "book" : "page"} theme. User hint: "${optionalKeywords}"`
       : `Suggest a unique coloring ${pageGoal === "book" ? "book" : "page"} theme. Be creative and original.`;
 
-    logModelUsage("Suggest theme", "text", TEXT_MODEL);
-
     const response = await openai.chat.completions.create({
-      model: TEXT_MODEL,
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

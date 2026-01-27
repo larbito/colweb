@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     };
 
     const complexityStyle = {
-      simple: "very simple shapes, minimal details, large coloring areas, ages 3-6",
+      kids: "very simple shapes, minimal details, large coloring areas, ages 3-6",
       medium: "moderate detail level, balanced complexity",
       detailed: "intricate detailed patterns for older children and adults",
     };

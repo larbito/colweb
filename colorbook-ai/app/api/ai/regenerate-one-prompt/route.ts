@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured, TEXT_MODEL, logModelUsage } from "@/lib/openai";
+import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
-import { themePackSchema } from "@/lib/themePack";
+import { characterLockSchema } from "@/lib/schemas";
 
-// GenerationSpec schema
+// Accept GenerationSpec directly
 const generationSpecSchema = z.object({
-  bookMode: z.enum(["series", "collection"]),
   trimSize: z.string(),
   pixelSize: z.string(),
   complexity: z.enum(["simple", "medium", "detailed"]),
@@ -21,28 +20,32 @@ const generationSpecSchema = z.object({
 const requestSchema = z.object({
   pageNumber: z.number().int().min(1),
   theme: z.string().min(1),
-  mainCharacter: z.string().optional(),
-  characterType: z.string().optional(),
-  themePack: themePackSchema.optional().nullable(),
+  characterLock: characterLockSchema.optional().nullable(),
   spec: generationSpecSchema,
   previousSceneTitle: z.string(),
-  previousScenePrompt: z.string(),
+  previousPrompt: z.string(),
 });
 
-// Response returns structured scenePrompt
 const responseSchema = z.object({
   pageNumber: z.number(),
   sceneTitle: z.string(),
-  scenePrompt: z.string(),
+  prompt: z.string(),
 });
 
-export type RegenerateSceneResponse = z.infer<typeof responseSchema>;
+export type RegenerateOnePromptRequest = z.infer<typeof requestSchema>;
+export type RegenerateOnePromptResponse = z.infer<typeof responseSchema>;
 
-// Props count by complexity - kept strict
-const COMPLEXITY_PROPS = {
-  simple: { min: 2, max: 4 },
-  medium: { min: 4, max: 6 },
-  detailed: { min: 5, max: 8 },
+// Complexity guidelines
+const COMPLEXITY_GUIDE = {
+  simple: "1 main subject + 2-4 simple props, minimal/no background, very large coloring areas",
+  medium: "1-2 subjects + 4-8 props, light simple background, moderate detail",
+  detailed: "1-2 subjects + 8-12 props, more intricate patterns but still NO shading",
+};
+
+const LINE_GUIDE = {
+  thin: "medium outer lines, thin inner details",
+  medium: "thick outer lines, medium inner details",
+  bold: "very thick outer lines, thick inner details",
 };
 
 export async function POST(request: NextRequest) {
@@ -58,7 +61,6 @@ export async function POST(request: NextRequest) {
     const parseResult = requestSchema.safeParse(body);
 
     if (!parseResult.success) {
-      console.error("Validation error:", JSON.stringify(parseResult.error.flatten(), null, 2));
       return NextResponse.json(
         { error: "Invalid request", details: parseResult.error.flatten() },
         { status: 400 }
@@ -68,82 +70,62 @@ export async function POST(request: NextRequest) {
     const {
       pageNumber,
       theme,
-      mainCharacter,
-      characterType,
-      themePack,
+      characterLock,
       spec,
       previousSceneTitle,
-      previousScenePrompt,
+      previousPrompt,
     } = parseResult.data;
 
-    const propsRange = COMPLEXITY_PROPS[spec.complexity];
-    const characterDesc = mainCharacter ? mainCharacter : "the main subject";
-
-    // Build theme context
-    let themeContext = "";
-    if (themePack) {
-      themeContext = `
-THEME PACK (use consistently):
-- Setting: ${themePack.setting}
-- Mood: ${themePack.artMood}
-- Recurring props (choose from): ${themePack.recurringProps.slice(0, 10).join(", ")}
-- FORBIDDEN: ${themePack.forbidden.join(", ")}`;
+    // Build character section
+    let characterSection = "";
+    if (characterLock) {
+      characterSection = `
+MAIN CHARACTER (LOCKED - MUST BE IDENTICAL):
+Name: ${characterLock.canonicalName}
+Proportions: ${characterLock.visualRules.proportions}
+Face: ${characterLock.visualRules.face}
+Unique Features: ${characterLock.visualRules.uniqueFeatures.join(", ")}
+Outfit: ${characterLock.visualRules.outfit}`;
     }
 
-    const systemPrompt = `You are a scene designer for a children's coloring book. Design SIMPLE, UNCLUTTERED scenes.
+    const systemPrompt = `You are a coloring book prompt writer. Generate ONE replacement prompt for page ${pageNumber} of ${spec.pageCount}.
 
 THEME: ${theme}
-MAIN CHARACTER/SUBJECT: ${characterDesc}${characterType ? ` (a ${characterType})` : ""}
-PAGE: ${pageNumber} of ${spec.pageCount}
-${themeContext}
+${characterSection}
 
-The previous scene was:
+GENERATION SPEC:
+- Complexity: ${spec.complexity} - ${COMPLEXITY_GUIDE[spec.complexity]}
+- Line Thickness: ${spec.lineThickness} - ${LINE_GUIDE[spec.lineThickness]}
+- Trim Size: ${spec.trimSize}
+
+The previous prompt for this page was:
 Title: "${previousSceneTitle}"
-Scene: "${previousScenePrompt}"
+Prompt: "${previousPrompt}"
 
-Generate a NEW, DIFFERENT scene for page ${pageNumber}.
-
-CRITICAL SIMPLICITY RULES:
-- ONE main subject only
-- MAXIMUM ${propsRange.max} props total (count them!)
-- NO repeating items (no "many flowers", no "lots of butterflies")
-- Background: almost nothing (1 horizon line, 0-1 cloud)
-- 70% of the image should be empty white space
-
-STRUCTURED SCENE FORMAT:
-"SUBJECT: [ONE main character with pose]
-ACTION: [simple action]
-SETTING: ${themePack?.setting || "[consistent setting]"}
-FOREGROUND: [1-2 items max]
-MIDGROUND: [subject + 1-2 props]
-BACKGROUND: [almost empty - 1 cloud max]
-PROPS (${propsRange.min}-${propsRange.max} TOTAL): [list each prop ONCE]
-COMPOSITION: centered, wide margins, 70% white space"
-
-FORBIDDEN PATTERNS:
-- "surrounded by many..."
-- "covered in..."
-- "field of..."
-- "lots of..."
-- More than 3 of any item
+Generate a NEW, DIFFERENT scene for page ${pageNumber} that:
+1. Is different from the previous prompt
+2. Fits the theme and story arc (page ${pageNumber} of ${spec.pageCount})
+3. Features the SAME main character with IDENTICAL appearance
+4. Matches complexity level: "${spec.complexity}"
+5. Suitable for black & white line art coloring
+6. NO text, letters, numbers in the image
+7. Portrait orientation composition
 
 Return ONLY this JSON:
 {
   "pageNumber": ${pageNumber},
   "sceneTitle": "Short 3-5 word title",
-  "scenePrompt": "Full structured scene"
+  "prompt": "Detailed scene description..."
 }`;
 
-    logModelUsage(`Regenerate scene ${pageNumber}`, "text", TEXT_MODEL);
-
     const response = await openai.chat.completions.create({
-      model: TEXT_MODEL,
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate a new simple, uncluttered scene for page ${pageNumber}. Maximum ${propsRange.max} props.` },
+        { role: "user", content: `Generate a new, different prompt for page ${pageNumber}.` },
       ],
       temperature: 0.85,
-      max_tokens: 500,
+      max_tokens: 400,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -177,9 +159,9 @@ Return ONLY this JSON:
 
     return NextResponse.json(validationResult.data);
   } catch (error) {
-    console.error("Regenerate scene error:", error);
+    console.error("Regenerate one prompt error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to regenerate scene" },
+      { error: error instanceof Error ? error.message : "Failed to regenerate prompt" },
       { status: 500 }
     );
   }
