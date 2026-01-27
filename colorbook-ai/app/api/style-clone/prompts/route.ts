@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
           }),
         },
       ],
-      max_tokens: Math.min(4000, pagesCount * 200), // Scale tokens with page count
+      max_tokens: Math.max(1000, Math.min(4000, pagesCount * 300)), // Scale tokens with page count, minimum 1000
       response_format: { type: "json_object" },
     });
 
@@ -74,23 +74,51 @@ export async function POST(request: NextRequest) {
       const parsed = JSON.parse(content);
       
       // Handle both array and object with prompts/pages key
-      const promptsArray = Array.isArray(parsed) 
-        ? parsed 
-        : (parsed.prompts || parsed.pages || parsed.scenes || []);
+      let promptsArray: unknown[] = [];
       
-      prompts = promptsArray.map((p: { pageIndex?: number; title?: string; scenePrompt?: string; prompt?: string }, index: number) => ({
-        pageIndex: p.pageIndex || index + 1,
-        title: p.title || `Scene ${index + 1}`,
-        scenePrompt: p.scenePrompt || p.prompt || "",
-      }));
+      if (Array.isArray(parsed)) {
+        promptsArray = parsed;
+      } else if (typeof parsed === 'object' && parsed !== null) {
+        // Try common keys first
+        promptsArray = parsed.prompts || parsed.pages || parsed.scenes || parsed.data || parsed.items || [];
+        
+        // If still empty, look for any array property in the response
+        if (promptsArray.length === 0) {
+          for (const key of Object.keys(parsed)) {
+            if (Array.isArray(parsed[key]) && parsed[key].length > 0) {
+              promptsArray = parsed[key];
+              console.log(`Found prompts array under key: ${key}`);
+              break;
+            }
+          }
+        }
+      }
+      
+      if (promptsArray.length === 0) {
+        console.error("No prompts array found in response:", content.substring(0, 500));
+        return NextResponse.json(
+          { error: "AI returned empty or invalid prompts. Please try again." },
+          { status: 500 }
+        );
+      }
+      
+      prompts = promptsArray.map((p: unknown, index: number) => {
+        const item = p as { pageIndex?: number; title?: string; scenePrompt?: string; prompt?: string; description?: string };
+        return {
+          pageIndex: item.pageIndex || index + 1,
+          title: item.title || `Scene ${index + 1}`,
+          scenePrompt: item.scenePrompt || item.prompt || item.description || "",
+        };
+      });
 
       // Ensure we have the requested number of prompts
       if (prompts.length < pagesCount) {
         console.warn(`Only generated ${prompts.length} prompts, requested ${pagesCount}`);
       }
-    } catch {
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError, "Content:", content.substring(0, 500));
       return NextResponse.json(
-        { error: "Failed to parse AI response as JSON" },
+        { error: "Failed to parse AI response as JSON. Please try again." },
         { status: 500 }
       );
     }

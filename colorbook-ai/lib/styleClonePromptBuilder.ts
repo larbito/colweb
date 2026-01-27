@@ -283,20 +283,23 @@ MODE: ${mode === "series" ? "SERIES - Same character appears in every scene" : "
 
 COMPLEXITY: ${complexity.toUpperCase()} - ${complexityGuide[complexity]}
 
-OUTPUT FORMAT - JSON array:
-[
-  {
-    "pageIndex": 1,
-    "title": "Short scene title (3-5 words)",
-    "scenePrompt": "Detailed scene description (5-10 lines) including:
-      - SUBJECT: Who/what is the main focus
-      - ACTION: What they are doing
-      - SETTING: Where the scene takes place
-      - PROPS: 3-8 specific props in the scene
-      - COMPOSITION: How elements are arranged"
-  },
-  ...
-]
+OUTPUT FORMAT - Return a JSON object with a "prompts" array:
+{
+  "prompts": [
+    {
+      "pageIndex": 1,
+      "title": "Short scene title (3-5 words)",
+      "scenePrompt": "Detailed scene description (5-10 lines) including: SUBJECT, ACTION, SETTING, PROPS (3-8 items), COMPOSITION"
+    },
+    {
+      "pageIndex": 2,
+      "title": "Another scene title",
+      "scenePrompt": "Another detailed scene description..."
+    }
+  ]
+}
+
+IMPORTANT: You MUST return exactly ${pagesCount} prompts in the "prompts" array.
 
 RULES:
 - Each scene must be UNIQUE and interesting
