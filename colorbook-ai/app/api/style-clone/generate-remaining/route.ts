@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
 import { 
-  buildStyleClonePrompt, 
-  buildStricterStyleCloneSuffix 
+  buildFinalImagePrompt,
+  buildCharacterBible,
 } from "@/lib/styleClonePromptBuilder";
+import { validateImageQuality, getQualityThresholds } from "@/lib/qualityGates";
 import { 
-  BLACK_RATIO_THRESHOLDS, 
   KDP_SIZE_PRESETS,
   type StyleContract, 
   type ThemePack,
@@ -14,7 +14,6 @@ import {
   type StyleCloneDebugInfo,
 } from "@/lib/styleClone";
 import type { Complexity, LineThickness, GenerationSpec } from "@/lib/generationSpec";
-import { processImageWithSharp } from "@/lib/imageProcessor";
 import crypto from "crypto";
 
 const styleContractSchema = z.object({
@@ -27,6 +26,7 @@ const styleContractSchema = z.object({
   backgroundRules: z.string(),
   compositionRules: z.string(),
   eyeRules: z.string(),
+  extractedThemeGuess: z.string().optional(),
 });
 
 const themePackSchema = z.object({
@@ -47,11 +47,14 @@ const promptSchema = z.object({
 
 const requestSchema = z.object({
   prompts: z.array(promptSchema).min(1),
-  themePack: themePackSchema.nullable(),
-  styleContract: styleContractSchema.nullable(),
+  themePack: themePackSchema.nullable().optional(),
+  styleContract: styleContractSchema.nullable().optional(),
   complexity: z.enum(["simple", "medium", "detailed"]),
   lineThickness: z.enum(["thin", "medium", "bold"]),
   sizePreset: z.string(),
+  mode: z.enum(["series", "collection"]).optional(),
+  characterName: z.string().optional(),
+  characterDescription: z.string().optional(),
   anchorImageBase64: z.string().optional(),
   skipPageIndices: z.array(z.number()).optional(),
 });
@@ -64,47 +67,49 @@ const DALLE_SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = 
   "1024x1024": "1024x1024",
 };
 
-// Rate limiting: max concurrent requests and delay between batches
+// Rate limiting
 const BATCH_SIZE = 2;
 const DELAY_BETWEEN_BATCHES_MS = 3000;
+const MAX_RETRIES_PER_PAGE = 2;
 
 async function generateSinglePage(params: {
   pageIndex: number;
   scenePrompt: string;
   themePack: ThemePack | null;
   styleContract: StyleContract | null;
+  characterBible: string;
   spec: GenerationSpec;
   dalleSize: "1024x1792" | "1024x1024" | "1792x1024";
-  maxBlackRatio: number;
+  complexity: Complexity;
 }): Promise<StyleCloneImage> {
-  const { pageIndex, scenePrompt, themePack, styleContract, spec, dalleSize, maxBlackRatio } = params;
+  const { pageIndex, scenePrompt, themePack, styleContract, characterBible, spec, dalleSize, complexity } = params;
 
-  const fullPrompt = buildStyleClonePrompt({
-    scenePrompt,
-    themePack,
-    styleContract,
-    spec,
-    isAnchor: false,
-  });
-
-  const promptHash = crypto.createHash("md5").update(fullPrompt).digest("hex").substring(0, 8);
-
+  const thresholds = getQualityThresholds(complexity);
   let imageUrl: string | undefined;
   let imageBase64: string | undefined;
   let retryCount = 0;
-  const maxRetries = 2;
   let lastFailureReason: string | undefined;
-  let finalBlackRatio: number | undefined;
+  let lastQualityMetrics: Record<string, unknown> | undefined;
+  let finalPromptUsed = "";
 
-  while (retryCount < maxRetries) {
+  while (retryCount < MAX_RETRIES_PER_PAGE) {
     try {
-      const attemptPrompt = retryCount > 0 
-        ? `${fullPrompt}${buildStricterStyleCloneSuffix(lastFailureReason || "Too much black")}`
-        : fullPrompt;
+      const fullPrompt = buildFinalImagePrompt({
+        scenePrompt,
+        themePack,
+        styleContract,
+        characterBible,
+        spec,
+        isAnchor: false,
+        retryAttempt: retryCount,
+      });
+
+      finalPromptUsed = fullPrompt;
+      const promptHash = crypto.createHash("md5").update(fullPrompt).digest("hex").substring(0, 8);
 
       const response = await openai.images.generate({
         model: "dall-e-3",
-        prompt: attemptPrompt,
+        prompt: fullPrompt,
         n: 1,
         size: dalleSize,
         quality: "hd",
@@ -114,38 +119,35 @@ async function generateSinglePage(params: {
       imageUrl = response.data?.[0]?.url;
 
       if (imageUrl) {
-        try {
-          const imageResponse = await fetch(imageUrl);
+        const imageResponse = await fetch(imageUrl);
+        if (imageResponse.ok) {
           const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
           
-          const processed = await processImageWithSharp(imageBuffer, {
-            binarizationThreshold: 220,
-            maxBlackRatio,
-            minRunLength: 50,
-            maxLongRuns: 30,
-          });
+          const qualityResult = await validateImageQuality(imageBuffer, complexity);
+          lastQualityMetrics = {
+            ...qualityResult.metrics,
+            ...qualityResult.debug,
+          };
 
-          finalBlackRatio = processed.blackRatio;
-
-          if (processed.passed) {
-            imageBase64 = processed.base64;
+          if (qualityResult.passed && qualityResult.correctedImageBuffer) {
+            // Use the corrected (pure B&W) buffer
+            imageBase64 = qualityResult.correctedImageBuffer.toString("base64");
             break;
           } else {
-            lastFailureReason = processed.failureReason || "Quality check failed";
+            lastFailureReason = qualityResult.failureReason;
           }
-        } catch {
-          // Use original if processing fails
-          const imageResponse = await fetch(imageUrl);
-          imageBase64 = Buffer.from(await imageResponse.arrayBuffer()).toString("base64");
-          break;
+        } else {
+          lastFailureReason = "Failed to fetch image";
         }
+      } else {
+        lastFailureReason = "No image URL returned";
       }
-    } catch (genError) {
-      lastFailureReason = genError instanceof Error ? genError.message : "Generation failed";
+    } catch (error) {
+      lastFailureReason = error instanceof Error ? error.message : "Generation failed";
     }
 
     retryCount++;
-    if (retryCount < maxRetries) {
+    if (retryCount < MAX_RETRIES_PER_PAGE) {
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
@@ -153,18 +155,19 @@ async function generateSinglePage(params: {
   const debugInfo: StyleCloneDebugInfo = {
     provider: "openai",
     imageModel: "dall-e-3",
-    textModel: "gpt-4o",
+    textModel: "gpt-4.1",
     size: dalleSize,
-    promptHash,
-    promptPreview: fullPrompt.substring(0, 300) + "...",
-    finalPrompt: fullPrompt,
+    promptHash: crypto.createHash("md5").update(finalPromptUsed).digest("hex").substring(0, 8),
+    promptPreview: finalPromptUsed.substring(0, 300) + "...",
+    finalPrompt: finalPromptUsed,
     negativePrompt: styleContract?.forbiddenList?.join(", ") || "",
     thresholds: {
-      blackRatio: finalBlackRatio || 0,
-      maxBlackRatio,
-      blobThreshold: 0.015,
+      blackRatio: (lastQualityMetrics?.blackRatio as number) || 0,
+      maxBlackRatio: thresholds.maxBlackRatio,
+      blobThreshold: thresholds.maxBlobRatio,
     },
-    blackRatio: finalBlackRatio,
+    blackRatio: lastQualityMetrics?.blackRatio as number | undefined,
+    colorCorrectionApplied: (lastQualityMetrics?.wasColorCorrected as boolean) || false,
     retries: retryCount,
     failureReason: !imageBase64 ? lastFailureReason : undefined,
   };
@@ -173,7 +176,7 @@ async function generateSinglePage(params: {
     pageIndex,
     imageBase64,
     imageUrl,
-    finalPrompt: fullPrompt,
+    finalPrompt: finalPromptUsed,
     passedGates: !!imageBase64,
     debug: debugInfo,
   };
@@ -186,6 +189,8 @@ export async function POST(request: NextRequest) {
       { status: 503 }
     );
   }
+
+  const requestId = crypto.randomUUID();
 
   try {
     const body = await request.json();
@@ -205,11 +210,15 @@ export async function POST(request: NextRequest) {
       complexity, 
       lineThickness, 
       sizePreset,
+      mode,
+      characterName,
+      characterDescription,
       skipPageIndices = [],
     } = parseResult.data;
 
     const preset = KDP_SIZE_PRESETS[sizePreset] || KDP_SIZE_PRESETS["8.5x11"];
     const pixelSize = preset.pixels;
+    const dalleSize = DALLE_SIZE_MAP[pixelSize] || "1024x1792";
 
     const spec: GenerationSpec = {
       trimSize: sizePreset,
@@ -224,10 +233,17 @@ export async function POST(request: NextRequest) {
       stylePreset: "kids-kdp",
     };
 
-    const dalleSize = DALLE_SIZE_MAP[pixelSize] || "1024x1792";
-    const maxBlackRatio = BLACK_RATIO_THRESHOLDS[complexity as Complexity];
+    // Build character bible for Series mode
+    let characterBible = "";
+    if (mode === "series" && characterName && styleContract) {
+      characterBible = buildCharacterBible({
+        characterName,
+        characterDescription,
+        styleContract: styleContract as StyleContract,
+      });
+    }
 
-    // Filter out pages that should be skipped
+    // Filter out pages to skip
     const promptsToGenerate = prompts.filter(p => !skipPageIndices.includes(p.pageIndex));
     
     if (promptsToGenerate.length === 0) {
@@ -236,6 +252,7 @@ export async function POST(request: NextRequest) {
         successCount: 0,
         failCount: 0,
         message: "No pages to generate",
+        requestId,
       });
     }
 
@@ -243,7 +260,7 @@ export async function POST(request: NextRequest) {
     let successCount = 0;
     let failCount = 0;
 
-    // Process in batches to avoid rate limits
+    // Process in batches
     for (let i = 0; i < promptsToGenerate.length; i += BATCH_SIZE) {
       const batch = promptsToGenerate.slice(i, i + BATCH_SIZE);
       
@@ -254,9 +271,10 @@ export async function POST(request: NextRequest) {
             scenePrompt: prompt.scenePrompt,
             themePack: themePack as ThemePack | null,
             styleContract: styleContract as StyleContract | null,
+            characterBible,
             spec,
             dalleSize,
-            maxBlackRatio,
+            complexity: complexity as Complexity,
           })
         )
       );
@@ -270,7 +288,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Add delay between batches (except for the last batch)
+      // Delay between batches
       if (i + BATCH_SIZE < promptsToGenerate.length) {
         await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS));
       }
@@ -281,23 +299,20 @@ export async function POST(request: NextRequest) {
       successCount,
       failCount,
       totalRequested: promptsToGenerate.length,
+      requestId,
     });
-  } catch (error) {
-    console.error("Generate remaining error:", error);
 
-    if (error instanceof Error) {
-      if (error.message.includes("rate_limit")) {
-        return NextResponse.json(
-          { error: "Rate limit exceeded. Please wait and try again." },
-          { status: 429 }
-        );
-      }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("rate_limit")) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded.", requestId },
+        { status: 429 }
+      );
     }
 
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate remaining pages" },
+      { error: error instanceof Error ? error.message : "Failed to generate pages", requestId },
       { status: 500 }
     );
   }
 }
-

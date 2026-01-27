@@ -2,8 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
 import { buildImprovePromptPrompt } from "@/lib/styleClonePromptBuilder";
-import type { ThemePack, StyleClonePrompt } from "@/lib/styleClone";
+import type { StyleClonePrompt } from "@/lib/styleClone";
 import type { Complexity } from "@/lib/generationSpec";
+
+const styleContractSchema = z.object({
+  styleSummary: z.string(),
+  styleContractText: z.string(),
+  forbiddenList: z.array(z.string()),
+  recommendedLineThickness: z.enum(["thin", "medium", "bold"]),
+  recommendedComplexity: z.enum(["simple", "medium", "detailed"]),
+  outlineRules: z.string(),
+  backgroundRules: z.string(),
+  compositionRules: z.string(),
+  eyeRules: z.string(),
+  extractedThemeGuess: z.string().optional(),
+}).optional().nullable();
 
 const themePackSchema = z.object({
   setting: z.string(),
@@ -13,9 +26,10 @@ const themePackSchema = z.object({
   forbiddenElements: z.array(z.string()),
   characterName: z.string().optional(),
   characterDescription: z.string().optional(),
-});
+}).optional().nullable();
 
 const requestSchema = z.object({
+  styleContract: styleContractSchema,
   themePack: themePackSchema,
   complexity: z.enum(["simple", "medium", "detailed"]),
   currentTitle: z.string().min(1),
@@ -53,22 +67,30 @@ export async function POST(
       );
     }
 
-    const { themePack, complexity, currentTitle, currentPrompt } = parseResult.data;
+    const { styleContract, themePack, complexity, currentTitle, currentPrompt } = parseResult.data;
+
+    // Get theme from either styleContract or themePack
+    let extractedThemeGuess = "";
+    if (styleContract?.extractedThemeGuess) {
+      extractedThemeGuess = styleContract.extractedThemeGuess;
+    } else if (themePack) {
+      extractedThemeGuess = `Setting: ${themePack.setting}. Motifs: ${themePack.motifs.join(", ")}.`;
+    }
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4.1",
       messages: [
         {
           role: "user",
           content: buildImprovePromptPrompt({
             currentPrompt,
             currentTitle,
-            themePack: themePack as ThemePack,
+            extractedThemeGuess,
             complexity: complexity as Complexity,
           }),
         },
       ],
-      max_tokens: 600,
+      max_tokens: 800,
       response_format: { type: "json_object" },
     });
 
@@ -98,7 +120,7 @@ export async function POST(
     return NextResponse.json({
       prompt,
       debug: {
-        model: "gpt-4o",
+        model: "gpt-4.1",
         tokensUsed: response.usage?.total_tokens,
       },
     });
@@ -111,4 +133,3 @@ export async function POST(
     );
   }
 }
-

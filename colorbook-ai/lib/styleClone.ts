@@ -28,6 +28,8 @@ export interface StyleContract {
   compositionRules: string;
   /** Eye/face rules to avoid fills */
   eyeRules: string;
+  /** Extracted theme/world/setting guess from the reference image */
+  extractedThemeGuess: string;
 }
 
 export interface ThemePack {
@@ -82,6 +84,8 @@ export interface StyleCloneDebugInfo {
     totalBlobs: number;
     microNoiseCount: number;
   };
+  /** Whether the image was force-converted from color to B&W */
+  colorCorrectionApplied?: boolean;
   retries: number;
   failureReason?: string;
 }

@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
-import { buildScenePromptsPrompt } from "@/lib/styleClonePromptBuilder";
-import type { ThemePack, StyleClonePrompt } from "@/lib/styleClone";
+import { buildScenePromptsGenerationPrompt } from "@/lib/styleClonePromptBuilder";
+import type { StyleClonePrompt } from "@/lib/styleClone";
 import type { Complexity } from "@/lib/generationSpec";
+
+const styleContractSchema = z.object({
+  styleSummary: z.string(),
+  styleContractText: z.string(),
+  forbiddenList: z.array(z.string()),
+  recommendedLineThickness: z.enum(["thin", "medium", "bold"]),
+  recommendedComplexity: z.enum(["simple", "medium", "detailed"]),
+  outlineRules: z.string(),
+  backgroundRules: z.string(),
+  compositionRules: z.string(),
+  eyeRules: z.string(),
+  extractedThemeGuess: z.string(),
+});
 
 const themePackSchema = z.object({
   setting: z.string(),
@@ -13,13 +26,19 @@ const themePackSchema = z.object({
   forbiddenElements: z.array(z.string()),
   characterName: z.string().optional(),
   characterDescription: z.string().optional(),
-});
+}).optional().nullable();
 
 const requestSchema = z.object({
+  // Can receive either styleContract (with extractedThemeGuess) or themePack
+  styleContract: styleContractSchema.optional().nullable(),
   themePack: themePackSchema,
+  userTheme: z.string().optional(),
   mode: z.enum(["series", "collection"]),
   pagesCount: z.number().int().min(1).max(80),
   complexity: z.enum(["simple", "medium", "detailed"]),
+  // For Series mode
+  characterName: z.string().optional(),
+  characterDescription: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -41,22 +60,59 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { themePack, mode, pagesCount, complexity } = parseResult.data;
+    const { styleContract, themePack, userTheme, mode, pagesCount, complexity, characterName, characterDescription } = parseResult.data;
+
+    // Get the theme/world from either styleContract or themePack
+    let extractedThemeGuess = "";
+    let finalCharacterName = characterName;
+    let finalCharacterDescription = characterDescription;
+
+    if (styleContract?.extractedThemeGuess) {
+      extractedThemeGuess = styleContract.extractedThemeGuess;
+    } else if (themePack) {
+      extractedThemeGuess = `Setting: ${themePack.setting}. 
+Visual motifs: ${themePack.motifs.join(", ")}. 
+Recurring elements: ${themePack.recurringProps.join(", ")}.
+Allowed subjects: ${themePack.allowedSubjects.join(", ")}.`;
+      
+      if (themePack.characterName) {
+        finalCharacterName = finalCharacterName || themePack.characterName;
+        finalCharacterDescription = finalCharacterDescription || themePack.characterDescription;
+      }
+    }
+
+    if (!extractedThemeGuess && !userTheme) {
+      return NextResponse.json(
+        { error: "No theme information provided. Please extract style first or provide a theme." },
+        { status: 400 }
+      );
+    }
+
+    // Build the prompt generation request
+    const generationPrompt = buildScenePromptsGenerationPrompt({
+      extractedThemeGuess: extractedThemeGuess || userTheme || "",
+      userTheme,
+      mode,
+      pagesCount,
+      complexity: complexity as Complexity,
+      characterName: finalCharacterName,
+      characterDescription: finalCharacterDescription,
+    });
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4.1",
       messages: [
         {
+          role: "system",
+          content: "You are an expert at creating detailed, cohesive coloring book scene descriptions. Always output valid JSON.",
+        },
+        {
           role: "user",
-          content: buildScenePromptsPrompt({
-            themePack: themePack as ThemePack,
-            mode,
-            pagesCount,
-            complexity: complexity as Complexity,
-          }),
+          content: generationPrompt,
         },
       ],
-      max_tokens: Math.max(1000, Math.min(4000, pagesCount * 300)), // Scale tokens with page count, minimum 1000
+      max_tokens: Math.max(2000, Math.min(8000, pagesCount * 400)),
+      temperature: 0.7,
       response_format: { type: "json_object" },
     });
 
@@ -73,7 +129,7 @@ export async function POST(request: NextRequest) {
     try {
       const parsed = JSON.parse(content);
       
-      // Handle both array and object with prompts/pages key
+      // Handle both array and object with prompts key
       let promptsArray: unknown[] = [];
       
       if (Array.isArray(parsed)) {
@@ -111,6 +167,12 @@ export async function POST(request: NextRequest) {
         };
       });
 
+      // Validate prompt quality
+      const validPrompts = prompts.filter(p => p.scenePrompt && p.scenePrompt.length > 50);
+      if (validPrompts.length < prompts.length) {
+        console.warn(`${prompts.length - validPrompts.length} prompts were too short`);
+      }
+
       // Ensure we have the requested number of prompts
       if (prompts.length < pagesCount) {
         console.warn(`Only generated ${prompts.length} prompts, requested ${pagesCount}`);
@@ -126,9 +188,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       prompts,
       debug: {
-        model: "gpt-4o",
+        model: "gpt-4.1",
         tokensUsed: response.usage?.total_tokens,
         promptsGenerated: prompts.length,
+        themeUsed: extractedThemeGuess.substring(0, 200) + "...",
+        mode,
+        complexity,
       },
     });
   } catch (error) {
@@ -149,4 +214,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

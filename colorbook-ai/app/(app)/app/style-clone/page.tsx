@@ -73,12 +73,15 @@ interface FormState {
   complexity: Complexity;
   lineThickness: LineThickness;
   sizePreset: string;
-  styleContract: StyleContract | null;
+  styleContract: (StyleContract & { extractedThemeGuess?: string }) | null;
   themePack: ThemePack | null;
   prompts: StyleClonePrompt[];
   pageImages: Record<number, PageImageState>;
   anchorApproved: boolean;
   anchorImageBase64: string | null;
+  // Series mode character info
+  characterName: string;
+  characterDescription: string;
 }
 
 export default function StyleClonePage() {
@@ -115,6 +118,8 @@ export default function StyleClonePage() {
     pageImages: {},
     anchorApproved: false,
     anchorImageBase64: null,
+    characterName: "",
+    characterDescription: "",
   });
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -232,8 +237,9 @@ export default function StyleClonePage() {
   // Generate Prompts
   // =====================
   const generatePrompts = async () => {
-    if (!form.themePack) {
-      toast.error("Please generate a theme pack first");
+    // Can use either styleContract (with extractedThemeGuess) or themePack
+    if (!form.styleContract?.extractedThemeGuess && !form.themePack) {
+      toast.error("Please extract style first or generate a theme pack");
       return;
     }
 
@@ -243,10 +249,14 @@ export default function StyleClonePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          styleContract: form.styleContract,
           themePack: form.themePack,
+          userTheme: form.themeText || undefined,
           mode: form.mode,
           pagesCount: form.pagesCount,
           complexity: form.complexity,
+          characterName: form.mode === "series" ? form.characterName : undefined,
+          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
         }),
       });
 
@@ -270,7 +280,7 @@ export default function StyleClonePage() {
   // Regenerate Single Prompt
   // =====================
   const regeneratePrompt = async (pageIndex: number) => {
-    if (!form.themePack) return;
+    if (!form.styleContract?.extractedThemeGuess && !form.themePack) return;
 
     const currentPrompt = form.prompts.find(p => p.pageIndex === pageIndex);
     
@@ -286,12 +296,15 @@ export default function StyleClonePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          styleContract: form.styleContract,
           themePack: form.themePack,
           mode: form.mode,
           complexity: form.complexity,
           previousTitle: currentPrompt?.title,
           previousPrompt: currentPrompt?.scenePrompt,
           existingTitles: form.prompts.map(p => p.title),
+          characterName: form.mode === "series" ? form.characterName : undefined,
+          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
         }),
       });
 
@@ -314,7 +327,7 @@ export default function StyleClonePage() {
   // Improve Single Prompt
   // =====================
   const improvePrompt = async (pageIndex: number) => {
-    if (!form.themePack) return;
+    if (!form.styleContract?.extractedThemeGuess && !form.themePack) return;
 
     const currentPrompt = form.prompts.find(p => p.pageIndex === pageIndex);
     if (!currentPrompt) return;
@@ -324,6 +337,7 @@ export default function StyleClonePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          styleContract: form.styleContract,
           themePack: form.themePack,
           complexity: form.complexity,
           currentTitle: currentPrompt.title,
@@ -376,6 +390,9 @@ export default function StyleClonePage() {
           complexity: form.complexity,
           lineThickness: form.lineThickness,
           sizePreset: form.sizePreset,
+          mode: form.mode,
+          characterName: form.mode === "series" ? form.characterName : undefined,
+          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
           referenceImageBase64: form.referenceImageBase64,
         }),
       });
@@ -474,6 +491,9 @@ export default function StyleClonePage() {
           complexity: form.complexity,
           lineThickness: form.lineThickness,
           sizePreset: form.sizePreset,
+          mode: form.mode,
+          characterName: form.mode === "series" ? form.characterName : undefined,
+          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
           anchorImageBase64: form.anchorImageBase64,
           skipPageIndices: Object.entries(form.pageImages)
             .filter(([, state]) => state.imageUrl)
@@ -547,6 +567,9 @@ export default function StyleClonePage() {
           complexity: form.complexity,
           lineThickness: form.lineThickness,
           sizePreset: form.sizePreset,
+          mode: form.mode,
+          characterName: form.mode === "series" ? form.characterName : undefined,
+          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
           anchorImageBase64: form.anchorImageBase64,
         }),
       });
@@ -598,9 +621,13 @@ export default function StyleClonePage() {
   const canProceed = () => {
     switch (step) {
       case 1:
-        return !!form.referenceImageBase64;
+        return !!form.referenceImageBase64 && !!form.styleContract;
       case 2:
-        return !!form.styleContract && !!form.themePack;
+        // Need either styleContract with extractedThemeGuess OR themePack
+        const hasThemeInfo = !!form.styleContract?.extractedThemeGuess || !!form.themePack;
+        // For Series mode, also need character name
+        const hasSeriesInfo = form.mode === "collection" || (form.mode === "series" && form.characterName.trim().length > 0);
+        return hasThemeInfo && hasSeriesInfo;
       case 3:
         return form.prompts.length > 0;
       case 4:
@@ -814,9 +841,39 @@ export default function StyleClonePage() {
                       </div>
                     </div>
 
+                    {/* Series Mode: Character Info */}
+                    {form.mode === "series" && (
+                      <div className="space-y-4 rounded-xl border border-border bg-muted/30 p-4">
+                        <h4 className="font-semibold flex items-center gap-2">
+                          <Users className="h-4 w-4" /> Main Character (Series Mode)
+                        </h4>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium">Character Name</label>
+                          <Input
+                            placeholder="e.g., Luna the Unicorn, Captain Rex"
+                            value={form.characterName}
+                            onChange={(e) => updateForm("characterName", e.target.value)}
+                            className="rounded-xl"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium">Character Description</label>
+                          <Textarea
+                            placeholder="e.g., A cute baby panda with big round eyes, wearing a red bowtie..."
+                            value={form.characterDescription}
+                            onChange={(e) => updateForm("characterDescription", e.target.value)}
+                            className="rounded-xl min-h-[80px]"
+                          />
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            This character will appear consistently on every page
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Theme Input */}
                     <div>
-                      <label className="mb-2 block text-sm font-medium">Theme (optional)</label>
+                      <label className="mb-2 block text-sm font-medium">Additional Theme (optional)</label>
                       <Input
                         placeholder="e.g., underwater adventure, farm animals, space exploration"
                         value={form.themeText}
@@ -824,9 +881,21 @@ export default function StyleClonePage() {
                         className="rounded-xl"
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Leave empty for AI to suggest based on your reference
+                        Add extra context, or leave empty to use the theme from your reference
                       </p>
                     </div>
+
+                    {/* Show Extracted Theme from Reference */}
+                    {form.styleContract?.extractedThemeGuess && (
+                      <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+                        <h4 className="font-semibold text-blue-700 dark:text-blue-400 mb-2 flex items-center gap-2">
+                          <Sparkles className="h-4 w-4" /> Theme Detected from Reference
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          {form.styleContract.extractedThemeGuess}
+                        </p>
+                      </div>
+                    )}
 
                     {/* Page Count */}
                     <div>
@@ -1197,10 +1266,62 @@ export default function StyleClonePage() {
 
                     {showDebug && lastDebug && (
                       <Card className="border-border/50 bg-muted/30">
-                        <CardContent className="p-3">
-                          <pre className="text-xs overflow-auto max-h-40">
-                            {JSON.stringify(lastDebug, null, 2)}
-                          </pre>
+                        <CardContent className="p-3 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-medium">Debug Info</h4>
+                            {(lastDebug as { finalPromptFull?: string }).finalPromptFull && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => {
+                                  navigator.clipboard.writeText((lastDebug as { finalPromptFull: string }).finalPromptFull);
+                                  toast.success("Final prompt copied!");
+                                }}
+                              >
+                                <Copy className="h-3 w-3 mr-1" /> Copy Final Prompt
+                              </Button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-muted-foreground">Model:</span>{" "}
+                              <span className="font-mono">{(lastDebug as { imageModel?: string }).imageModel || "N/A"}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Retries:</span>{" "}
+                              <span className="font-mono">{(lastDebug as { retries?: number }).retries || 0}</span>
+                            </div>
+                            {(lastDebug as { qualityMetrics?: { blackRatio?: number } }).qualityMetrics && (
+                              <>
+                                <div>
+                                  <span className="text-muted-foreground">Black Ratio:</span>{" "}
+                                  <span className="font-mono">
+                                    {(((lastDebug as { qualityMetrics: { blackRatio: number } }).qualityMetrics.blackRatio || 0) * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Max Allowed:</span>{" "}
+                                  <span className="font-mono">
+                                    {(((lastDebug as { thresholds?: { maxBlackRatio?: number } }).thresholds?.maxBlackRatio || 0) * 100).toFixed(0)}%
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          {(lastDebug as { failureReason?: string }).failureReason && (
+                            <div className="text-xs text-red-500 bg-red-500/10 rounded p-2">
+                              <strong>Failure:</strong> {(lastDebug as { failureReason: string }).failureReason}
+                            </div>
+                          )}
+                          <details className="text-xs">
+                            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                              Full Debug JSON
+                            </summary>
+                            <pre className="mt-2 overflow-auto max-h-32 bg-muted p-2 rounded text-[10px]">
+                              {JSON.stringify(lastDebug, null, 2)}
+                            </pre>
+                          </details>
                         </CardContent>
                       </Card>
                     )}
