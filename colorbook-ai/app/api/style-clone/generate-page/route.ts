@@ -207,7 +207,7 @@ export async function POST(request: NextRequest) {
       pageIndex,
       provider: "openai",
       imageModel: "dall-e-3",
-      textModel: "gpt-4.1",
+      textModel: "gpt-4o",
       size: dalleSize,
       complexity,
       lineThickness,

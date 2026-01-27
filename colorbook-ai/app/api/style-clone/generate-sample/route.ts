@@ -233,7 +233,7 @@ export async function POST(request: NextRequest) {
       requestId,
       provider: "openai",
       imageModel: "dall-e-3",
-      textModel: "gpt-4.1", // Latest stable text model for prompt generation
+      textModel: "gpt-4o", // Latest stable text model for prompt generation
       size: dalleSize,
       complexity,
       lineThickness,

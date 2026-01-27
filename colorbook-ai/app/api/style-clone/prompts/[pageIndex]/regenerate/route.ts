@@ -134,7 +134,7 @@ OUTPUT FORMAT (JSON):
 Make it UNIQUE, engaging, and consistent with the theme/world. No references to color.`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: "gpt-4o",
       messages: [
         {
           role: "user",
@@ -171,7 +171,7 @@ Make it UNIQUE, engaging, and consistent with the theme/world. No references to 
     return NextResponse.json({
       prompt,
       debug: {
-        model: "gpt-4.1",
+        model: "gpt-4o",
         tokensUsed: response.usage?.total_tokens,
       },
     });

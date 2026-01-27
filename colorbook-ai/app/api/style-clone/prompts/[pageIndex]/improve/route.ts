@@ -78,7 +78,7 @@ export async function POST(
     }
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: "gpt-4o",
       messages: [
         {
           role: "user",
@@ -120,7 +120,7 @@ export async function POST(
     return NextResponse.json({
       prompt,
       debug: {
-        model: "gpt-4.1",
+        model: "gpt-4o",
         tokensUsed: response.usage?.total_tokens,
       },
     });

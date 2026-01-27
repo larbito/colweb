@@ -100,7 +100,7 @@ Allowed subjects: ${themePack.allowedSubjects.join(", ")}.`;
     });
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -188,7 +188,7 @@ Allowed subjects: ${themePack.allowedSubjects.join(", ")}.`;
     return NextResponse.json({
       prompts,
       debug: {
-        model: "gpt-4.1",
+        model: "gpt-4o",
         tokensUsed: response.usage?.total_tokens,
         promptsGenerated: prompts.length,
         themeUsed: extractedThemeGuess.substring(0, 200) + "...",

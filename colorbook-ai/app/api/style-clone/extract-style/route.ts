@@ -111,7 +111,7 @@ Be EXTREMELY specific and detailed. This will be used to generate dozens of matc
 
     // Use GPT-4o for vision analysis
     const response = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: "gpt-4o",
       messages: [
         {
           role: "user",
@@ -181,7 +181,7 @@ Be EXTREMELY specific and detailed. This will be used to generate dozens of matc
     return NextResponse.json({
       styleContract,
       debug: {
-        model: "gpt-4.1",
+        model: "gpt-4o",
         tokensUsed: response.usage?.total_tokens,
         promptTokens: response.usage?.prompt_tokens,
         completionTokens: response.usage?.completion_tokens,

@@ -155,7 +155,7 @@ async function generateSinglePage(params: {
   const debugInfo: StyleCloneDebugInfo = {
     provider: "openai",
     imageModel: "dall-e-3",
-    textModel: "gpt-4.1",
+    textModel: "gpt-4o",
     size: dalleSize,
     promptHash: crypto.createHash("md5").update(finalPromptUsed).digest("hex").substring(0, 8),
     promptPreview: finalPromptUsed.substring(0, 300) + "...",
