@@ -3,6 +3,12 @@
   "outputDirectory": ".next",
   "installCommand": "npm install",
   "framework": "nextjs",
+  "functions": {
+    "app/api/style-clone/**/*.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/refresh-trends",
@@ -10,4 +16,3 @@
     }
   ]
 }
-

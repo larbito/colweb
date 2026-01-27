@@ -7,6 +7,30 @@ const requestSchema = z.object({
   referenceImageBase64: z.string().min(1, "Reference image is required"),
 });
 
+// Compress image if too large (max 4MB for base64 ~= 3MB raw)
+async function compressImageIfNeeded(base64: string): Promise<string> {
+  // If base64 is under 4MB, use as-is
+  if (base64.length < 4 * 1024 * 1024) {
+    return base64;
+  }
+  
+  // Try to compress with Sharp
+  try {
+    const sharp = await import("sharp").catch(() => null);
+    if (!sharp) return base64;
+    
+    const buffer = Buffer.from(base64, "base64");
+    const compressed = await sharp.default(buffer)
+      .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    
+    return compressed.toString("base64");
+  } catch {
+    return base64;
+  }
+}
+
 /**
  * REAL style extraction using GPT-4o vision
  * Analyzes the uploaded reference image to extract:
@@ -33,7 +57,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { referenceImageBase64 } = parseResult.data;
+    const { referenceImageBase64: rawImage } = parseResult.data;
+
+    // Compress if needed
+    const referenceImageBase64 = await compressImageIfNeeded(rawImage);
 
     // Determine the image media type
     let mediaType = "image/png";
@@ -42,6 +69,8 @@ export async function POST(request: NextRequest) {
     } else if (referenceImageBase64.startsWith("iVBOR")) {
       mediaType = "image/png";
     }
+    
+    console.log(`[extract-style] Image size: ${(referenceImageBase64.length / 1024).toFixed(0)}KB`);
 
     // Detailed vision analysis prompt
     const analysisPrompt = `You are an expert at analyzing coloring book pages. Analyze this reference coloring page image in EXTREME DETAIL.
