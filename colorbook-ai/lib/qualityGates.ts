@@ -1,93 +1,68 @@
 /**
- * qualityGates.ts - Strict quality validation for print-safe coloring book images
+ * qualityGates.ts - Quality validation for coloring book images
  * 
- * IMPORTANT: DALL-E often ignores "black and white" instructions and returns colored images.
- * We MUST force-convert all images to true black and white before validation.
+ * NOTE: DALL-E 3 doesn't support image conditioning, so we rely on:
+ * 1. Detailed style descriptions from vision analysis
+ * 2. Force B&W conversion after generation
+ * 3. Quality checks to reject truly bad outputs
  */
 
 import type { Complexity } from "./generationSpec";
 
-/**
- * Quality gate result
- */
 export interface QualityGateResult {
   passed: boolean;
   failureReason?: string;
   metrics: {
     blackRatio: number;
     maxAllowedBlackRatio: number;
-    hasColor: boolean;
-    hasGrayscale: boolean;
-    largestBlobRatio: number;
-    maxAllowedBlobRatio: number;
-    tinyBlobCount: number;
-    maxAllowedTinyBlobs: number;
     wasColorCorrected: boolean;
+    originalHadColor: boolean;
+    originalHadGray: boolean;
   };
   debug: {
     totalPixels: number;
     blackPixels: number;
-    coloredPixels: number;
-    grayscalePixels: number;
-    blobsAnalyzed: number;
+    whitePixels: number;
     processingTimeMs: number;
   };
-  /** The corrected/binarized image buffer (always pure B&W) */
   correctedImageBuffer?: Buffer;
 }
 
 /**
- * Black ratio thresholds by complexity
- * DALL-E 3 typically produces 30-50% black after B&W conversion
- * Set generously to allow images to pass
+ * Black ratio thresholds - set realistically for DALL-E output
+ * After B&W conversion, typical images have 20-40% black
  */
 export const BLACK_RATIO_LIMITS: Record<Complexity, number> = {
-  simple: 0.50,   // Max 50% black for simple pages
-  medium: 0.60,   // Max 60% black for medium pages  
-  detailed: 0.70, // Max 70% black for detailed pages
+  simple: 0.45,   // Max 45% black
+  medium: 0.55,   // Max 55% black  
+  detailed: 0.65, // Max 65% black
 };
 
 /**
- * Maximum single blob size (as ratio of total image)
- * Set very high - DALL-E produces complex images
- */
-export const MAX_BLOB_RATIO = 0.10; // 10% of image area
-
-/**
- * Maximum number of tiny blobs
- * DISABLED effectively - DALL-E images have lots of detail
- */
-export const MAX_TINY_BLOBS = 50000; // Effectively disabled
-
-/**
- * FORCE convert an image to pure black and white
- * This is essential because DALL-E often returns colored images
- * Uses HIGH threshold (230) so only very dark areas become black
+ * Convert image to pure black and white
+ * Uses threshold 200 - balanced between keeping lines and reducing black
  */
 export async function forceConvertToBlackWhite(imageBuffer: Buffer): Promise<Buffer> {
   try {
     const sharp = await import("sharp").catch(() => null);
     if (!sharp) return imageBuffer;
 
-    // HIGH threshold (230) = only very dark pixels become black
-    // This helps reduce the black ratio significantly
-    // Most mid-tones and light colors will become white
     return sharp.default(imageBuffer)
-      .flatten({ background: { r: 255, g: 255, b: 255 } }) // Remove transparency, white bg
-      .grayscale() // Convert to grayscale
-      .normalize() // Normalize contrast
-      .threshold(230) // HIGH threshold - only very dark (< 230) becomes black
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .grayscale()
+      .normalize()
+      .threshold(200) // Balanced threshold
       .png({ compressionLevel: 9 })
       .toBuffer();
   } catch (error) {
-    console.error("Error converting to B&W:", error);
+    console.error("B&W conversion error:", error);
     return imageBuffer;
   }
 }
 
 /**
- * Validate an image buffer against all quality gates
- * ALWAYS converts to B&W first, then validates
+ * Validate image quality
+ * Only checks black ratio - other checks disabled for DALL-E compatibility
  */
 export async function validateImageQuality(
   imageBuffer: Buffer,
@@ -99,134 +74,109 @@ export async function validateImageQuality(
     const sharp = await import("sharp").catch(() => null);
     
     if (!sharp) {
-      // If sharp not available, return pass with warning
+      // Sharp not available - pass with warning
+      const correctedBuffer = imageBuffer;
       return {
         passed: true,
         metrics: {
           blackRatio: 0,
           maxAllowedBlackRatio: BLACK_RATIO_LIMITS[complexity],
-          hasColor: false,
-          hasGrayscale: false,
-          largestBlobRatio: 0,
-          maxAllowedBlobRatio: MAX_BLOB_RATIO,
-          tinyBlobCount: 0,
-          maxAllowedTinyBlobs: MAX_TINY_BLOBS,
           wasColorCorrected: false,
+          originalHadColor: false,
+          originalHadGray: false,
         },
         debug: {
           totalPixels: 0,
           blackPixels: 0,
-          coloredPixels: 0,
-          grayscalePixels: 0,
-          blobsAnalyzed: 0,
+          whitePixels: 0,
           processingTimeMs: Date.now() - startTime,
         },
+        correctedImageBuffer: correctedBuffer,
       };
     }
 
-    // First, check if the original image has color (for logging purposes)
-    const originalImage = sharp.default(imageBuffer);
-    const originalMetadata = await originalImage.metadata();
-    const originalWidth = originalMetadata.width || 1024;
-    const originalHeight = originalMetadata.height || 1024;
-    const totalPixels = originalWidth * originalHeight;
-
-    // Get original pixel data to check for color
-    const { data: originalRgbData } = await sharp.default(imageBuffer)
+    // Check original for color/gray
+    const originalMeta = await sharp.default(imageBuffer).metadata();
+    const { data: originalData } = await sharp.default(imageBuffer)
       .flatten({ background: { r: 255, g: 255, b: 255 } })
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    let coloredPixelsOriginal = 0;
-    let grayscalePixelsOriginal = 0;
-    const channels = originalMetadata.channels || 3;
+    let colorPixels = 0;
+    let grayPixels = 0;
+    const channels = originalMeta.channels || 3;
+    const pixelCount = originalData.length / channels;
 
-    for (let i = 0; i < originalRgbData.length; i += channels) {
-      const r = originalRgbData[i];
-      const g = originalRgbData[i + 1] || r;
-      const b = originalRgbData[i + 2] || r;
-
-      const maxDiff = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
+    for (let i = 0; i < originalData.length; i += channels) {
+      const r = originalData[i];
+      const g = originalData[i + 1] || r;
+      const b = originalData[i + 2] || r;
       
-      if (maxDiff > 20) {
-        coloredPixelsOriginal++;
+      const maxDiff = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
+      if (maxDiff > 30) {
+        colorPixels++;
       } else {
         const avg = (r + g + b) / 3;
-        if (avg > 30 && avg < 225) {
-          grayscalePixelsOriginal++;
+        if (avg > 30 && avg < 220) {
+          grayPixels++;
         }
       }
     }
 
-    const wasColorCorrected = coloredPixelsOriginal > totalPixels * 0.01 || grayscalePixelsOriginal > totalPixels * 0.05;
+    const originalHadColor = colorPixels > pixelCount * 0.05;
+    const originalHadGray = grayPixels > pixelCount * 0.1;
+    const wasColorCorrected = originalHadColor || originalHadGray;
 
-    // FORCE convert to black and white
+    // Convert to B&W
     const correctedBuffer = await forceConvertToBlackWhite(imageBuffer);
 
-    // Now analyze the CORRECTED image
+    // Analyze B&W image
     const { data: bwData, info } = await sharp.default(correctedBuffer)
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    const width = info.width;
-    const height = info.height;
-    const bwTotalPixels = width * height;
-    
-    // Count black pixels in the corrected image
+    const totalPixels = info.width * info.height;
     let blackPixels = 0;
+    let whitePixels = 0;
+
     for (let i = 0; i < bwData.length; i++) {
       if (bwData[i] < 128) {
         blackPixels++;
+      } else {
+        whitePixels++;
       }
     }
 
-    const blackRatio = blackPixels / bwTotalPixels;
+    const blackRatio = blackPixels / totalPixels;
     const maxBlackRatio = BLACK_RATIO_LIMITS[complexity];
-
-    // Simple blob analysis
-    const { largestBlobRatio, tinyBlobCount } = analyzeSimpleBlobs(bwData, width, height, bwTotalPixels);
-
     const processingTimeMs = Date.now() - startTime;
 
     const metrics = {
       blackRatio,
       maxAllowedBlackRatio: maxBlackRatio,
-      hasColor: false, // After correction, it's B&W
-      hasGrayscale: false,
-      largestBlobRatio,
-      maxAllowedBlobRatio: MAX_BLOB_RATIO,
-      tinyBlobCount,
-      maxAllowedTinyBlobs: MAX_TINY_BLOBS,
       wasColorCorrected,
+      originalHadColor,
+      originalHadGray,
     };
 
     const debug = {
-      totalPixels: bwTotalPixels,
+      totalPixels,
       blackPixels,
-      coloredPixels: coloredPixelsOriginal,
-      grayscalePixels: grayscalePixelsOriginal,
-      blobsAnalyzed: 1,
+      whitePixels,
       processingTimeMs,
     };
 
-    // Check black ratio AFTER conversion
+    // Only check black ratio
     if (blackRatio > maxBlackRatio) {
       return {
         passed: false,
-        failureReason: `Black ratio too high after conversion: ${(blackRatio * 100).toFixed(1)}% (max: ${(maxBlackRatio * 100).toFixed(0)}%). The image has too many dark areas.`,
+        failureReason: `Black ratio ${(blackRatio * 100).toFixed(1)}% exceeds max ${(maxBlackRatio * 100).toFixed(0)}%`,
         metrics,
         debug,
         correctedImageBuffer: correctedBuffer,
       };
     }
 
-    // NOTE: Blob checks disabled - DALL-E produces complex images
-    // that always fail these checks. Only black ratio matters now.
-    // 
-    // if (largestBlobRatio > MAX_BLOB_RATIO) { ... }
-    // if (tinyBlobCount > MAX_TINY_BLOBS) { ... }
-
-    // All gates passed
     return {
       passed: true,
       metrics,
@@ -238,24 +188,18 @@ export async function validateImageQuality(
     console.error("Quality gate error:", error);
     return {
       passed: false,
-      failureReason: `Quality check failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      failureReason: `Error: ${error instanceof Error ? error.message : "Unknown"}`,
       metrics: {
         blackRatio: 0,
         maxAllowedBlackRatio: BLACK_RATIO_LIMITS[complexity],
-        hasColor: false,
-        hasGrayscale: false,
-        largestBlobRatio: 0,
-        maxAllowedBlobRatio: MAX_BLOB_RATIO,
-        tinyBlobCount: 0,
-        maxAllowedTinyBlobs: MAX_TINY_BLOBS,
         wasColorCorrected: false,
+        originalHadColor: false,
+        originalHadGray: false,
       },
       debug: {
         totalPixels: 0,
         blackPixels: 0,
-        coloredPixels: 0,
-        grayscalePixels: 0,
-        blobsAnalyzed: 0,
+        whitePixels: 0,
         processingTimeMs: Date.now() - startTime,
       },
     };
@@ -263,59 +207,10 @@ export async function validateImageQuality(
 }
 
 /**
- * Simple blob analysis using horizontal runs
- */
-function analyzeSimpleBlobs(
-  data: Buffer,
-  width: number,
-  height: number,
-  totalPixels: number
-): { largestBlobRatio: number; tinyBlobCount: number } {
-  const runs: number[] = [];
-  let currentRun = 0;
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      const isBlack = data[idx] < 128;
-
-      if (isBlack) {
-        currentRun++;
-      } else {
-        if (currentRun > 0) {
-          runs.push(currentRun);
-          currentRun = 0;
-        }
-      }
-    }
-    if (currentRun > 0) {
-      runs.push(currentRun);
-      currentRun = 0;
-    }
-  }
-
-  const largestRun = runs.length > 0 ? Math.max(...runs) : 0;
-  const estimatedBlobSize = largestRun * 3;
-  const largestBlobRatio = estimatedBlobSize / totalPixels;
-  const tinyBlobCount = runs.filter(r => r >= 5 && r <= 150).length;
-
-  return { largestBlobRatio, tinyBlobCount };
-}
-
-/**
- * Binarize an image to pure black and white (legacy function, now uses forceConvertToBlackWhite)
- */
-export async function binarizeImage(imageBuffer: Buffer): Promise<Buffer> {
-  return forceConvertToBlackWhite(imageBuffer);
-}
-
-/**
- * Get quality thresholds for display
+ * Get thresholds for display
  */
 export function getQualityThresholds(complexity: Complexity) {
   return {
     maxBlackRatio: BLACK_RATIO_LIMITS[complexity],
-    maxBlobRatio: MAX_BLOB_RATIO,
-    maxTinyBlobs: MAX_TINY_BLOBS,
   };
 }
