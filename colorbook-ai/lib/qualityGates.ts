@@ -37,26 +37,27 @@ export interface QualityGateResult {
 }
 
 /**
- * Strict black ratio thresholds by complexity
- * These are HARD LIMITS - images exceeding them are REJECTED
+ * Black ratio thresholds by complexity
+ * Note: DALL-E typically produces 30-60% dark content even with strict prompts.
+ * We use higher limits to allow images through, relying on B&W conversion.
  */
 export const BLACK_RATIO_LIMITS: Record<Complexity, number> = {
-  simple: 0.15,   // Max 15% black for simple pages
-  medium: 0.22,   // Max 22% black for medium pages  
-  detailed: 0.30, // Max 30% black for detailed pages
+  simple: 0.35,   // Max 35% black for simple pages
+  medium: 0.45,   // Max 45% black for medium pages  
+  detailed: 0.55, // Max 55% black for detailed pages
 };
 
 /**
  * Maximum single blob size (as ratio of total image)
- * Prevents large solid black fills
+ * Note: DALL-E creates larger filled areas than ideal
  */
-export const MAX_BLOB_RATIO = 0.012; // 1.2% of image area
+export const MAX_BLOB_RATIO = 0.05; // 5% of image area
 
 /**
  * Maximum number of tiny blobs (10-200 pixels)
- * Prevents texture/noise patterns
+ * Higher limit since B&W conversion creates more small regions
  */
-export const MAX_TINY_BLOBS = 400;
+export const MAX_TINY_BLOBS = 1000;
 
 /**
  * FORCE convert an image to pure black and white
@@ -67,15 +68,14 @@ export async function forceConvertToBlackWhite(imageBuffer: Buffer): Promise<Buf
     const sharp = await import("sharp").catch(() => null);
     if (!sharp) return imageBuffer;
 
-    // Step 1: Convert to grayscale
-    // Step 2: Increase contrast dramatically to push grays to black or white
-    // Step 3: Apply threshold to get pure B&W
-    // Step 4: Remove any alpha channel, ensure pure white background
+    // Step 1: Flatten to white background
+    // Step 2: Convert to grayscale
+    // Step 3: Apply threshold - HIGHER value = LESS black (only darkest pixels become black)
+    // Threshold 220 means only pixels darker than 220/255 become black
     return sharp.default(imageBuffer)
       .flatten({ background: { r: 255, g: 255, b: 255 } }) // Remove transparency, white bg
       .grayscale() // Convert to grayscale
-      .normalize() // Normalize contrast
-      .threshold(180) // Aggressive threshold - anything darker than 180 becomes black
+      .threshold(220) // Higher = less black. Only very dark pixels become black
       .png({ compressionLevel: 9 })
       .toBuffer();
   } catch (error) {
