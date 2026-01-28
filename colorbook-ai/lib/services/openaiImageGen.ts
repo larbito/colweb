@@ -23,8 +23,11 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
 
-// Allowed sizes for DALL-E 3
+// Allowed sizes for GPT Image 1.5
 export type ImageSize = "1024x1024" | "1024x1792" | "1792x1024";
+
+// Image model to use
+const IMAGE_MODEL = "gpt-image-1.5";
 
 export interface GenerateImageParams {
   prompt: string;
@@ -47,7 +50,7 @@ export function isOpenAIImageGenConfigured(): boolean {
 }
 
 /**
- * Generate images using OpenAI DALL-E 3
+ * Generate images using OpenAI GPT Image 1.5
  * 
  * ⚠️ HARD RULE: This function sends the prompt EXACTLY as provided.
  * No hidden system prompts. No automatic style injection.
@@ -76,25 +79,25 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
     throw new Error("Prompt is required");
   }
 
-  console.log(`[openaiImageGen] Generating ${n} image(s)`);
+  console.log(`[openaiImageGen] Generating ${n} image(s) with model: ${IMAGE_MODEL}`);
   console.log(`[openaiImageGen] Size: ${size}, Quality: ${quality}, Style: ${style}`);
   console.log(`[openaiImageGen] EXACT PROMPT (${prompt.length} chars): "${prompt.substring(0, 150)}..."`);
 
   const images: string[] = [];
   const revisedPrompts: string[] = [];
 
-  // DALL-E 3 only supports n=1, so we loop for multiple images
+  // Loop for multiple images
   for (let i = 0; i < Math.min(n, 4); i++) {
     try {
       const response = await openai.images.generate({
-        model: "dall-e-3",
+        model: IMAGE_MODEL,
         prompt: prompt, // EXACT prompt - no modifications
         n: 1,
         size: size,
         quality: quality,
         style: style,
         response_format: "url", // Get URL, then fetch and convert to base64
-      });
+      } as OpenAI.Images.ImageGenerateParams);
 
       const imageUrl = response.data?.[0]?.url;
       const revisedPrompt = response.data?.[0]?.revised_prompt;
