@@ -6,7 +6,7 @@ import { WizardStepper } from "@/components/app/wizard-stepper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -27,110 +27,78 @@ import {
   CheckCircle2,
   AlertCircle,
   Download,
-  Users,
-  Palette,
   Info,
+  Palette,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ImagePreviewModal } from "@/components/app/image-preview-modal";
-import { KDP_SIZE_PRESETS, type StyleContract, type ThemePack, type StyleClonePrompt, type StyleCloneMode } from "@/lib/styleClone";
-import type { Complexity, LineThickness } from "@/lib/generationSpec";
+import { SCENE_PRESETS } from "@/lib/coloringPageTypes";
+import type { ImageAnalysis, GeneratedPrompt, GenerationResult } from "@/lib/coloringPageTypes";
 
 const steps = [
   { id: 1, label: "Upload" },
-  { id: 2, label: "Configure" },
-  { id: 3, label: "Prompts" },
+  { id: 2, label: "Analyze" },
+  { id: 3, label: "Configure" },
   { id: 4, label: "Generate" },
 ];
 
-const complexities: { value: Complexity; label: string; desc: string }[] = [
-  { value: "simple", label: "Simple", desc: "Ages 3-6, 2-4 props" },
-  { value: "medium", label: "Medium", desc: "Ages 6-12, 4-8 props" },
-  { value: "detailed", label: "Detailed", desc: "Older kids/adults" },
-];
-
-const thicknesses: { value: LineThickness; label: string; desc: string }[] = [
-  { value: "thin", label: "Thin", desc: "Delicate lines" },
-  { value: "medium", label: "Medium", desc: "Standard weight" },
-  { value: "bold", label: "Bold", desc: "Thick, forgiving" },
-];
-
-interface PageImageState {
+interface PageState {
   imageUrl?: string;
   imageBase64?: string;
   isGenerating: boolean;
-  error?: string;
-  failedPrintSafe?: boolean;
-  debug?: Record<string, unknown>;
-}
-
-interface FormState {
-  referenceImageBase64: string | null;
-  referenceImagePreview: string | null;
-  mode: StyleCloneMode;
-  themeText: string;
-  pagesCount: number;
-  complexity: Complexity;
-  lineThickness: LineThickness;
-  sizePreset: string;
-  styleContract: (StyleContract & { extractedThemeGuess?: string }) | null;
-  themePack: ThemePack | null;
-  prompts: StyleClonePrompt[];
-  pageImages: Record<number, PageImageState>;
-  anchorApproved: boolean;
-  anchorImageBase64: string | null;
-  // Series mode character info
-  characterName: string;
-  characterDescription: string;
+  validation?: {
+    isValid: boolean;
+    hasColor: boolean;
+    hasShading: boolean;
+    blackRatio: number;
+    failureReasons: string[];
+  };
+  retryCount?: number;
 }
 
 export default function StyleClonePage() {
   const [step, setStep] = useState(1);
   const [saved, setSaved] = useState(true);
 
-  // Loading states
-  const [extractingStyle, setExtractingStyle] = useState(false);
-  const [generatingThemePack, setGeneratingThemePack] = useState(false);
-  const [generatingPrompts, setGeneratingPrompts] = useState(false);
-  const [generatingSample, setGeneratingSample] = useState(false);
-  const [generatingRemaining, setGeneratingRemaining] = useState(false);
+  // Image states
+  const [referenceImageBase64, setReferenceImageBase64] = useState<string | null>(null);
+  const [referenceImagePreview, setReferenceImagePreview] = useState<string | null>(null);
+
+  // Analysis state
+  const [analysis, setAnalysis] = useState<ImageAnalysis | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  // Configuration state
+  const [pageCount, setPageCount] = useState(5);
+  const [selectedScenes, setSelectedScenes] = useState<string[]>([]);
+
+  // Prompts state
+  const [prompts, setPrompts] = useState<GeneratedPrompt[]>([]);
+
+  // Generation state
+  const [pageStates, setPageStates] = useState<Record<number, PageState>>({});
+  const [generating, setGenerating] = useState(false);
 
   // Preview modal
   const [previewPage, setPreviewPage] = useState<{ pageNumber: number; title: string; imageUrl: string } | null>(null);
 
-  // Debug panel
+  // Debug state
   const [showDebug, setShowDebug] = useState(false);
   const [lastDebug, setLastDebug] = useState<Record<string, unknown> | null>(null);
 
-  // Form state
-  const [form, setForm] = useState<FormState>({
-    referenceImageBase64: null,
-    referenceImagePreview: null,
-    mode: "series",
-    themeText: "",
-    pagesCount: 12,
-    complexity: "simple",
-    lineThickness: "bold",
-    sizePreset: "8.5x11",
-    styleContract: null,
-    themePack: null,
-    prompts: [],
-    pageImages: {},
-    anchorApproved: false,
-    anchorImageBase64: null,
-    characterName: "",
-    characterDescription: "",
-  });
+  // ==================== Helpers ====================
 
-  const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    setSaved(false);
-    setTimeout(() => setSaved(true), 500);
+  const safeJsonParse = async (response: Response) => {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(text.slice(0, 200) || "Unknown error");
+    }
   };
 
-  // =====================
-  // File Upload Handler
-  // =====================
+  // ==================== File Upload ====================
+
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -144,527 +112,223 @@ export default function StyleClonePage() {
     reader.onload = () => {
       const dataUrl = reader.result as string;
       const base64 = dataUrl.split(",")[1];
-      updateForm("referenceImageBase64", base64);
-      updateForm("referenceImagePreview", dataUrl);
+      setReferenceImageBase64(base64);
+      setReferenceImagePreview(dataUrl);
+      setAnalysis(null); // Reset analysis when new image uploaded
+      setPrompts([]);
+      setPageStates({});
       toast.success("Reference image uploaded!");
     };
     reader.readAsDataURL(file);
   }, []);
 
   const removeReferenceImage = () => {
-    updateForm("referenceImageBase64", null);
-    updateForm("referenceImagePreview", null);
-    updateForm("styleContract", null);
+    setReferenceImageBase64(null);
+    setReferenceImagePreview(null);
+    setAnalysis(null);
+    setPrompts([]);
+    setPageStates({});
   };
 
-  // =====================
-  // Extract Style from Reference
-  // =====================
-  const extractStyle = async () => {
-    if (!form.referenceImageBase64) {
+  // ==================== Image Analysis ====================
+
+  const analyzeImage = async () => {
+    if (!referenceImageBase64) {
       toast.error("Please upload a reference image first");
       return;
     }
 
-    setExtractingStyle(true);
+    setAnalyzing(true);
     try {
-      const response = await fetch("/api/style-clone/extract-style", {
+      const response = await fetch("/api/analyze-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          referenceImageBase64: form.referenceImageBase64,
-        }),
+        body: JSON.stringify({ imageBase64: referenceImageBase64 }),
       });
 
       const data = await safeJsonParse(response);
-      
+
       if (!response.ok) {
-        throw new Error(data.error || "Failed to extract style");
+        throw new Error(data.error || "Failed to analyze image");
       }
 
-      updateForm("styleContract", data.styleContract);
+      setAnalysis(data.analysis);
       setLastDebug(data.debug);
+      toast.success("Image analyzed successfully!");
       
-      // Apply recommended settings
-      if (data.styleContract.recommendedComplexity) {
-        updateForm("complexity", data.styleContract.recommendedComplexity);
-      }
-      if (data.styleContract.recommendedLineThickness) {
-        updateForm("lineThickness", data.styleContract.recommendedLineThickness);
-      }
-
-      toast.success("Style extracted! Settings auto-adjusted based on reference.");
+      // Auto-advance to next step
+      setStep(3);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to extract style");
+      toast.error(error instanceof Error ? error.message : "Failed to analyze image");
     } finally {
-      setExtractingStyle(false);
+      setAnalyzing(false);
     }
   };
 
-  // =====================
-  // Generate Theme Pack
-  // =====================
-  const generateThemePack = async () => {
-    setGeneratingThemePack(true);
-    try {
-      const response = await fetch("/api/style-clone/theme-pack", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          themeText: form.themeText || undefined,
-          mode: form.mode,
-          referenceImageBase64: form.referenceImageBase64,
-        }),
-      });
+  // ==================== Scene Selection ====================
 
-      const data = await safeJsonParse(response);
-      
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate theme pack");
+  const toggleScene = (sceneId: string) => {
+    setSelectedScenes(prev => {
+      if (prev.includes(sceneId)) {
+        return prev.filter(s => s !== sceneId);
       }
-
-      updateForm("themePack", data.themePack);
-      setLastDebug(data.debug);
-      toast.success("Theme pack generated!");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to generate theme pack");
-    } finally {
-      setGeneratingThemePack(false);
-    }
-  };
-
-  // =====================
-  // Generate Prompts
-  // =====================
-  const generatePrompts = async () => {
-    // Can use either styleContract (with extractedThemeGuess) or themePack
-    if (!form.styleContract?.extractedThemeGuess && !form.themePack) {
-      toast.error("Please extract style first or generate a theme pack");
-      return;
-    }
-
-    setGeneratingPrompts(true);
-    try {
-      const response = await fetch("/api/style-clone/prompts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          styleContract: form.styleContract,
-          themePack: form.themePack,
-          userTheme: form.themeText || undefined,
-          mode: form.mode,
-          pagesCount: form.pagesCount,
-          complexity: form.complexity,
-          characterName: form.mode === "series" ? form.characterName : undefined,
-          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
-        }),
-      });
-
-      const data = await safeJsonParse(response);
-      
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate prompts");
+      if (prev.length >= pageCount) {
+        toast.error(`Maximum ${pageCount} scenes selected`);
+        return prev;
       }
-
-      updateForm("prompts", data.prompts);
-      setLastDebug(data.debug);
-      toast.success(`Generated ${data.prompts.length} prompts!`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to generate prompts");
-    } finally {
-      setGeneratingPrompts(false);
-    }
-  };
-
-  // =====================
-  // Regenerate Single Prompt
-  // =====================
-  const regeneratePrompt = async (pageIndex: number) => {
-    if (!form.styleContract?.extractedThemeGuess && !form.themePack) return;
-
-    const currentPrompt = form.prompts.find(p => p.pageIndex === pageIndex);
-    
-    setForm(prev => ({
-      ...prev,
-      prompts: prev.prompts.map(p => 
-        p.pageIndex === pageIndex ? { ...p, isRegenerating: true } as StyleClonePrompt & { isRegenerating: boolean } : p
-      ),
-    }));
-
-    try {
-      const response = await fetch(`/api/style-clone/prompts/${pageIndex}/regenerate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          styleContract: form.styleContract,
-          themePack: form.themePack,
-          mode: form.mode,
-          complexity: form.complexity,
-          previousTitle: currentPrompt?.title,
-          previousPrompt: currentPrompt?.scenePrompt,
-          existingTitles: form.prompts.map(p => p.title),
-          characterName: form.mode === "series" ? form.characterName : undefined,
-          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
-        }),
-      });
-
-      const data = await safeJsonParse(response);
-      
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to regenerate prompt");
-      }
-
-      updateForm("prompts", form.prompts.map(p => 
-        p.pageIndex === pageIndex ? data.prompt : p
-      ));
-      toast.success(`Page ${pageIndex} prompt regenerated!`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to regenerate prompt");
-    }
-  };
-
-  // =====================
-  // Improve Single Prompt
-  // =====================
-  const improvePrompt = async (pageIndex: number) => {
-    if (!form.styleContract?.extractedThemeGuess && !form.themePack) return;
-
-    const currentPrompt = form.prompts.find(p => p.pageIndex === pageIndex);
-    if (!currentPrompt) return;
-
-    try {
-      const response = await fetch(`/api/style-clone/prompts/${pageIndex}/improve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          styleContract: form.styleContract,
-          themePack: form.themePack,
-          complexity: form.complexity,
-          currentTitle: currentPrompt.title,
-          currentPrompt: currentPrompt.scenePrompt,
-        }),
-      });
-
-      const data = await safeJsonParse(response);
-      
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to improve prompt");
-      }
-
-      updateForm("prompts", form.prompts.map(p => 
-        p.pageIndex === pageIndex ? data.prompt : p
-      ));
-      toast.success(`Page ${pageIndex} prompt improved!`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to improve prompt");
-    }
-  };
-
-  // =====================
-  // Generate Sample (Page 1)
-  // =====================
-  const generateSample = async () => {
-    if (form.prompts.length === 0) {
-      toast.error("No prompts to generate from");
-      return;
-    }
-
-    setGeneratingSample(true);
-    setForm(prev => ({
-      ...prev,
-      pageImages: {
-        ...prev.pageImages,
-        [1]: { isGenerating: true },
-      },
-    }));
-
-    try {
-      const firstPrompt = form.prompts[0];
-      const response = await fetch("/api/style-clone/generate-sample", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scenePrompt: firstPrompt.scenePrompt,
-          themePack: form.themePack,
-          styleContract: form.styleContract,
-          complexity: form.complexity,
-          lineThickness: form.lineThickness,
-          sizePreset: form.sizePreset,
-          mode: form.mode,
-          characterName: form.mode === "series" ? form.characterName : undefined,
-          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
-          referenceImageBase64: form.referenceImageBase64,
-        }),
-      });
-
-      const data = await safeJsonParse(response);
-      setLastDebug(data.debug);
-      
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate sample");
-      }
-      
-      const imageUrl = data.imageBase64 
-        ? `data:image/png;base64,${data.imageBase64}` 
-        : data.imageUrl;
-
-      setForm(prev => ({
-        ...prev,
-        pageImages: {
-          ...prev.pageImages,
-          [1]: { 
-            imageUrl, 
-            imageBase64: data.imageBase64,
-            isGenerating: false,
-            debug: data.debug,
-          },
-        },
-      }));
-
-      toast.success("Sample generated! Review and approve to continue.");
-    } catch (error) {
-      setForm(prev => ({
-        ...prev,
-        pageImages: {
-          ...prev.pageImages,
-          [1]: { 
-            isGenerating: false, 
-            error: error instanceof Error ? error.message : "Failed",
-            failedPrintSafe: true,
-          },
-        },
-      }));
-      toast.error(error instanceof Error ? error.message : "Failed to generate sample");
-    } finally {
-      setGeneratingSample(false);
-    }
-  };
-
-  // =====================
-  // Approve Sample
-  // =====================
-  const approveSample = () => {
-    const sampleImage = form.pageImages[1];
-    if (!sampleImage?.imageBase64 && !sampleImage?.imageUrl) {
-      toast.error("No sample image to approve");
-      return;
-    }
-
-    updateForm("anchorApproved", true);
-    updateForm("anchorImageBase64", sampleImage.imageBase64 || null);
-    toast.success("Sample approved! You can now generate remaining pages.");
-  };
-
-  // =====================
-  // Generate Remaining Pages
-  // =====================
-  const generateRemaining = async () => {
-    if (!form.anchorApproved) {
-      toast.error("Please approve the sample first");
-      return;
-    }
-
-    setGeneratingRemaining(true);
-
-    // Mark all remaining pages as generating
-    const updates: Record<number, PageImageState> = {};
-    form.prompts.slice(1).forEach(p => {
-      if (!form.pageImages[p.pageIndex]?.imageUrl) {
-        updates[p.pageIndex] = { isGenerating: true };
-      }
+      return [...prev, sceneId];
     });
-    setForm(prev => ({
-      ...prev,
-      pageImages: { ...prev.pageImages, ...updates },
-    }));
+  };
+
+  // ==================== Generation ====================
+
+  const generatePages = async () => {
+    if (!analysis) {
+      toast.error("Please analyze the image first");
+      return;
+    }
+
+    setGenerating(true);
+    
+    // Initialize page states
+    const initialStates: Record<number, PageState> = {};
+    for (let i = 1; i <= pageCount; i++) {
+      initialStates[i] = { isGenerating: true };
+    }
+    setPageStates(initialStates);
 
     try {
-      const response = await fetch("/api/style-clone/generate-remaining", {
+      const response = await fetch("/api/generate-coloring-pages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompts: form.prompts.slice(1),
-          themePack: form.themePack,
-          styleContract: form.styleContract,
-          complexity: form.complexity,
-          lineThickness: form.lineThickness,
-          sizePreset: form.sizePreset,
-          mode: form.mode,
-          characterName: form.mode === "series" ? form.characterName : undefined,
-          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
-          anchorImageBase64: form.anchorImageBase64,
-          skipPageIndices: Object.entries(form.pageImages)
-            .filter(([, state]) => state.imageUrl)
-            .map(([idx]) => parseInt(idx)),
+          analysis,
+          count: pageCount,
+          scenes: selectedScenes.length > 0 ? selectedScenes : undefined,
+          size: "1024x1792",
         }),
       });
 
       const data = await safeJsonParse(response);
-      
+
       if (!response.ok) {
-        throw new Error(data.error || "Failed to generate remaining pages");
+        throw new Error(data.error || "Failed to generate pages");
       }
-      
-      // Update page images with results
-      const imageUpdates: Record<number, PageImageState> = {};
-      for (const img of data.images) {
-        const imageUrl = img.imageBase64 
-          ? `data:image/png;base64,${img.imageBase64}` 
-          : img.imageUrl;
-        
-        imageUpdates[img.pageIndex] = {
+
+      // Update prompts
+      setPrompts(data.prompts);
+      setLastDebug(data.debug);
+
+      // Update page states with results
+      const newStates: Record<number, PageState> = {};
+      for (const result of data.results as GenerationResult[]) {
+        const imageUrl = result.imageBase64
+          ? `data:image/png;base64,${result.imageBase64}`
+          : undefined;
+
+        newStates[result.pageIndex] = {
           imageUrl,
-          imageBase64: img.imageBase64,
+          imageBase64: result.imageBase64,
           isGenerating: false,
-          failedPrintSafe: !img.passedGates,
-          debug: img.debug,
+          validation: result.validation,
+          retryCount: result.retryCount,
         };
       }
+      setPageStates(newStates);
 
-      setForm(prev => ({
-        ...prev,
-        pageImages: { ...prev.pageImages, ...imageUpdates },
-      }));
-
-      toast.success(`Generated ${data.successCount}/${data.totalRequested} pages!`);
-      if (data.failCount > 0) {
-        toast.warning(`${data.failCount} pages failed quality checks. You can regenerate them.`);
+      toast.success(`Generated ${data.summary.success}/${data.summary.total} pages!`);
+      if (data.summary.failed > 0) {
+        toast.warning(`${data.summary.failed} pages had validation issues`);
       }
     } catch (error) {
+      // Mark all as failed
+      const failedStates: Record<number, PageState> = {};
+      for (let i = 1; i <= pageCount; i++) {
+        failedStates[i] = { isGenerating: false };
+      }
+      setPageStates(failedStates);
       toast.error(error instanceof Error ? error.message : "Failed to generate pages");
     } finally {
-      setGeneratingRemaining(false);
+      setGenerating(false);
     }
   };
 
-  // =====================
-  // Helper to safely parse JSON response
-  // =====================
-  const safeJsonParse = async (response: Response) => {
-    const text = await response.text();
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new Error(text.slice(0, 200) || "Unknown error");
-    }
-  };
+  // ==================== Regenerate Single Page ====================
 
-  // =====================
-  // Regenerate Single Page
-  // =====================
   const regeneratePage = async (pageIndex: number) => {
-    const prompt = form.prompts.find(p => p.pageIndex === pageIndex);
-    if (!prompt) return;
+    if (!analysis) return;
 
-    setForm(prev => ({
+    setPageStates(prev => ({
       ...prev,
-      pageImages: {
-        ...prev.pageImages,
-        [pageIndex]: { isGenerating: true },
-      },
+      [pageIndex]: { isGenerating: true },
     }));
 
     try {
-      const response = await fetch("/api/style-clone/generate-page", {
+      const response = await fetch("/api/generate-coloring-pages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pageIndex,
-          scenePrompt: prompt.scenePrompt,
-          themePack: form.themePack,
-          styleContract: form.styleContract,
-          complexity: form.complexity,
-          lineThickness: form.lineThickness,
-          sizePreset: form.sizePreset,
-          mode: form.mode,
-          characterName: form.mode === "series" ? form.characterName : undefined,
-          characterDescription: form.mode === "series" ? form.characterDescription : undefined,
-          anchorImageBase64: form.anchorImageBase64,
+          analysis,
+          count: 1,
+          scenes: selectedScenes[pageIndex - 1] ? [selectedScenes[pageIndex - 1]] : undefined,
+          size: "1024x1792",
         }),
       });
 
       const data = await safeJsonParse(response);
-      
+
       if (!response.ok) {
-        setLastDebug(data.debug);
         throw new Error(data.error || "Failed to regenerate page");
       }
-      const imageUrl = data.imageBase64 
-        ? `data:image/png;base64,${data.imageBase64}` 
-        : data.imageUrl;
 
-      setForm(prev => ({
+      const result = data.results[0] as GenerationResult;
+      const imageUrl = result.imageBase64
+        ? `data:image/png;base64,${result.imageBase64}`
+        : undefined;
+
+      setPageStates(prev => ({
         ...prev,
-        pageImages: {
-          ...prev.pageImages,
-          [pageIndex]: {
-            imageUrl,
-            imageBase64: data.imageBase64,
-            isGenerating: false,
-            failedPrintSafe: !data.passedGates,
-            debug: data.debug,
-          },
+        [pageIndex]: {
+          imageUrl,
+          imageBase64: result.imageBase64,
+          isGenerating: false,
+          validation: result.validation,
+          retryCount: result.retryCount,
         },
       }));
+
+      // Update the prompt
+      if (data.prompts[0]) {
+        setPrompts(prev => prev.map(p => 
+          p.pageIndex === pageIndex ? { ...data.prompts[0], pageIndex } : p
+        ));
+      }
 
       toast.success(`Page ${pageIndex} regenerated!`);
     } catch (error) {
-      setForm(prev => ({
+      setPageStates(prev => ({
         ...prev,
-        pageImages: {
-          ...prev.pageImages,
-          [pageIndex]: { 
-            isGenerating: false, 
-            error: error instanceof Error ? error.message : "Failed",
-            failedPrintSafe: true,
-          },
-        },
+        [pageIndex]: { isGenerating: false },
       }));
-      toast.error(error instanceof Error ? error.message : "Failed to regenerate page");
+      toast.error(error instanceof Error ? error.message : "Failed to regenerate");
     }
   };
 
-  // =====================
-  // Helpers
-  // =====================
+  // ==================== Navigation ====================
+
   const canProceed = () => {
     switch (step) {
-      case 1:
-        return !!form.referenceImageBase64 && !!form.styleContract;
-      case 2:
-        // Need either styleContract with extractedThemeGuess OR themePack
-        const hasThemeInfo = !!form.styleContract?.extractedThemeGuess || !!form.themePack;
-        // For Series mode, also need character name
-        const hasSeriesInfo = form.mode === "collection" || (form.mode === "series" && form.characterName.trim().length > 0);
-        return hasThemeInfo && hasSeriesInfo;
-      case 3:
-        return form.prompts.length > 0;
-      case 4:
-        return form.anchorApproved;
-      default:
-        return true;
+      case 1: return !!referenceImageBase64;
+      case 2: return !!analysis;
+      case 3: return pageCount >= 1;
+      case 4: return Object.values(pageStates).some(p => p.imageUrl);
+      default: return true;
     }
   };
 
-  const updatePromptText = (pageIndex: number, newPrompt: string) => {
-    setForm(prev => ({
-      ...prev,
-      prompts: prev.prompts.map(p => 
-        p.pageIndex === pageIndex ? { ...p, scenePrompt: newPrompt } : p
-      ),
-    }));
-  };
+  const generatedCount = Object.values(pageStates).filter(p => p.imageUrl).length;
 
-  const copyPrompt = (prompt: string) => {
-    navigator.clipboard.writeText(prompt);
-    toast.success("Prompt copied!");
-  };
-
-  const openPreview = (pageNumber: number, title: string, imageUrl: string) => {
-    setPreviewPage({ pageNumber, title, imageUrl });
-  };
-
-  const generatedCount = Object.values(form.pageImages).filter(p => p.imageUrl).length;
+  // ==================== Render ====================
 
   return (
     <>
@@ -678,7 +342,7 @@ export default function StyleClonePage() {
             <div>
               <p className="font-medium text-amber-700 dark:text-amber-400">Demo Mode</p>
               <p className="text-sm text-muted-foreground">
-                Projects are temporary and will expire after 6 hours. Data is not permanently stored.
+                Projects are temporary and will expire after 6 hours.
               </p>
             </div>
           </div>
@@ -688,25 +352,25 @@ export default function StyleClonePage() {
           <WizardStepper steps={steps} currentStep={step} />
 
           <div className="min-h-[500px]">
-            {/* =============== STEP 1: UPLOAD =============== */}
+            {/* ==================== STEP 1: UPLOAD ==================== */}
             {step === 1 && (
               <div className="space-y-6">
                 <div className="text-center">
                   <h2 className="text-2xl font-semibold">Upload Reference Image 📸</h2>
                   <p className="text-muted-foreground">
-                    Upload a coloring page you love. We&apos;ll extract its style for your new pages.
+                    Upload a coloring page you love. We&apos;ll analyze its style and generate matching pages.
                   </p>
                 </div>
 
                 <div className="grid gap-6 lg:grid-cols-2">
                   {/* Upload Area */}
                   <Card className="border-dashed border-2 border-border/50 bg-muted/30">
-                    <CardContent className="flex flex-col items-center justify-center p-8 text-center min-h-[300px]">
-                      {form.referenceImagePreview ? (
+                    <CardContent className="flex flex-col items-center justify-center p-8 text-center min-h-[350px]">
+                      {referenceImagePreview ? (
                         <div className="relative w-full max-w-xs">
-                          <img 
-                            src={form.referenceImagePreview} 
-                            alt="Reference" 
+                          <img
+                            src={referenceImagePreview}
+                            alt="Reference"
                             className="rounded-xl border border-border bg-white w-full"
                           />
                           <Button
@@ -758,7 +422,7 @@ export default function StyleClonePage() {
                       </div>
                       <div className="flex items-start gap-2">
                         <CheckCircle2 className="h-4 w-4 mt-0.5 text-green-500 shrink-0" />
-                        <span>Avoid pages with lots of solid black areas</span>
+                        <span>Clear character design (face, body) is ideal</span>
                       </div>
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-500 shrink-0" />
@@ -766,144 +430,161 @@ export default function StyleClonePage() {
                       </div>
                     </div>
 
-                    {form.referenceImageBase64 && !form.styleContract && (
-                      <Button 
-                        onClick={extractStyle} 
-                        disabled={extractingStyle}
-                        className="w-full rounded-xl mt-4"
-                      >
-                        {extractingStyle ? (
-                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing Style...</>
-                        ) : (
-                          <><Wand2 className="mr-2 h-4 w-4" /> Extract Style from Reference</>
-                        )}
-                      </Button>
+                    <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 mt-4">
+                      <h4 className="font-semibold text-blue-700 dark:text-blue-400 mb-2">
+                        What happens next?
+                      </h4>
+                      <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+                        <li>We analyze your image using AI vision</li>
+                        <li>Extract character, style, and scene details</li>
+                        <li>Generate matching coloring pages</li>
+                        <li>Validate output for print quality</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ==================== STEP 2: ANALYZE ==================== */}
+            {step === 2 && (
+              <div className="space-y-6">
+                <div className="text-center">
+                  <h2 className="text-2xl font-semibold">Analyze Reference Image 🔍</h2>
+                  <p className="text-muted-foreground">
+                    Our AI will extract character, style, and scene information from your image.
+                  </p>
+                </div>
+
+                <div className="grid gap-6 lg:grid-cols-2">
+                  {/* Reference Preview */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <ImageIcon className="h-5 w-5" /> Reference Image
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {referenceImagePreview && (
+                        <img
+                          src={referenceImagePreview}
+                          alt="Reference"
+                          className="rounded-xl border border-border bg-white w-full max-w-xs mx-auto"
+                        />
+                      )}
+                      
+                      {!analysis && (
+                        <Button
+                          onClick={analyzeImage}
+                          disabled={analyzing}
+                          className="w-full mt-4 rounded-xl"
+                        >
+                          {analyzing ? (
+                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing...</>
+                          ) : (
+                            <><Wand2 className="mr-2 h-4 w-4" /> Analyze Image</>
+                          )}
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Analysis Results */}
+                  <div className="space-y-4">
+                    {analyzing && (
+                      <div className="space-y-3">
+                        <Skeleton className="h-8 w-48" />
+                        <Skeleton className="h-24 w-full rounded-xl" />
+                        <Skeleton className="h-24 w-full rounded-xl" />
+                      </div>
                     )}
 
-                    {form.styleContract && (
-                      <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle2 className="h-5 w-5 text-green-500" />
-                          <span className="font-semibold text-green-700 dark:text-green-400">Style Extracted!</span>
+                    {analysis && (
+                      <>
+                        <Card className="border-green-500/30 bg-green-500/10">
+                          <CardContent className="p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <CheckCircle2 className="h-5 w-5 text-green-500" />
+                              <span className="font-semibold text-green-700 dark:text-green-400">
+                                Analysis Complete!
+                              </span>
+                            </div>
+                            
+                            <div className="grid gap-4 text-sm">
+                              <div>
+                                <span className="font-medium">Character:</span>
+                                <p className="text-muted-foreground">
+                                  {analysis.character.species}
+                                  {analysis.character.special_features.length > 0 && (
+                                    <> with {analysis.character.special_features.join(", ")}</>
+                                  )}
+                                </p>
+                              </div>
+                              
+                              <div>
+                                <span className="font-medium">Style:</span>
+                                <p className="text-muted-foreground">
+                                  {analysis.line_art.outer_line_weight} outer lines, {analysis.line_art.style}
+                                </p>
+                              </div>
+                              
+                              <div>
+                                <span className="font-medium">Scene:</span>
+                                <p className="text-muted-foreground">
+                                  {analysis.scene.location}
+                                </p>
+                              </div>
+                              
+                              <div>
+                                <span className="font-medium">Character Signature:</span>
+                                <p className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded mt-1">
+                                  {analysis.character_signature}
+                                </p>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        <div className="flex flex-wrap gap-2">
+                          {analysis.constraints.slice(0, 6).map((c, i) => (
+                            <Badge key={i} variant="secondary" className="text-xs">{c}</Badge>
+                          ))}
                         </div>
-                        <p className="text-sm text-muted-foreground">{form.styleContract.styleSummary}</p>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          <Badge variant="secondary" className="text-xs">
-                            {form.styleContract.recommendedComplexity}
-                          </Badge>
-                          <Badge variant="secondary" className="text-xs">
-                            {form.styleContract.recommendedLineThickness} lines
-                          </Badge>
-                        </div>
-                      </div>
+                      </>
                     )}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* =============== STEP 2: CONFIGURE =============== */}
-            {step === 2 && (
+            {/* ==================== STEP 3: CONFIGURE ==================== */}
+            {step === 3 && (
               <div className="space-y-6">
                 <div className="text-center">
                   <h2 className="text-2xl font-semibold">Configure Generation ⚙️</h2>
-                  <p className="text-muted-foreground">Set your preferences and generate a theme pack</p>
+                  <p className="text-muted-foreground">
+                    Choose how many pages and which scenes you want
+                  </p>
                 </div>
 
                 <div className="grid gap-6 lg:grid-cols-2">
-                  {/* Left: Settings */}
+                  {/* Settings */}
                   <div className="space-y-6">
-                    {/* Mode Selection */}
-                    <div>
-                      <label className="mb-3 block text-sm font-medium">Generation Mode</label>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <Card
-                          className={cn(
-                            "cursor-pointer border-2 transition-all hover:border-primary",
-                            form.mode === "series" ? "border-primary bg-primary/5" : "border-border/50"
-                          )}
-                          onClick={() => updateForm("mode", "series")}
-                        >
-                          <CardContent className="p-4">
-                            <div className="flex items-center gap-3 mb-2">
-                              <Users className="h-5 w-5" />
-                              <span className="font-semibold">Series</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground">Same main character across all pages</p>
-                          </CardContent>
-                        </Card>
-                        <Card
-                          className={cn(
-                            "cursor-pointer border-2 transition-all hover:border-primary",
-                            form.mode === "collection" ? "border-primary bg-primary/5" : "border-border/50"
-                          )}
-                          onClick={() => updateForm("mode", "collection")}
-                        >
-                          <CardContent className="p-4">
-                            <div className="flex items-center gap-3 mb-2">
-                              <Palette className="h-5 w-5" />
-                              <span className="font-semibold">Collection</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground">Same style, different subjects</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </div>
-
-                    {/* Series Mode: Character Info */}
-                    {form.mode === "series" && (
-                      <div className="space-y-4 rounded-xl border border-border bg-muted/30 p-4">
-                        <h4 className="font-semibold flex items-center gap-2">
-                          <Users className="h-4 w-4" /> Main Character (Series Mode)
-                        </h4>
-                        <div>
-                          <label className="mb-2 block text-sm font-medium">Character Name</label>
-                          <Input
-                            placeholder="e.g., Luna the Unicorn, Captain Rex"
-                            value={form.characterName}
-                            onChange={(e) => updateForm("characterName", e.target.value)}
-                            className="rounded-xl"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-2 block text-sm font-medium">Character Description</label>
-                          <Textarea
-                            placeholder="e.g., A cute baby panda with big round eyes, wearing a red bowtie..."
-                            value={form.characterDescription}
-                            onChange={(e) => updateForm("characterDescription", e.target.value)}
-                            className="rounded-xl min-h-[80px]"
-                          />
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            This character will appear consistently on every page
+                    {/* Character Summary */}
+                    {analysis && (
+                      <Card>
+                        <CardContent className="p-4">
+                          <h4 className="font-semibold mb-2 flex items-center gap-2">
+                            <Palette className="h-4 w-4" /> Style Lock
+                          </h4>
+                          <p className="text-sm text-muted-foreground">
+                            All generated pages will maintain this consistent style:
                           </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Theme Input */}
-                    <div>
-                      <label className="mb-2 block text-sm font-medium">Additional Theme (optional)</label>
-                      <Input
-                        placeholder="e.g., underwater adventure, farm animals, space exploration"
-                        value={form.themeText}
-                        onChange={(e) => updateForm("themeText", e.target.value)}
-                        className="rounded-xl"
-                      />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Add extra context, or leave empty to use the theme from your reference
-                      </p>
-                    </div>
-
-                    {/* Show Extracted Theme from Reference */}
-                    {form.styleContract?.extractedThemeGuess && (
-                      <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
-                        <h4 className="font-semibold text-blue-700 dark:text-blue-400 mb-2 flex items-center gap-2">
-                          <Sparkles className="h-4 w-4" /> Theme Detected from Reference
-                        </h4>
-                        <p className="text-sm text-muted-foreground">
-                          {form.styleContract.extractedThemeGuess}
-                        </p>
-                      </div>
+                          <p className="text-xs font-mono bg-muted p-2 rounded mt-2">
+                            {analysis.style_lock}
+                          </p>
+                        </CardContent>
+                      </Card>
                     )}
 
                     {/* Page Count */}
@@ -912,514 +593,291 @@ export default function StyleClonePage() {
                       <Input
                         type="number"
                         min={1}
-                        max={80}
-                        value={form.pagesCount}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) || 1;
-                          updateForm("pagesCount", Math.min(Math.max(1, val), 80));
-                        }}
+                        max={20}
+                        value={pageCount}
+                        onChange={(e) => setPageCount(Math.min(Math.max(1, parseInt(e.target.value) || 1), 20))}
                         className="w-32 rounded-xl"
                       />
-                    </div>
-
-                    {/* Size Preset */}
-                    <div>
-                      <label className="mb-2 block text-sm font-medium">Page Size</label>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {Object.entries(KDP_SIZE_PRESETS).map(([key, preset]) => (
-                          <Card
-                            key={key}
-                            className={cn(
-                              "cursor-pointer border transition-all hover:border-primary",
-                              form.sizePreset === key ? "border-primary bg-primary/5" : "border-border/50"
-                            )}
-                            onClick={() => updateForm("sizePreset", key)}
-                          >
-                            <CardContent className="p-3">
-                              <p className="font-medium text-sm">{preset.label}</p>
-                              <p className="text-xs text-muted-foreground">{preset.pixels}</p>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right: Style settings + Theme Pack */}
-                  <div className="space-y-6">
-                    {/* Complexity */}
-                    <div>
-                      <label className="mb-3 block text-sm font-medium">Complexity</label>
-                      <div className="grid gap-2">
-                        {complexities.map((c) => (
-                          <Card
-                            key={c.value}
-                            className={cn(
-                              "cursor-pointer border transition-all hover:border-primary",
-                              form.complexity === c.value ? "border-primary bg-primary/5" : "border-border/50"
-                            )}
-                            onClick={() => updateForm("complexity", c.value)}
-                          >
-                            <CardContent className="flex items-center justify-between p-3">
-                              <div>
-                                <p className="font-medium text-sm">{c.label}</p>
-                                <p className="text-xs text-muted-foreground">{c.desc}</p>
-                              </div>
-                              {form.complexity === c.value && <Check className="h-4 w-4 text-primary" />}
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Line Thickness */}
-                    <div>
-                      <label className="mb-3 block text-sm font-medium">Line Thickness</label>
-                      <div className="grid gap-2">
-                        {thicknesses.map((t) => (
-                          <Card
-                            key={t.value}
-                            className={cn(
-                              "cursor-pointer border transition-all hover:border-primary",
-                              form.lineThickness === t.value ? "border-primary bg-primary/5" : "border-border/50"
-                            )}
-                            onClick={() => updateForm("lineThickness", t.value)}
-                          >
-                            <CardContent className="flex items-center justify-between p-3">
-                              <div>
-                                <p className="font-medium text-sm">{t.label}</p>
-                                <p className="text-xs text-muted-foreground">{t.desc}</p>
-                              </div>
-                              {form.lineThickness === t.value && <Check className="h-4 w-4 text-primary" />}
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Generate Theme Pack Button */}
-                    <Button
-                      onClick={generateThemePack}
-                      disabled={generatingThemePack || !form.styleContract}
-                      className="w-full rounded-xl"
-                    >
-                      {generatingThemePack ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating Theme...</>
-                      ) : (
-                        <><Wand2 className="mr-2 h-4 w-4" /> Generate Theme Pack</>
-                      )}
-                    </Button>
-
-                    {/* Theme Pack Preview */}
-                    {form.themePack && (
-                      <div className="rounded-xl border border-border bg-card p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle2 className="h-5 w-5 text-green-500" />
-                          <span className="font-semibold">Theme Pack Ready</span>
-                        </div>
-                        <p className="text-sm mb-2"><strong>Setting:</strong> {form.themePack.setting}</p>
-                        {form.themePack.characterName && (
-                          <p className="text-sm mb-2"><strong>Character:</strong> {form.themePack.characterName}</p>
-                        )}
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {form.themePack.recurringProps.slice(0, 6).map((prop, i) => (
-                            <Badge key={i} variant="secondary" className="text-xs">{prop}</Badge>
-                          ))}
-                          {form.themePack.recurringProps.length > 6 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{form.themePack.recurringProps.length - 6} more
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* =============== STEP 3: PROMPTS =============== */}
-            {step === 3 && (
-              <div className="space-y-6">
-                <div className="text-center">
-                  <h2 className="text-2xl font-semibold">Generate Prompts 📝</h2>
-                  <p className="text-muted-foreground">
-                    Create scene prompts for your {form.pagesCount} pages
-                  </p>
-                </div>
-
-                {form.prompts.length === 0 ? (
-                  <div className="space-y-4">
-                    <Card className="border-dashed border-border/50 bg-muted/30">
-                      <CardContent className="flex flex-col items-center justify-center p-8 text-center">
-                        <Sparkles className="mb-3 h-8 w-8 text-muted-foreground" />
-                        <p className="mb-4 text-muted-foreground">
-                          Click below to generate {form.pagesCount} unique scene prompts
-                        </p>
-                        <Button onClick={generatePrompts} disabled={generatingPrompts} className="rounded-xl">
-                          {generatingPrompts ? (
-                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                          ) : (
-                            <><Sparkles className="mr-2 h-4 w-4" /> Generate Prompts</>
-                          )}
-                        </Button>
-                      </CardContent>
-                    </Card>
-                    {generatingPrompts && (
-                      <div className="space-y-3">
-                        {Array.from({ length: 3 }).map((_, i) => (
-                          <Skeleton key={i} className="h-24 rounded-xl" />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-muted-foreground">
-                        {form.prompts.length} prompts generated
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Generate 1-20 matching coloring pages
                       </p>
-                      <Button variant="outline" onClick={generatePrompts} disabled={generatingPrompts} className="rounded-xl">
-                        {generatingPrompts ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                        Regenerate All
-                      </Button>
                     </div>
-                    
-                    <div className="max-h-[500px] overflow-y-auto space-y-3 pr-2">
-                      {form.prompts.map((prompt) => (
-                        <Card key={prompt.pageIndex} className="border-border/50 bg-card/60">
-                          <CardContent className="p-4">
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <Badge variant="secondary">{prompt.pageIndex}</Badge>
-                                <span className="font-medium text-sm">{prompt.title}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-7 w-7" 
-                                  onClick={() => copyPrompt(prompt.scenePrompt)} 
-                                  title="Copy"
-                                >
-                                  <Copy className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 gap-1 rounded-lg text-xs"
-                                  onClick={() => improvePrompt(prompt.pageIndex)}
-                                >
-                                  <Wand2 className="h-3 w-3" />
-                                  Improve
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 gap-1 rounded-lg text-xs"
-                                  onClick={() => regeneratePrompt(prompt.pageIndex)}
-                                >
-                                  <RefreshCw className="h-3 w-3" />
-                                  Regen
-                                </Button>
-                              </div>
+                  </div>
+
+                  {/* Scene Selection */}
+                  <div>
+                    <label className="mb-3 block text-sm font-medium">
+                      Select Scenes (optional)
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Choose specific scenes or leave empty for automatic variation
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-2">
+                      {SCENE_PRESETS.map((scene) => (
+                        <Card
+                          key={scene.id}
+                          className={cn(
+                            "cursor-pointer border transition-all hover:border-primary",
+                            selectedScenes.includes(scene.id) 
+                              ? "border-primary bg-primary/5" 
+                              : "border-border/50"
+                          )}
+                          onClick={() => toggleScene(scene.id)}
+                        >
+                          <CardContent className="p-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">{scene.label}</span>
+                              {selectedScenes.includes(scene.id) && (
+                                <Check className="h-4 w-4 text-primary" />
+                              )}
                             </div>
-                            <Textarea
-                              value={prompt.scenePrompt}
-                              onChange={(e) => updatePromptText(prompt.pageIndex, e.target.value)}
-                              className="min-h-[80px] resize-none rounded-xl text-sm"
-                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {scene.props.slice(0, 3).join(", ")}
+                            </p>
                           </CardContent>
                         </Card>
                       ))}
                     </div>
+                    {selectedScenes.length > 0 && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {selectedScenes.length} scene(s) selected
+                      </p>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
             )}
 
-            {/* =============== STEP 4: GENERATE =============== */}
+            {/* ==================== STEP 4: GENERATE ==================== */}
             {step === 4 && (
               <div className="space-y-6">
                 <div className="text-center">
-                  <h2 className="text-2xl font-semibold">Generate Pages 🚀</h2>
+                  <h2 className="text-2xl font-semibold">Generate Pages 🎨</h2>
                   <p className="text-muted-foreground">
-                    First approve a sample, then generate all remaining pages
+                    Generate {pageCount} matching coloring pages
                   </p>
                 </div>
 
-                {/* Sample Generation Section */}
-                <div className="grid gap-6 lg:grid-cols-2">
-                  {/* Sample Preview */}
-                  <Card className="border-border/50">
-                    <CardContent className="p-4">
-                      <h3 className="font-semibold mb-3 flex items-center gap-2">
-                        <ImageIcon className="h-4 w-4" />
-                        Sample (Page 1)
-                      </h3>
-                      
-                      <div className="aspect-[2/3] bg-white rounded-xl border border-border overflow-hidden mb-3">
-                        {form.pageImages[1]?.imageUrl ? (
-                          <img
-                            src={form.pageImages[1].imageUrl}
-                            alt="Sample"
-                            className="h-full w-full object-contain"
-                          />
-                        ) : form.pageImages[1]?.isGenerating ? (
-                          <div className="flex h-full flex-col items-center justify-center gap-2 bg-muted">
-                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                            <p className="text-xs text-muted-foreground">Generating sample...</p>
-                          </div>
-                        ) : form.pageImages[1]?.failedPrintSafe ? (
-                          <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-red-50 dark:bg-red-900/10">
-                            <AlertTriangle className="mb-2 h-8 w-8 text-red-500" />
-                            <p className="text-xs font-medium text-red-600">Failed print-safe check</p>
-                          </div>
-                        ) : (
-                          <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-muted">
-                            <ImageIcon className="mb-2 h-8 w-8 text-muted-foreground" />
-                            <p className="text-xs text-muted-foreground">Sample preview</p>
-                          </div>
-                        )}
-                      </div>
+                {/* Generate Button */}
+                {generatedCount === 0 && (
+                  <div className="flex justify-center">
+                    <Button
+                      onClick={generatePages}
+                      disabled={generating}
+                      size="lg"
+                      className="rounded-xl"
+                    >
+                      {generating ? (
+                        <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating {pageCount} Pages...</>
+                      ) : (
+                        <><Sparkles className="mr-2 h-5 w-5" /> Generate {pageCount} Pages</>
+                      )}
+                    </Button>
+                  </div>
+                )}
 
-                      <div className="flex gap-2">
-                        {!form.pageImages[1]?.imageUrl && (
-                          <Button
-                            onClick={generateSample}
-                            disabled={generatingSample || form.prompts.length === 0}
-                            className="flex-1 rounded-xl"
-                          >
-                            {generatingSample ? (
-                              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                            ) : (
-                              <><Sparkles className="mr-2 h-4 w-4" /> Generate Sample</>
-                            )}
-                          </Button>
-                        )}
-                        {form.pageImages[1]?.imageUrl && !form.anchorApproved && (
-                          <>
-                            <Button
-                              variant="outline"
-                              onClick={() => regeneratePage(1)}
-                              disabled={form.pageImages[1]?.isGenerating}
-                              className="rounded-xl"
-                            >
-                              <RefreshCw className="mr-2 h-4 w-4" /> Regenerate
-                            </Button>
-                            <Button onClick={approveSample} className="flex-1 rounded-xl">
-                              <Check className="mr-2 h-4 w-4" /> Approve Sample
-                            </Button>
-                          </>
-                        )}
-                        {form.anchorApproved && (
-                          <div className="flex items-center gap-2 text-green-600">
-                            <CheckCircle2 className="h-5 w-5" />
-                            <span className="font-medium">Approved</span>
-                          </div>
-                        )}
-                      </div>
+                {/* Progress Info */}
+                {generating && (
+                  <div className="text-center text-sm text-muted-foreground">
+                    This may take a few minutes. Each page is validated for print quality.
+                  </div>
+                )}
+
+                {/* Results Summary */}
+                {generatedCount > 0 && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <Badge variant="secondary" className="text-sm">
+                        {generatedCount}/{pageCount} Generated
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowDebug(!showDebug)}
+                        className="text-xs"
+                      >
+                        {showDebug ? "Hide" : "Show"} Debug
+                      </Button>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={generatePages}
+                      disabled={generating}
+                      className="rounded-xl"
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Regenerate All
+                    </Button>
+                  </div>
+                )}
+
+                {/* Debug Panel */}
+                {showDebug && lastDebug && (
+                  <Card className="border-border/50 bg-muted/30">
+                    <CardContent className="p-4">
+                      <h4 className="font-medium text-sm mb-2">Debug Info</h4>
+                      <pre className="text-xs overflow-auto max-h-40 bg-muted p-2 rounded">
+                        {JSON.stringify(lastDebug, null, 2)}
+                      </pre>
                     </CardContent>
                   </Card>
-
-                  {/* Generation Controls */}
-                  <div className="space-y-4">
-                    <Card className="border-border/50 bg-card/60">
-                      <CardContent className="p-4">
-                        <h3 className="font-semibold mb-3">Generation Summary</h3>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <p className="text-muted-foreground">Style</p>
-                            <p className="font-medium">{form.complexity} / {form.lineThickness}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Size</p>
-                            <p className="font-medium">{KDP_SIZE_PRESETS[form.sizePreset]?.label}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Mode</p>
-                            <p className="font-medium capitalize">{form.mode}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Progress</p>
-                            <p className="font-medium">{generatedCount} / {form.prompts.length}</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    {form.anchorApproved && form.prompts.length > 1 && (
-                      <Button
-                        onClick={generateRemaining}
-                        disabled={generatingRemaining}
-                        className="w-full rounded-xl"
-                        size="lg"
-                      >
-                        {generatingRemaining ? (
-                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating {form.prompts.length - 1} Pages...</>
-                        ) : (
-                          <><Sparkles className="mr-2 h-4 w-4" /> Generate Remaining {form.prompts.length - 1} Pages</>
-                        )}
-                      </Button>
-                    )}
-
-                    {/* Debug Toggle */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowDebug(!showDebug)}
-                      className="text-xs text-muted-foreground"
-                    >
-                      {showDebug ? "Hide Debug Info" : "Show Debug Info"}
-                    </Button>
-
-                    {showDebug && lastDebug && (
-                      <Card className="border-border/50 bg-muted/30">
-                        <CardContent className="p-3 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-sm font-medium">Debug Info</h4>
-                            {(lastDebug as { finalPromptFull?: string }).finalPromptFull && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => {
-                                  navigator.clipboard.writeText((lastDebug as { finalPromptFull: string }).finalPromptFull);
-                                  toast.success("Final prompt copied!");
-                                }}
-                              >
-                                <Copy className="h-3 w-3 mr-1" /> Copy Final Prompt
-                              </Button>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-muted-foreground">Model:</span>{" "}
-                              <span className="font-mono">{(lastDebug as { imageModel?: string }).imageModel || "N/A"}</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Retries:</span>{" "}
-                              <span className="font-mono">{(lastDebug as { retries?: number }).retries || 0}</span>
-                            </div>
-                            {(lastDebug as { qualityMetrics?: { blackRatio?: number } }).qualityMetrics && (
-                              <>
-                                <div>
-                                  <span className="text-muted-foreground">Black Ratio:</span>{" "}
-                                  <span className="font-mono">
-                                    {(((lastDebug as { qualityMetrics: { blackRatio: number } }).qualityMetrics.blackRatio || 0) * 100).toFixed(1)}%
-                                  </span>
-                                </div>
-                                <div>
-                                  <span className="text-muted-foreground">Max Allowed:</span>{" "}
-                                  <span className="font-mono">
-                                    {(((lastDebug as { thresholds?: { maxBlackRatio?: number } }).thresholds?.maxBlackRatio || 0) * 100).toFixed(0)}%
-                                  </span>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                          {(lastDebug as { failureReason?: string }).failureReason && (
-                            <div className="text-xs text-red-500 bg-red-500/10 rounded p-2">
-                              <strong>Failure:</strong> {(lastDebug as { failureReason: string }).failureReason}
-                            </div>
-                          )}
-                          <details className="text-xs">
-                            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                              Full Debug JSON
-                            </summary>
-                            <pre className="mt-2 overflow-auto max-h-32 bg-muted p-2 rounded text-[10px]">
-                              {JSON.stringify(lastDebug, null, 2)}
-                            </pre>
-                          </details>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </div>
-                </div>
+                )}
 
                 {/* Page Grid */}
-                {form.prompts.length > 1 && (
-                  <div className="space-y-3">
-                    <h3 className="font-semibold">All Pages</h3>
-                    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-                      {form.prompts.map((prompt) => {
-                        const pageState = form.pageImages[prompt.pageIndex];
-                        const hasImage = !!pageState?.imageUrl;
-                        const isGenerating = pageState?.isGenerating;
-                        const failedPrintSafe = pageState?.failedPrintSafe;
+                <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                  {Array.from({ length: pageCount }, (_, i) => i + 1).map((pageIndex) => {
+                    const state = pageStates[pageIndex];
+                    const prompt = prompts.find(p => p.pageIndex === pageIndex);
+                    const hasImage = !!state?.imageUrl;
+                    const isLoading = state?.isGenerating;
+                    const hasIssues = state?.validation && !state.validation.isValid;
 
-                        return (
-                          <Card key={prompt.pageIndex} className={cn("overflow-hidden border-border/50", failedPrintSafe && "border-red-500/50")}>
-                            <div className="aspect-[2/3] bg-white relative">
-                              {hasImage ? (
-                                <img
-                                  src={pageState.imageUrl}
-                                  alt={`Page ${prompt.pageIndex}`}
-                                  className="h-full w-full object-contain"
-                                />
-                              ) : isGenerating ? (
-                                <div className="flex h-full flex-col items-center justify-center gap-2 bg-muted">
-                                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                                </div>
-                              ) : failedPrintSafe ? (
-                                <div className="flex h-full flex-col items-center justify-center p-4 text-center bg-red-50 dark:bg-red-900/10">
-                                  <AlertTriangle className="mb-1 h-6 w-6 text-red-500" />
-                                  <p className="text-xs text-red-600">Failed</p>
-                                </div>
-                              ) : (
-                                <div className="flex h-full flex-col items-center justify-center p-2 text-center bg-muted">
-                                  <ImageIcon className="mb-1 h-6 w-6 text-muted-foreground" />
-                                  <p className="text-xs text-muted-foreground">Page {prompt.pageIndex}</p>
-                                </div>
-                              )}
-                              {prompt.pageIndex === 1 && form.anchorApproved && (
-                                <Badge className="absolute top-2 left-2 text-xs" variant="default">
-                                  Anchor
-                                </Badge>
-                              )}
+                    return (
+                      <Card
+                        key={pageIndex}
+                        className={cn(
+                          "overflow-hidden border-border/50",
+                          hasIssues && "border-amber-500/50"
+                        )}
+                      >
+                        <div className="aspect-[2/3] bg-white relative">
+                          {hasImage ? (
+                            <img
+                              src={state.imageUrl}
+                              alt={`Page ${pageIndex}`}
+                              className="h-full w-full object-contain"
+                            />
+                          ) : isLoading ? (
+                            <div className="flex h-full flex-col items-center justify-center gap-2 bg-muted">
+                              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                              <p className="text-xs text-muted-foreground">Generating...</p>
                             </div>
-                            <CardContent className="p-2">
-                              <p className="mb-2 truncate text-xs font-medium">{prompt.title}</p>
-                              <div className="flex gap-1">
-                                {hasImage && (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="flex-1 h-7 rounded-lg text-xs"
-                                      onClick={() => openPreview(prompt.pageIndex, prompt.title, pageState.imageUrl!)}
-                                    >
-                                      <Eye className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="flex-1 h-7 rounded-lg text-xs"
-                                      onClick={() => {
-                                        const link = document.createElement("a");
-                                        link.href = pageState.imageUrl!;
-                                        link.download = `page-${prompt.pageIndex}.png`;
-                                        link.click();
-                                      }}
-                                    >
-                                      <Download className="h-3 w-3" />
-                                    </Button>
-                                  </>
-                                )}
+                          ) : (
+                            <div className="flex h-full flex-col items-center justify-center p-2 text-center bg-muted">
+                              <ImageIcon className="mb-1 h-6 w-6 text-muted-foreground" />
+                              <p className="text-xs text-muted-foreground">Page {pageIndex}</p>
+                            </div>
+                          )}
+
+                          {/* Validation Badge */}
+                          {state?.validation && (
+                            <Badge
+                              className={cn(
+                                "absolute top-2 left-2 text-xs",
+                                state.validation.isValid 
+                                  ? "bg-green-500" 
+                                  : "bg-amber-500"
+                              )}
+                            >
+                              {state.validation.isValid ? "Valid" : "Warning"}
+                            </Badge>
+                          )}
+
+                          {/* Retry Count */}
+                          {(state?.retryCount ?? 0) > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="absolute top-2 right-2 text-xs"
+                            >
+                              {state?.retryCount} retries
+                            </Badge>
+                          )}
+                        </div>
+
+                        <CardContent className="p-2">
+                          <p className="mb-2 truncate text-xs font-medium">
+                            {prompt?.title || `Page ${pageIndex}`}
+                          </p>
+                          <div className="flex gap-1">
+                            {hasImage && (
+                              <>
                                 <Button
                                   size="sm"
-                                  variant="outline"
+                                  variant="ghost"
                                   className="flex-1 h-7 rounded-lg text-xs"
-                                  onClick={() => regeneratePage(prompt.pageIndex)}
-                                  disabled={isGenerating || generatingRemaining || (prompt.pageIndex !== 1 && !form.anchorApproved)}
+                                  onClick={() => setPreviewPage({
+                                    pageNumber: pageIndex,
+                                    title: prompt?.title || `Page ${pageIndex}`,
+                                    imageUrl: state.imageUrl!,
+                                  })}
                                 >
-                                  <RefreshCw className="h-3 w-3" />
+                                  <Eye className="h-3 w-3" />
                                 </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="flex-1 h-7 rounded-lg text-xs"
+                                  onClick={() => {
+                                    const link = document.createElement("a");
+                                    link.href = state.imageUrl!;
+                                    link.download = `coloring-page-${pageIndex}.png`;
+                                    link.click();
+                                  }}
+                                >
+                                  <Download className="h-3 w-3" />
+                                </Button>
+                              </>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 h-7 rounded-lg text-xs"
+                              onClick={() => regeneratePage(pageIndex)}
+                              disabled={isLoading || generating}
+                            >
+                              <RefreshCw className="h-3 w-3" />
+                            </Button>
+                          </div>
+
+                          {/* Validation Issues */}
+                          {hasIssues && state?.validation && (
+                            <div className="mt-2 p-2 bg-amber-500/10 rounded text-xs">
+                              <p className="text-amber-600 font-medium">Issues:</p>
+                              <ul className="text-muted-foreground">
+                                {state.validation.failureReasons.slice(0, 2).map((r, i) => (
+                                  <li key={i}>• {r}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+
+                {/* Prompts Section */}
+                {prompts.length > 0 && (
+                  <div className="space-y-4 mt-8">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" /> Generated Prompts
+                    </h3>
+                    <div className="grid gap-3 max-h-[400px] overflow-y-auto pr-2">
+                      {prompts.map((prompt) => (
+                        <Card key={prompt.pageIndex} className="border-border/50">
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary">{prompt.pageIndex}</Badge>
+                                <span className="font-medium text-sm">{prompt.title}</span>
                               </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(prompt.fullPrompt);
+                                  toast.success("Prompt copied!");
+                                }}
+                              >
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              {prompt.mainPrompt}
+                            </p>
+                          </CardContent>
+                        </Card>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1429,26 +887,26 @@ export default function StyleClonePage() {
 
           {/* Navigation */}
           <div className="flex items-center justify-between border-t border-border pt-6">
-            <Button 
-              variant="outline" 
-              onClick={() => setStep((s) => Math.max(1, s - 1))} 
-              disabled={step === 1} 
+            <Button
+              variant="outline"
+              onClick={() => setStep((s) => Math.max(1, s - 1))}
+              disabled={step === 1}
               className="rounded-xl"
             >
               <ArrowLeft className="mr-2 h-4 w-4" /> Back
             </Button>
             {step < 4 ? (
-              <Button 
-                onClick={() => setStep((s) => Math.min(4, s + 1))} 
-                disabled={!canProceed()} 
+              <Button
+                onClick={() => setStep((s) => Math.min(4, s + 1))}
+                disabled={!canProceed()}
                 className="rounded-xl"
               >
                 Next <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             ) : (
               <Button
-                onClick={() => toast.success("Project ready! Export feature coming soon.")}
-                disabled={generatedCount < form.prompts.length}
+                onClick={() => toast.success("Pages ready! Download or export.")}
+                disabled={generatedCount === 0}
                 className="rounded-xl"
               >
                 <Check className="mr-2 h-4 w-4" /> Finish
@@ -1471,4 +929,3 @@ export default function StyleClonePage() {
     </>
   );
 }
-
