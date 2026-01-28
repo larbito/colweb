@@ -176,12 +176,12 @@ export default function StyleClonePage() {
         }),
       });
 
+      const data = await safeJsonParse(response);
+      
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to extract style");
+        throw new Error(data.error || "Failed to extract style");
       }
 
-      const data = await response.json();
       updateForm("styleContract", data.styleContract);
       setLastDebug(data.debug);
       
@@ -217,12 +217,12 @@ export default function StyleClonePage() {
         }),
       });
 
+      const data = await safeJsonParse(response);
+      
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to generate theme pack");
+        throw new Error(data.error || "Failed to generate theme pack");
       }
 
-      const data = await response.json();
       updateForm("themePack", data.themePack);
       setLastDebug(data.debug);
       toast.success("Theme pack generated!");
@@ -260,12 +260,12 @@ export default function StyleClonePage() {
         }),
       });
 
+      const data = await safeJsonParse(response);
+      
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to generate prompts");
+        throw new Error(data.error || "Failed to generate prompts");
       }
 
-      const data = await response.json();
       updateForm("prompts", data.prompts);
       setLastDebug(data.debug);
       toast.success(`Generated ${data.prompts.length} prompts!`);
@@ -308,12 +308,12 @@ export default function StyleClonePage() {
         }),
       });
 
+      const data = await safeJsonParse(response);
+      
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to regenerate prompt");
+        throw new Error(data.error || "Failed to regenerate prompt");
       }
 
-      const data = await response.json();
       updateForm("prompts", form.prompts.map(p => 
         p.pageIndex === pageIndex ? data.prompt : p
       ));
@@ -345,12 +345,12 @@ export default function StyleClonePage() {
         }),
       });
 
+      const data = await safeJsonParse(response);
+      
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to improve prompt");
+        throw new Error(data.error || "Failed to improve prompt");
       }
 
-      const data = await response.json();
       updateForm("prompts", form.prompts.map(p => 
         p.pageIndex === pageIndex ? data.prompt : p
       ));
@@ -397,14 +397,12 @@ export default function StyleClonePage() {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        setLastDebug(error.debug);
-        throw new Error(error.error || "Failed to generate sample");
-      }
-
-      const data = await response.json();
+      const data = await safeJsonParse(response);
       setLastDebug(data.debug);
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate sample");
+      }
       
       const imageUrl = data.imageBase64 
         ? `data:image/png;base64,${data.imageBase64}` 
@@ -501,12 +499,11 @@ export default function StyleClonePage() {
         }),
       });
 
+      const data = await safeJsonParse(response);
+      
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to generate remaining pages");
+        throw new Error(data.error || "Failed to generate remaining pages");
       }
-
-      const data = await response.json();
       
       // Update page images with results
       const imageUpdates: Record<number, PageImageState> = {};
@@ -537,6 +534,18 @@ export default function StyleClonePage() {
       toast.error(error instanceof Error ? error.message : "Failed to generate pages");
     } finally {
       setGeneratingRemaining(false);
+    }
+  };
+
+  // =====================
+  // Helper to safely parse JSON response
+  // =====================
+  const safeJsonParse = async (response: Response) => {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(text.slice(0, 200) || "Unknown error");
     }
   };
 
@@ -574,12 +583,12 @@ export default function StyleClonePage() {
         }),
       });
 
+      const data = await safeJsonParse(response);
+      
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to regenerate page");
+        setLastDebug(data.debug);
+        throw new Error(data.error || "Failed to regenerate page");
       }
-
-      const data = await response.json();
       const imageUrl = data.imageBase64 
         ? `data:image/png;base64,${data.imageBase64}` 
         : data.imageUrl;
