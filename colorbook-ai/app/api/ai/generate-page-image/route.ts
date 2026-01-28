@@ -85,7 +85,6 @@ export async function POST(request: NextRequest) {
           n: 1,
           size: imageSize,
           quality: "hd",
-          style: "natural",
         });
 
         if (result.images && result.images.length > 0) {

@@ -34,7 +34,6 @@ export interface GenerateImageParams {
   n?: number;
   size?: ImageSize;
   quality?: "standard" | "hd";
-  style?: "natural" | "vivid";
 }
 
 export interface GenerateImageResult {
@@ -60,7 +59,6 @@ export function isOpenAIImageGenConfigured(): boolean {
  * @param params.n - Number of images (1-4, default 1)
  * @param params.size - Image size (default "1024x1792" for portrait coloring pages)
  * @param params.quality - "standard" or "hd" (default "hd")
- * @param params.style - "natural" or "vivid" (default "natural")
  */
 export async function generateImage(params: GenerateImageParams): Promise<GenerateImageResult> {
   const { 
@@ -68,7 +66,6 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
     n = 1, 
     size = "1024x1792",
     quality = "hd",
-    style = "natural"
   } = params;
 
   if (!isOpenAIImageGenConfigured()) {
@@ -80,7 +77,7 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
   }
 
   console.log(`[openaiImageGen] Generating ${n} image(s) with model: ${IMAGE_MODEL}`);
-  console.log(`[openaiImageGen] Size: ${size}, Quality: ${quality}, Style: ${style}`);
+  console.log(`[openaiImageGen] Size: ${size}, Quality: ${quality}`);
   console.log(`[openaiImageGen] EXACT PROMPT (${prompt.length} chars): "${prompt.substring(0, 150)}..."`);
 
   const images: string[] = [];
@@ -95,7 +92,6 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
         n: 1,
         size: size,
         quality: quality,
-        style: style,
         response_format: "url", // Get URL, then fetch and convert to base64
       } as OpenAI.Images.ImageGenerateParams);
 

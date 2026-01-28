@@ -127,7 +127,6 @@ export async function POST(request: NextRequest) {
           n: 1,
           size: dalleSize,
           quality: "hd",
-          style: "natural",
         });
 
         if (!genResult.images || genResult.images.length === 0) {

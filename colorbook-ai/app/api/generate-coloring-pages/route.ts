@@ -172,7 +172,6 @@ async function generateSinglePage(
         n: 1,
         size,
         quality: "hd",
-        style: "natural",
       });
 
       if (!result.images || result.images.length === 0) {

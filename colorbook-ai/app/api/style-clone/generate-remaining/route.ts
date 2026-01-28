@@ -101,7 +101,6 @@ async function generateSinglePage(params: {
         n: 1,
         size: dalleSize,
         quality: "hd",
-        style: "natural",
       });
 
       if (!genResult.images || genResult.images.length === 0) {
