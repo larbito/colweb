@@ -100,7 +100,6 @@ async function generateSinglePage(params: {
         prompt: finalPromptUsed,
         n: 1,
         size: dalleSize,
-        quality: "hd",
       });
 
       if (!genResult.images || genResult.images.length === 0) {

@@ -136,7 +136,6 @@ export async function POST(request: NextRequest) {
           prompt: finalPromptUsed,
           n: 1,
           size: dalleSize,
-          quality: "hd",
         });
 
         if (!genResult.images || genResult.images.length === 0) {

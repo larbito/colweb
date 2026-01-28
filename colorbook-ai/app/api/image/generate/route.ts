@@ -29,7 +29,6 @@ const requestSchema = z.object({
   prompt: z.string().min(1, "Prompt is required").max(4000, "Prompt too long"),
   n: z.number().int().min(1).max(4).default(1),
   size: z.enum(["1024x1024", "1024x1792", "1792x1024"]).default("1024x1792"),
-  quality: z.enum(["standard", "hd"]).default("hd"),
 });
 
 export async function POST(request: NextRequest) {
@@ -55,11 +54,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { prompt, n, size, quality } = parseResult.data;
+    const { prompt, n, size } = parseResult.data;
 
     // Log the exact prompt being used (for transparency)
     console.log(`[/api/image/generate] Request received`);
-    console.log(`[/api/image/generate] n=${n}, size=${size}, quality=${quality}`);
+    console.log(`[/api/image/generate] n=${n}, size=${size}`);
     console.log(`[/api/image/generate] EXACT PROMPT SENT TO OPENAI:`);
     console.log(`"${prompt}"`);
     console.log(`[/api/image/generate] --- END PROMPT ---`);
@@ -69,7 +68,6 @@ export async function POST(request: NextRequest) {
       prompt, // EXACT prompt, no modifications
       n,
       size: size as ImageSize,
-      quality,
     });
 
     // Log success

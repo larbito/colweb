@@ -33,7 +33,6 @@ export interface GenerateImageParams {
   prompt: string;
   n?: number;
   size?: ImageSize;
-  quality?: "standard" | "hd";
 }
 
 export interface GenerateImageResult {
@@ -58,14 +57,12 @@ export function isOpenAIImageGenConfigured(): boolean {
  * @param params.prompt - The EXACT prompt to send (no modifications)
  * @param params.n - Number of images (1-4, default 1)
  * @param params.size - Image size (default "1024x1792" for portrait coloring pages)
- * @param params.quality - "standard" or "hd" (default "hd")
  */
 export async function generateImage(params: GenerateImageParams): Promise<GenerateImageResult> {
   const { 
     prompt, 
     n = 1, 
     size = "1024x1792",
-    quality = "hd",
   } = params;
 
   if (!isOpenAIImageGenConfigured()) {
@@ -77,7 +74,7 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
   }
 
   console.log(`[openaiImageGen] Generating ${n} image(s) with model: ${IMAGE_MODEL}`);
-  console.log(`[openaiImageGen] Size: ${size}, Quality: ${quality}`);
+  console.log(`[openaiImageGen] Size: ${size}`);
   console.log(`[openaiImageGen] EXACT PROMPT (${prompt.length} chars): "${prompt.substring(0, 150)}..."`);
 
   const images: string[] = [];
@@ -86,25 +83,32 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
   // Loop for multiple images
   for (let i = 0; i < Math.min(n, 4); i++) {
     try {
+      // gpt-image-1.5 uses minimal parameters - no response_format, style, etc.
       const response = await openai.images.generate({
         model: IMAGE_MODEL,
         prompt: prompt, // EXACT prompt - no modifications
         n: 1,
         size: size,
-        quality: quality,
-        response_format: "url", // Get URL, then fetch and convert to base64
       } as OpenAI.Images.ImageGenerateParams);
 
-      const imageUrl = response.data?.[0]?.url;
-      const revisedPrompt = response.data?.[0]?.revised_prompt;
-
-      if (revisedPrompt) {
-        revisedPrompts.push(revisedPrompt);
+      const imageData = response.data?.[0];
+      
+      if (!imageData) {
+        console.error(`[openaiImageGen] No image data returned for image ${i + 1}`);
+        continue;
       }
 
-      if (imageUrl) {
+      // Handle revised prompt if present
+      if (imageData.revised_prompt) {
+        revisedPrompts.push(imageData.revised_prompt);
+      }
+
+      // Handle both b64_json and url responses
+      if (imageData.b64_json) {
+        images.push(imageData.b64_json);
+      } else if (imageData.url) {
         // Fetch image and convert to base64
-        const imageResponse = await fetch(imageUrl);
+        const imageResponse = await fetch(imageData.url);
         if (imageResponse.ok) {
           const buffer = Buffer.from(await imageResponse.arrayBuffer());
           images.push(buffer.toString("base64"));

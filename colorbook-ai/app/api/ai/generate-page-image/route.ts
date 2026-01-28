@@ -84,7 +84,6 @@ export async function POST(request: NextRequest) {
           prompt: attemptPrompt,
           n: 1,
           size: imageSize,
-          quality: "hd",
         });
 
         if (result.images && result.images.length > 0) {

@@ -171,7 +171,6 @@ async function generateSinglePage(
         prompt: finalPrompt,
         n: 1,
         size,
-        quality: "hd",
       });
 
       if (!result.images || result.images.length === 0) {

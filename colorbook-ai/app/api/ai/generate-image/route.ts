@@ -47,7 +47,6 @@ export async function POST(request: NextRequest) {
       prompt, // Exact prompt, no modifications
       n: 1,
       size: "1024x1024",
-      quality: "standard",
     });
 
     if (!result.images || result.images.length === 0) {

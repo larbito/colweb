@@ -59,7 +59,6 @@ ${negativeRules.map(rule => `- AVOID: ${rule}`).join("\n")}`;
       prompt: prompt,
       n: 1,
       size: "1024x1792", // Portrait for character sheet
-      quality: "hd",
     });
 
     if (!genResult.images || genResult.images.length === 0) {
