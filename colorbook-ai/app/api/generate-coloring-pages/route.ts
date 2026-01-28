@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
+import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
 import { buildColoringPrompt, buildDalle3Prompt } from "@/lib/coloringPromptBuilder";
-import { validateColoringPage, analyzeForRetry } from "@/lib/coloringPageValidator";
+import { validateColoringPage } from "@/lib/coloringPageValidator";
 import type { ImageAnalysis, GeneratedPrompt, GenerationResult, ValidationResult } from "@/lib/coloringPageTypes";
 
 const analysisSchema = z.object({
@@ -45,7 +45,7 @@ const requestSchema = z.object({
  * Uses strict B&W enforcement and automatic retry on failure.
  */
 export async function POST(request: NextRequest) {
-  if (!isOpenAIConfigured()) {
+  if (!isOpenAIImageGenConfigured()) {
     return NextResponse.json(
       { error: "OpenAI API key not configured" },
       { status: 503 }
@@ -166,28 +166,20 @@ async function generateSinglePage(
       
       console.log(`[generate-coloring-pages] Page ${prompt.pageIndex} attempt ${attempt + 1}, prompt length: ${finalPrompt.length}`);
 
-      // Generate with DALL-E 3
-      const response = await openai.images.generate({
-        model: "dall-e-3",
+      // Generate with centralized OpenAI service
+      const result = await generateImage({
         prompt: finalPrompt,
         n: 1,
         size,
         quality: "hd",
-        style: "natural", // Natural tends to follow instructions better
+        style: "natural",
       });
 
-      const imageUrl = response.data?.[0]?.url;
-      if (!imageUrl) {
-        throw new Error("No image URL returned");
+      if (!result.images || result.images.length === 0) {
+        throw new Error("No image generated");
       }
 
-      // Fetch the image
-      const imageResponse = await fetch(imageUrl);
-      if (!imageResponse.ok) {
-        throw new Error("Failed to fetch generated image");
-      }
-      
-      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+      const imageBuffer = Buffer.from(result.images[0], "base64");
       
       // Validate the image (validates AFTER B&W conversion)
       const { validation, correctedBuffer } = await validateColoringPage(imageBuffer);

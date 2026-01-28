@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
+import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
 import { buildFinalImagePrompt, buildCharacterBible } from "@/lib/styleClonePromptBuilder";
 import { validateImageQuality, getQualityThresholds } from "@/lib/qualityGates";
 import { KDP_SIZE_PRESETS, type StyleContract, type ThemePack } from "@/lib/styleClone";
@@ -62,7 +62,7 @@ const DALLE_SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = 
 };
 
 export async function POST(request: NextRequest) {
-  if (!isOpenAIConfigured()) {
+  if (!isOpenAIImageGenConfigured()) {
     return NextResponse.json({ error: "OpenAI not configured" }, { status: 503 });
   }
 
@@ -131,9 +131,8 @@ export async function POST(request: NextRequest) {
 
         console.log(`[generate-sample] Attempt ${retry + 1}/${maxRetries}, prompt length: ${finalPromptUsed.length}`);
 
-        // Generate with DALL-E 3
-        const response = await openai.images.generate({
-          model: "dall-e-3",
+        // Generate with centralized OpenAI service
+        const genResult = await generateImage({
           prompt: finalPromptUsed,
           n: 1,
           size: dalleSize,
@@ -141,20 +140,12 @@ export async function POST(request: NextRequest) {
           style: "natural",
         });
 
-        const imageUrl = response.data?.[0]?.url;
-        if (!imageUrl) {
-          lastError = "No image URL returned";
+        if (!genResult.images || genResult.images.length === 0) {
+          lastError = "No image generated";
           continue;
         }
 
-        // Fetch image
-        const imageResponse = await fetch(imageUrl);
-        if (!imageResponse.ok) {
-          lastError = "Failed to fetch image";
-          continue;
-        }
-
-        const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+        const imageBuffer = Buffer.from(genResult.images[0], "base64");
 
         // Quality check (includes B&W conversion)
         const qualityResult = await validateImageQuality(imageBuffer, complexity as Complexity);

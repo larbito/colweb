@@ -1,92 +1,117 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
-
-const requestSchema = z.object({
-  prompt: z.string().min(1, "Prompt is required"),
-  n: z.number().int().min(1).max(4).default(1),
-  size: z.enum(["1024x1024", "1024x1792", "1792x1024"]).default("1024x1792"),
-});
+import { 
+  generateImage, 
+  isOpenAIImageGenConfigured,
+  assertOpenAIOnlyProvider,
+  type ImageSize 
+} from "@/lib/services/openaiImageGen";
 
 /**
+ * ============================================================
  * POST /api/image/generate
+ * ============================================================
  * 
- * Generates images using EXACTLY the prompt provided.
+ * ⚠️  STRICT RULES:
  * 
- * ⚠️ HARD RULE: NO HIDDEN PROMPTS
- * - Does NOT append any style instructions
- * - Does NOT prepend any system context
- * - Does NOT modify the prompt in any way
- * - Uses the prompt EXACTLY as the user provided it
+ * 1. Uses ONLY OpenAI DALL-E for image generation
+ * 2. Sends the prompt EXACTLY as provided - NO MODIFICATIONS
+ * 3. No hidden system prompts or style injection
+ * 4. The prompt parameter is the single source of truth
  * 
- * Input: { prompt: string, n?: number, size?: string }
- * Output: { images: string[] }
+ * Input:  { prompt: string, n?: number, size?: string }
+ * Output: { images: string[] } (base64 encoded)
+ * 
+ * ============================================================
  */
+
+const requestSchema = z.object({
+  prompt: z.string().min(1, "Prompt is required").max(4000, "Prompt too long"),
+  n: z.number().int().min(1).max(4).default(1),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024"]).default("1024x1792"),
+  quality: z.enum(["standard", "hd"]).default("hd"),
+  style: z.enum(["natural", "vivid"]).default("natural"),
+});
+
 export async function POST(request: NextRequest) {
-  if (!isOpenAIConfigured()) {
+  // Run provider guard (logs warnings if other providers are configured)
+  assertOpenAIOnlyProvider();
+
+  // Check OpenAI is configured
+  if (!isOpenAIImageGenConfigured()) {
     return NextResponse.json(
-      { error: "OpenAI API key not configured" },
+      { error: "OpenAI API key not configured. Set OPENAI_API_KEY in environment." },
       { status: 503 }
     );
   }
 
   try {
     const body = await request.json();
-    const { prompt, n, size } = requestSchema.parse(body);
+    const parseResult = requestSchema.safeParse(body);
 
-    console.log(`[image/generate] Generating ${n} image(s), prompt length: ${prompt.length}`);
-    console.log(`[image/generate] EXACT PROMPT USED: "${prompt.substring(0, 200)}..."`);
-
-    // Generate images - using prompt EXACTLY as provided
-    const images: string[] = [];
-
-    for (let i = 0; i < n; i++) {
-      const response = await openai.images.generate({
-        model: "dall-e-3",
-        prompt: prompt, // EXACT prompt, no modifications
-        n: 1,
-        size: size,
-        quality: "hd",
-        style: "natural",
-      });
-
-      const imageUrl = response.data?.[0]?.url;
-      if (imageUrl) {
-        // Fetch and convert to base64
-        const imageResponse = await fetch(imageUrl);
-        if (imageResponse.ok) {
-          const buffer = Buffer.from(await imageResponse.arrayBuffer());
-          images.push(buffer.toString("base64"));
-        }
-      }
-    }
-
-    if (images.length === 0) {
+    if (!parseResult.success) {
       return NextResponse.json(
-        { error: "Failed to generate images" },
-        { status: 500 }
-      );
-    }
-
-    console.log(`[image/generate] Generated ${images.length} image(s)`);
-
-    return NextResponse.json({ images });
-
-  } catch (error) {
-    console.error("[image/generate] Error:", error);
-    
-    // Handle content policy errors
-    if (error instanceof Error && error.message.includes("content_policy")) {
-      return NextResponse.json(
-        { error: "Content policy violation. Please modify your prompt." },
+        { error: "Invalid request", details: parseResult.error.flatten() },
         { status: 400 }
       );
     }
 
+    const { prompt, n, size, quality, style } = parseResult.data;
+
+    // Log the exact prompt being used (for transparency)
+    console.log(`[/api/image/generate] Request received`);
+    console.log(`[/api/image/generate] n=${n}, size=${size}, quality=${quality}, style=${style}`);
+    console.log(`[/api/image/generate] EXACT PROMPT SENT TO OPENAI:`);
+    console.log(`"${prompt}"`);
+    console.log(`[/api/image/generate] --- END PROMPT ---`);
+
+    // Generate using OpenAI ONLY
+    const result = await generateImage({
+      prompt, // EXACT prompt, no modifications
+      n,
+      size: size as ImageSize,
+      quality,
+      style,
+    });
+
+    // Log success
+    console.log(`[/api/image/generate] Success: ${result.images.length} image(s) generated`);
+    
+    // Log if DALL-E revised the prompt (for transparency)
+    if (result.revisedPrompts && result.revisedPrompts.length > 0) {
+      console.log(`[/api/image/generate] Note: DALL-E revised the prompt internally:`);
+      result.revisedPrompts.forEach((rp, i) => {
+        console.log(`[/api/image/generate] Revised prompt ${i + 1}: "${rp.substring(0, 100)}..."`);
+      });
+    }
+
+    return NextResponse.json({
+      images: result.images,
+      // Optionally include revised prompts for transparency
+      revisedPrompts: result.revisedPrompts,
+    });
+
+  } catch (error) {
+    console.error("[/api/image/generate] Error:", error);
+
+    // Handle specific errors
+    if (error instanceof Error) {
+      if (error.message.includes("content_policy")) {
+        return NextResponse.json(
+          { error: "Content policy violation. Please modify your prompt." },
+          { status: 400 }
+        );
+      }
+      
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate image" },
+      { error: "Failed to generate image" },
       { status: 500 }
     );
   }
 }
-

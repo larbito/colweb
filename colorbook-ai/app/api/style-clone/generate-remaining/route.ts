@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
+import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
 import { buildFinalImagePrompt, buildCharacterBible } from "@/lib/styleClonePromptBuilder";
 import { validateImageQuality, getQualityThresholds } from "@/lib/qualityGates";
 import { KDP_SIZE_PRESETS, type StyleContract, type ThemePack, type StyleCloneImage } from "@/lib/styleClone";
@@ -95,8 +95,8 @@ async function generateSinglePage(params: {
         retryAttempt: retry,
       });
 
-      const response = await openai.images.generate({
-        model: "dall-e-3",
+      // Use centralized OpenAI service
+      const genResult = await generateImage({
         prompt: finalPromptUsed,
         n: 1,
         size: dalleSize,
@@ -104,19 +104,12 @@ async function generateSinglePage(params: {
         style: "natural",
       });
 
-      const imageUrl = response.data?.[0]?.url;
-      if (!imageUrl) {
-        lastError = "No URL";
+      if (!genResult.images || genResult.images.length === 0) {
+        lastError = "No image generated";
         continue;
       }
 
-      const imageResponse = await fetch(imageUrl);
-      if (!imageResponse.ok) {
-        lastError = "Fetch failed";
-        continue;
-      }
-
-      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+      const imageBuffer = Buffer.from(genResult.images[0], "base64");
       const qualityResult = await validateImageQuality(imageBuffer, complexity);
       
       lastMetrics = { ...qualityResult.metrics, ...qualityResult.debug };
@@ -156,7 +149,7 @@ async function generateSinglePage(params: {
 }
 
 export async function POST(request: NextRequest) {
-  if (!isOpenAIConfigured()) {
+  if (!isOpenAIImageGenConfigured()) {
     return NextResponse.json({ error: "OpenAI not configured" }, { status: 503 });
   }
 

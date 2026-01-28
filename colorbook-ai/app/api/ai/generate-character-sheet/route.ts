@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
+import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
 import {
   generateCharacterSheetRequestSchema,
   type GenerateCharacterSheetResponse,
 } from "@/lib/schemas";
 
 export async function POST(request: NextRequest) {
-  if (!isOpenAIConfigured()) {
+  if (!isOpenAIImageGenConfigured()) {
     return NextResponse.json(
       { error: "OpenAI API key not configured." },
       { status: 503 }
@@ -54,9 +54,8 @@ STYLE REQUIREMENTS:
 
 ${negativeRules.map(rule => `- AVOID: ${rule}`).join("\n")}`;
 
-    // Use DALL-E 3 for the character sheet
-    const response = await openai.images.generate({
-      model: "dall-e-3",
+    // Use centralized OpenAI service
+    const genResult = await generateImage({
       prompt: prompt,
       n: 1,
       size: "1024x1792", // Portrait for character sheet
@@ -64,14 +63,14 @@ ${negativeRules.map(rule => `- AVOID: ${rule}`).join("\n")}`;
       style: "natural",
     });
 
-    const imageUrl = response.data?.[0]?.url;
-    if (!imageUrl) {
+    if (!genResult.images || genResult.images.length === 0) {
       return NextResponse.json({ error: "No image generated" }, { status: 500 });
     }
 
-    // For MVP, return the URL directly (not base64)
-    // In production, you'd want to fetch and convert to base64 for storage
-    const result: GenerateCharacterSheetResponse = { imageUrl };
+    // Return as data URL
+    const result: GenerateCharacterSheetResponse = { 
+      imageUrl: `data:image/png;base64,${genResult.images[0]}` 
+    };
 
     return NextResponse.json(result);
   } catch (error) {
@@ -92,4 +91,3 @@ ${negativeRules.map(rule => `- AVOID: ${rule}`).join("\n")}`;
     );
   }
 }
-

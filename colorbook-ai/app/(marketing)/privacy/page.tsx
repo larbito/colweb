@@ -63,8 +63,7 @@ export default function PrivacyPage() {
               We share data with trusted third parties to operate the Service:
             </p>
             <ul className="mt-2 list-disc space-y-1 pl-6 text-muted-foreground">
-              <li><strong>OpenAI:</strong> Processes your prompts to generate content</li>
-              <li><strong>Replicate:</strong> Generates images from prompts</li>
+              <li><strong>OpenAI:</strong> Processes your prompts and generates images (DALL-E)</li>
               <li><strong>Stripe:</strong> Handles payment processing</li>
               <li><strong>Vercel:</strong> Hosts our application</li>
             </ul>

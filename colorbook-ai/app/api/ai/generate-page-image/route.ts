@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
+import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
 import { characterLockSchema } from "@/lib/schemas";
 import { buildPrompt, buildStricterSuffix } from "@/lib/promptBuilder";
 import type { GenerationSpec } from "@/lib/generationSpec";
@@ -37,7 +37,7 @@ const SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = {
 };
 
 export async function POST(request: NextRequest) {
-  if (!isOpenAIConfigured()) {
+  if (!isOpenAIImageGenConfigured()) {
     return NextResponse.json(
       { error: "OpenAI API key not configured." },
       { status: 503 }
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     // Get the appropriate image size (always portrait)
     const imageSize = SIZE_MAP[spec.pixelSize] || "1024x1792";
 
-    let imageUrl: string | undefined;
+    let imageBase64: string | undefined;
     let retryCount = 0;
     const maxRetries = 2;
     let lastError: string | undefined;
@@ -79,8 +79,8 @@ export async function POST(request: NextRequest) {
           ? `${fullPrompt}${buildStricterSuffix()}`
           : fullPrompt;
 
-        const response = await openai.images.generate({
-          model: "dall-e-3",
+        // Use centralized OpenAI service
+        const result = await generateImage({
           prompt: attemptPrompt,
           n: 1,
           size: imageSize,
@@ -88,18 +88,8 @@ export async function POST(request: NextRequest) {
           style: "natural",
         });
 
-        imageUrl = response.data?.[0]?.url;
-
-        if (imageUrl) {
-          // In production, we would:
-          // 1. Fetch the image
-          // 2. Process with sharp (grayscale + binarize)
-          // 3. Check black pixel ratio
-          // 4. If fails, retry with stricter prompt
-          
-          // For now, we trust DALL-E 3 output with our strict prompts
-          // The prompt builder already includes very strict rules
-          
+        if (result.images && result.images.length > 0) {
+          imageBase64 = result.images[0];
           break;
         }
       } catch (genError) {
@@ -120,7 +110,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!imageUrl) {
+    if (!imageBase64) {
       return NextResponse.json(
         { 
           error: lastError || "Failed to generate image after multiple attempts",
@@ -131,7 +121,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      imageUrl,
+      imageUrl: `data:image/png;base64,${imageBase64}`,
       retries: retryCount,
       spec: {
         complexity: spec.complexity,
