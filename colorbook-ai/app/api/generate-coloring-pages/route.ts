@@ -35,7 +35,7 @@ const requestSchema = z.object({
   analysis: analysisSchema,
   count: z.number().int().min(1).max(20).default(1),
   scenes: z.array(z.string()).optional(),
-  size: z.enum(["1024x1024", "1024x1792", "1792x1024"]).default("1024x1792"),
+  size: z.enum(["1024x1024", "1024x1536", "1536x1024", "auto"]).default("1024x1536"),
 });
 
 /**
@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
 async function generateSinglePage(
   prompt: GeneratedPrompt,
   analysis: ImageAnalysis,
-  size: "1024x1024" | "1024x1792" | "1792x1024"
+  size: "1024x1024" | "1024x1536" | "1536x1024" | "auto"
 ): Promise<GenerationResult> {
   const maxRetries = 3;
   let lastValidation: ValidationResult | undefined;

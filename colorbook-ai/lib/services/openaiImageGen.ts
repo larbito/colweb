@@ -24,7 +24,8 @@ const openai = new OpenAI({
 });
 
 // Allowed sizes for GPT Image 1.5
-export type ImageSize = "1024x1024" | "1024x1792" | "1792x1024";
+// Supported: 1024x1024, 1024x1536, 1536x1024, auto
+export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 
 // Image model to use
 const IMAGE_MODEL = "gpt-image-1.5";
@@ -56,13 +57,13 @@ export function isOpenAIImageGenConfigured(): boolean {
  * 
  * @param params.prompt - The EXACT prompt to send (no modifications)
  * @param params.n - Number of images (1-4, default 1)
- * @param params.size - Image size (default "1024x1792" for portrait coloring pages)
+ * @param params.size - Image size (default "1024x1536" for portrait coloring pages)
  */
 export async function generateImage(params: GenerateImageParams): Promise<GenerateImageResult> {
   const { 
     prompt, 
     n = 1, 
-    size = "1024x1792",
+    size = "1024x1536", // Portrait format for coloring pages
   } = params;
 
   if (!isOpenAIImageGenConfigured()) {

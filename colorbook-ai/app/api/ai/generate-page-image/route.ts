@@ -28,12 +28,12 @@ const requestSchema = z.object({
 
 export type GeneratePageImageRequest = z.infer<typeof requestSchema>;
 
-// Image size mapping - all portrait
-const SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = {
-  "1024x1326": "1024x1792",
-  "1024x1280": "1024x1792",
-  "1024x1536": "1024x1792",
-  "1024x1448": "1024x1792",
+// GPT Image 1.5 supported sizes: 1024x1024, 1024x1536, 1536x1024, auto
+const SIZE_MAP: Record<string, "1024x1536" | "1024x1024" | "1536x1024"> = {
+  "1024x1326": "1024x1536",
+  "1024x1280": "1024x1536",
+  "1024x1536": "1024x1536",
+  "1024x1448": "1024x1536",
 };
 
 export async function POST(request: NextRequest) {
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Get the appropriate image size (always portrait)
-    const imageSize = SIZE_MAP[spec.pixelSize] || "1024x1792";
+    const imageSize = SIZE_MAP[spec.pixelSize] || "1024x1536";
 
     let imageBase64: string | undefined;
     let retryCount = 0;

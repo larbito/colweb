@@ -28,7 +28,7 @@ import {
 const requestSchema = z.object({
   prompt: z.string().min(1, "Prompt is required").max(4000, "Prompt too long"),
   n: z.number().int().min(1).max(4).default(1),
-  size: z.enum(["1024x1024", "1024x1792", "1792x1024"]).default("1024x1792"),
+  size: z.enum(["1024x1024", "1024x1536", "1536x1024", "auto"]).default("1024x1536"),
 });
 
 export async function POST(request: NextRequest) {

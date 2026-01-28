@@ -58,7 +58,7 @@ ${negativeRules.map(rule => `- AVOID: ${rule}`).join("\n")}`;
     const genResult = await generateImage({
       prompt: prompt,
       n: 1,
-      size: "1024x1792", // Portrait for character sheet
+      size: "1024x1536", // Portrait for character sheet (GPT Image 1.5 format)
     });
 
     if (!genResult.images || genResult.images.length === 0) {

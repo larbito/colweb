@@ -205,7 +205,7 @@ export default function StyleClonePage() {
         body: JSON.stringify({
           prompt: prompt, // EXACT prompt from textarea
           n: 1,
-          size: "1024x1792",
+          size: "1024x1536",
         }),
       });
 

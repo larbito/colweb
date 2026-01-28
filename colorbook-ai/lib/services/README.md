@@ -22,7 +22,7 @@ import { generateImage } from "@/lib/services/openaiImageGen";
 const result = await generateImage({
   prompt: "your prompt here",
   n: 1,
-  size: "1024x1792",
+  size: "1024x1536",
 });
 ```
 
@@ -34,7 +34,7 @@ const result = await generateImage({
 {
   "prompt": "string (required) - EXACT prompt sent to DALL-E",
   "n": "number (optional, default 1)",
-  "size": "1024x1024 | 1024x1792 | 1792x1024",
+  "size": "1024x1024 | 1024x1536 | 1536x1024 | auto",
   "quality": "standard | hd",
   "style": "natural | vivid"
 }
