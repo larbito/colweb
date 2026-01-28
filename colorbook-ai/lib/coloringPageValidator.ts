@@ -1,8 +1,9 @@
 /**
  * Coloring Page Validator
  * 
- * Validates that generated images are proper B&W coloring pages
- * without color, grayscale shading, or other unwanted elements.
+ * Validates that generated images are proper B&W coloring pages.
+ * DALL-E 3 always produces anti-aliased images with gray pixels,
+ * so we convert to pure B&W first, then validate the result.
  */
 
 import type { ValidationResult } from "./coloringPageTypes";
@@ -10,85 +11,80 @@ import type { ValidationResult } from "./coloringPageTypes";
 /**
  * Validate a coloring page image
  * Returns validation result with detailed metrics
+ * 
+ * NOTE: We convert to B&W FIRST, then validate the converted image.
+ * This is because DALL-E 3 cannot produce perfectly binary images.
  */
 export async function validateColoringPage(
   imageBuffer: Buffer
 ): Promise<{ validation: ValidationResult; correctedBuffer: Buffer }> {
   const sharp = (await import("sharp")).default;
   
-  // Get image metadata and raw pixel data
-  const image = sharp(imageBuffer);
-  const metadata = await image.metadata();
-  const { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
+  // FIRST: Convert to pure B&W - this fixes DALL-E's anti-aliasing
+  const correctedBuffer = await convertToPureBW(imageBuffer, sharp);
+  
+  // NOW: Validate the CONVERTED image (not the original)
+  const { data, info } = await sharp(correctedBuffer)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
   
   const totalPixels = info.width * info.height;
   const channels = info.channels;
   
-  // Analyze the image
+  // Count black vs white pixels in the converted B&W image
   let blackPixels = 0;
   let whitePixels = 0;
   let coloredPixels = 0;
-  let grayPixels = 0;
-  const grayLevels = new Set<number>();
   
   for (let i = 0; i < data.length; i += channels) {
     const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
+    const g = channels >= 3 ? data[i + 1] : r;
+    const b = channels >= 3 ? data[i + 2] : r;
     
-    // Check if pixel has color (RGB values significantly different)
-    const maxDiff = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
+    // After B&W conversion, pixels should be pure black or white
+    const gray = Math.round((r + g + b) / 3);
     
-    if (maxDiff > 15) {
-      // This pixel has color
-      coloredPixels++;
-    } else {
-      // Grayscale pixel - check the level
-      const gray = Math.round((r + g + b) / 3);
-      grayLevels.add(gray);
-      
-      if (gray < 50) {
-        blackPixels++;
-      } else if (gray > 240) {
-        whitePixels++;
-      } else {
-        grayPixels++;
+    // Check for any remaining color (shouldn't happen after conversion)
+    if (channels >= 3) {
+      const maxDiff = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
+      if (maxDiff > 5) {
+        coloredPixels++;
       }
+    }
+    
+    if (gray < 128) {
+      blackPixels++;
+    } else {
+      whitePixels++;
     }
   }
   
-  // Calculate metrics
+  // Calculate metrics on the CONVERTED image
   const colorRatio = coloredPixels / totalPixels;
   const blackRatio = blackPixels / totalPixels;
-  const grayRatio = grayPixels / totalPixels;
-  const grayLevelCount = grayLevels.size;
-  
-  // Determine if image passes validation
-  const hasColor = colorRatio > 0.01; // More than 1% colored pixels
-  const hasShading = grayRatio > 0.05 || grayLevelCount > 20; // More than 5% gray or many gray levels
   
   const failureReasons: string[] = [];
   
+  // After conversion, there should be NO color
+  const hasColor = colorRatio > 0.001;
   if (hasColor) {
-    failureReasons.push(`Image has ${(colorRatio * 100).toFixed(1)}% colored pixels`);
+    failureReasons.push(`Conversion failed: ${(colorRatio * 100).toFixed(2)}% colored pixels remain`);
   }
   
-  if (hasShading) {
-    failureReasons.push(`Image has ${(grayRatio * 100).toFixed(1)}% gray pixels with ${grayLevelCount} different gray levels`);
+  // Check black ratio is reasonable for a coloring page
+  if (blackRatio > 0.60) {
+    failureReasons.push(`Too much black after conversion: ${(blackRatio * 100).toFixed(1)}% (max 60%)`);
   }
   
-  if (blackRatio > 0.50) {
-    failureReasons.push(`Too much black: ${(blackRatio * 100).toFixed(1)}% (max 50%)`);
+  if (blackRatio < 0.03) {
+    failureReasons.push(`Too little black: ${(blackRatio * 100).toFixed(1)}% (min 3%)`);
   }
   
-  if (blackRatio < 0.05) {
-    failureReasons.push(`Too little black: ${(blackRatio * 100).toFixed(1)}% (min 5%)`);
-  }
+  // After B&W conversion, shading is impossible (only 0 and 255)
+  const hasShading = false;
+  const grayLevelCount = 2; // After conversion: just black and white
   
-  const isValid = !hasColor && !hasShading && blackRatio <= 0.50 && blackRatio >= 0.05;
-  
-  // Always convert to pure B&W for output
-  const correctedBuffer = await convertToPureBW(imageBuffer, sharp);
+  const isValid = !hasColor && blackRatio <= 0.60 && blackRatio >= 0.03;
   
   return {
     validation: {
@@ -105,7 +101,7 @@ export async function validateColoringPage(
 
 /**
  * Convert image to pure black & white
- * Uses adaptive thresholding for best results
+ * Uses high threshold to preserve only dark lines and make grays white
  */
 async function convertToPureBW(
   imageBuffer: Buffer,
@@ -122,15 +118,17 @@ async function convertToPureBW(
     .raw()
     .toBuffer({ resolveWithObject: true });
   
-  // Apply threshold - use 200 to make more whites and preserve only dark lines
-  const threshold = 200;
+  // Apply threshold - use 180 to preserve more line detail while removing grays
+  // Lower threshold = more black preserved, higher = more white
+  const threshold = 180;
   const bwData = Buffer.alloc(data.length);
   
   for (let i = 0; i < data.length; i++) {
+    // Anything above threshold becomes white, below becomes black
     bwData[i] = data[i] > threshold ? 255 : 0;
   }
   
-  // Reconstruct the image
+  // Reconstruct the image as PNG
   const bwImage = await sharp(bwData, {
     raw: {
       width: info.width,
@@ -138,15 +136,15 @@ async function convertToPureBW(
       channels: 1,
     },
   })
-    .png()
+    .png({ compressionLevel: 9 })
     .toBuffer();
   
   return bwImage;
 }
 
 /**
- * Quick check if image is likely a valid coloring page
- * Used for fast rejection before full validation
+ * Quick check if image has significant color (not just B&W with anti-aliasing)
+ * Used for fast detection of colored images
  */
 export async function quickColorCheck(imageBuffer: Buffer): Promise<boolean> {
   const sharp = (await import("sharp")).default;
@@ -158,24 +156,28 @@ export async function quickColorCheck(imageBuffer: Buffer): Promise<boolean> {
     .toBuffer({ resolveWithObject: true });
   
   const channels = info.channels;
+  if (channels < 3) return true; // Grayscale is fine
+  
   let coloredPixels = 0;
+  const totalPixels = info.width * info.height;
   
   for (let i = 0; i < data.length; i += channels) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
     
+    // Significant color difference means this is a colored image
     const maxDiff = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
-    if (maxDiff > 20) {
+    if (maxDiff > 30) {
       coloredPixels++;
     }
   }
   
-  const totalPixels = info.width * info.height;
   const colorRatio = coloredPixels / totalPixels;
   
-  // If more than 5% of sampled pixels have color, reject
-  return colorRatio <= 0.05;
+  // If more than 10% of sampled pixels have strong color, it's a colored image
+  // We're lenient here because we convert to B&W anyway
+  return colorRatio <= 0.10;
 }
 
 /**

@@ -189,7 +189,7 @@ async function generateSinglePage(
       
       const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
       
-      // Validate the image
+      // Validate the image (validates AFTER B&W conversion)
       const { validation, correctedBuffer } = await validateColoringPage(imageBuffer);
       lastValidation = validation;
       
@@ -198,8 +198,27 @@ async function generateSinglePage(
       
       const generationTime = Date.now() - startTime;
       
-      // If valid (or we've reached max retries), return
-      if (validation.isValid || attempt >= maxRetries - 1) {
+      console.log(`[generate-coloring-pages] Page ${prompt.pageIndex} attempt ${attempt + 1}: blackRatio=${(validation.blackRatio * 100).toFixed(1)}%, valid=${validation.isValid}`);
+      
+      // If valid, return immediately
+      if (validation.isValid) {
+        return {
+          pageIndex: prompt.pageIndex,
+          imageBase64: lastImageBase64,
+          prompt,
+          validation,
+          retryCount: attempt,
+          debug: {
+            model: "dall-e-3",
+            size,
+            generationTime,
+          },
+        };
+      }
+      
+      // On last retry, return anyway (we've done our best)
+      if (attempt >= maxRetries - 1) {
+        console.log(`[generate-coloring-pages] Page ${prompt.pageIndex} max retries reached, returning with warnings`);
         return {
           pageIndex: prompt.pageIndex,
           imageBase64: lastImageBase64,
