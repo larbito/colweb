@@ -12,15 +12,12 @@ import { IMAGE_ANALYSIS_SYSTEM_PROMPT } from "@/lib/coloringPagePromptEnforcer";
 /**
  * POST /api/profile/from-image
  * 
- * Extracts a detailed profile from a reference image for batch generation.
- * Returns:
- * - styleProfile: Visual style rules
- * - characterProfile: Character details for consistency (if character detected)
- * - sceneInventory: Props and elements that can be reused
- * - basePrompt: Full structured prompt describing the reference
+ * Extracts a DETAILED profile from a reference image for batch generation.
  * 
- * Input: { imageBase64: string }
- * Output: ProfileFromImageResponse
+ * CRITICAL for storybook mode:
+ * - Character profile must be extremely detailed
+ * - doNotChange array must list all critical visual traits
+ * - This enables character consistency across all pages
  */
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
@@ -80,38 +77,60 @@ export async function POST(request: NextRequest) {
 
     const basePrompt = promptResponse.choices[0]?.message?.content?.trim() || "";
 
-    // Now extract the profile for batch generation
-    const profileExtractionPrompt = `Analyze this coloring book page image and extract a detailed profile for generating similar pages.
+    // Now extract the profile with EXTREMELY detailed character information
+    const profileExtractionPrompt = `Analyze this coloring book page and extract an EXTREMELY DETAILED profile.
 
-You MUST return ONLY valid JSON (no markdown, no code blocks) in this exact format:
+CRITICAL: If there is a character, you MUST describe it in EXTREME detail for consistency across multiple pages.
+
+Return ONLY valid JSON (no markdown) in this exact format:
 {
   "styleProfile": {
-    "lineStyle": "description of line thickness, smoothness, boldness",
-    "compositionRules": "how elements are arranged (centered, rule of thirds, etc.)",
-    "environmentStyle": "background style (minimal, detailed, indoor, outdoor)",
+    "lineStyle": "detailed description of line thickness, smoothness, boldness (e.g., 'medium-thick clean outlines, consistent 2-3px stroke weight, smooth curves')",
+    "compositionRules": "how elements are arranged (e.g., 'centered subject filling 85% of frame, slight low angle view')",
+    "environmentStyle": "background style (e.g., 'minimal indoor scene with simple furniture outlines')",
     "colorScheme": "black and white line art",
-    "mustAvoid": ["solid black fills", "shading", "grayscale", "gradients", "hatching", "textures", "filled shapes"]
+    "mustAvoid": ["solid black fills", "filled shapes", "shading", "grayscale", "gradients", "hatching", "textures", "border", "frame"]
   },
   "characterProfile": {
-    "species": "type of character (panda, unicorn, cat, etc.)",
-    "keyFeatures": ["list", "of", "distinguishing", "visual", "features"],
-    "proportions": "chibi/realistic/stylized, big head small body, etc.",
-    "faceStyle": "round face, big eyes, small nose, etc.",
-    "clothing": "outfit or accessories if any",
-    "poseVibe": "playful/calm/active/curious",
-    "doNotChange": ["critical", "features", "that", "must", "stay", "consistent"]
+    "species": "exact type (e.g., 'pandacorn - panda with unicorn horn')",
+    "keyFeatures": [
+      "list EVERY distinguishing visual feature",
+      "e.g., 'spiral unicorn horn with horizontal stripes'",
+      "e.g., 'round panda face with outlined eye patches'",
+      "e.g., 'small rounded ears at 10 and 2 o'clock positions'",
+      "e.g., 'large circular eyes with tiny dot pupils'",
+      "be VERY specific about shapes and positions"
+    ],
+    "proportions": "exact proportions (e.g., 'chibi style - head is 40% of total height, round body, short limbs')",
+    "faceStyle": "detailed face description (e.g., 'perfectly round face, eyes 30% of face width, small triangle nose, gentle smile')",
+    "headDetails": "horn, ears, hair details (e.g., 'spiral horn center-top of head, round ears at 45 degree angle, small tuft of hair')",
+    "bodyDetails": "body specifics (e.g., 'round belly, small paws with 4 toes each, short stubby tail')",
+    "clothing": "any outfit or accessories",
+    "poseVibe": "general pose style",
+    "doNotChange": [
+      "LIST ALL CRITICAL VISUAL TRAITS THAT MUST STAY IDENTICAL",
+      "horn shape and spiral pattern",
+      "eye shape, size, and spacing",
+      "ear shape and placement",
+      "face shape (perfectly round)",
+      "body proportions (chibi ratio)",
+      "paw shape",
+      "expression style"
+    ]
   },
-  "sceneInventory": ["list", "of", "props", "and", "background", "elements", "visible"],
-  "extractedTheme": "detected theme or setting (e.g., 'cozy home', 'magical forest')"
+  "sceneInventory": ["list", "all", "visible", "props", "and", "background", "elements"],
+  "extractedTheme": "detected theme"
 }
 
-IMPORTANT RULES:
-1. Be EXTREMELY detailed about the character - include every distinguishing feature
-2. The "doNotChange" array must include the most critical visual traits for consistency
-3. "mustAvoid" MUST always include: "solid black fills", "filled shapes", "shading", "grayscale", "gradients"
-4. If no clear character is present, set characterProfile to null
-5. Include at least 8-10 items in sceneInventory
-6. Return ONLY the JSON object, no other text`;
+CRITICAL RULES:
+1. The characterProfile MUST be extremely detailed - this ensures consistency across pages
+2. keyFeatures should have 6-10 specific visual traits
+3. doNotChange should list 5-10 critical traits that define the character's identity
+4. Be specific about shapes, sizes, positions, and proportions
+5. If the character has dark patches (like panda markings), note they should be OUTLINED not filled
+6. If no clear character exists, set characterProfile to null
+
+Return ONLY the JSON.`;
 
     const profileResponse = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -133,7 +152,7 @@ IMPORTANT RULES:
           ],
         },
       ],
-      max_tokens: 1500,
+      max_tokens: 2000,
       temperature: 0.3,
     });
 
@@ -157,11 +176,10 @@ IMPORTANT RULES:
       profileData = JSON.parse(profileText);
     } catch {
       console.error("[profile/from-image] Failed to parse profile JSON:", profileText);
-      // Return a basic profile with defaults
       profileData = {
         styleProfile: {
           lineStyle: "Clean black outlines, medium thickness",
-          compositionRules: "Centered subject with margins",
+          compositionRules: "Centered subject filling 85% of frame",
           environmentStyle: "Simple background",
           colorScheme: "black and white line art",
           mustAvoid: DEFAULT_MUST_AVOID,
@@ -178,10 +196,24 @@ IMPORTANT RULES:
       profileData.styleProfile.colorScheme = "black and white line art";
     }
 
+    // Ensure character profile has doNotChange array
+    if (profileData.characterProfile) {
+      if (!profileData.characterProfile.doNotChange || profileData.characterProfile.doNotChange.length === 0) {
+        // Generate default doNotChange based on keyFeatures
+        profileData.characterProfile.doNotChange = [
+          "face shape",
+          "eye style and size",
+          "ear shape and placement",
+          "body proportions",
+          ...(profileData.characterProfile.keyFeatures?.slice(0, 4) || []),
+        ];
+      }
+    }
+
     const result: ProfileFromImageResponse = {
       styleProfile: profileData.styleProfile || {
         lineStyle: "Clean black outlines",
-        compositionRules: "Centered composition",
+        compositionRules: "Centered composition filling 85% of frame",
         environmentStyle: "Simple background",
         colorScheme: "black and white line art",
         mustAvoid: DEFAULT_MUST_AVOID,
@@ -194,6 +226,10 @@ IMPORTANT RULES:
 
     console.log(`[profile/from-image] Extracted profile with ${result.sceneInventory.length} scene items`);
     console.log(`[profile/from-image] Character detected: ${!!result.characterProfile}`);
+    if (result.characterProfile) {
+      console.log(`[profile/from-image] Character: ${result.characterProfile.species}`);
+      console.log(`[profile/from-image] Locked traits: ${result.characterProfile.doNotChange?.length || 0}`);
+    }
 
     return NextResponse.json(result);
 
@@ -205,4 +241,3 @@ IMPORTANT RULES:
     );
   }
 }
-

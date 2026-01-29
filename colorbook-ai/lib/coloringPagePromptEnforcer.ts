@@ -1,16 +1,13 @@
 /**
  * coloringPagePromptEnforcer.ts
  * 
- * Shared prompt builder that enforces "no filled black areas" constraints
- * and proper framing for different orientations (portrait/landscape/square).
+ * Shared prompt builder that enforces STRICT coloring page rules:
+ * 1. OUTLINE-ONLY - No solid black fills anywhere (including panda patches, dark fur, etc.)
+ * 2. NO BORDER/FRAME - No borders, frames, or edge lines
+ * 3. FILL THE CANVAS - Artwork must fill 85-95% of the canvas
+ * 4. CHARACTER CONSISTENCY - Same character design across storybook pages
  * 
- * ALL coloring page generation must go through this module to ensure
- * consistent, outline-only output with no solid black fills.
- * 
- * Usage:
- *   import { buildFinalColoringPrompt, assertPromptHasConstraints } from "@/lib/coloringPagePromptEnforcer";
- *   const finalPrompt = buildFinalColoringPrompt(userPrompt, { size: "1536x1024" });
- *   assertPromptHasConstraints(finalPrompt, "1536x1024"); // throws if missing required constraints
+ * ALL coloring page generation must go through this module.
  */
 
 // ============================================================
@@ -33,94 +30,110 @@ export function getSizeFromOrientation(orientation: Orientation): ImageSize {
 }
 
 // ============================================================
-// LANDSCAPE FRAMING CONSTRAINTS
+// STRICT OUTLINE-ONLY CONSTRAINTS (MANDATORY FOR ALL GENERATIONS)
 // ============================================================
 
 /**
- * Landscape framing constraints - appended when size is 1536x1024
- * Prevents small artwork with large white bands at top/bottom
+ * These constraints prevent ANY filled black areas.
+ * Critical for pandas, skunks, and any character with dark patches.
  */
-export const LANDSCAPE_FRAMING_CONSTRAINTS = `
+export const OUTLINE_ONLY_CONSTRAINTS = `
 
-=== FRAMING / LAYOUT (MANDATORY FOR LANDSCAPE) ===
-- Landscape canvas (1536x1024 / wide format).
-- Zoom in and scale the main subject + important background so the drawing fills 90–95% of the canvas.
-- Keep only a small clean margin (3–5%) around edges.
-- NO large blank white bands at top or bottom.
-- Foreground subject should be LARGE and fill significant vertical space.
-- Background elements scaled up to reach near edges while staying simple.
-- Spread the composition horizontally - use the full width.
-- The artwork must FILL THE FRAME, not float small in the center.`;
+=== STRICT OUTLINE-ONLY RULES (MANDATORY - READ CAREFULLY) ===
 
-/**
- * Portrait framing constraints - appended when size is 1024x1536
- */
-export const PORTRAIT_FRAMING_CONSTRAINTS = `
+This is a COLORING PAGE. ONLY black outlines on white background. NO EXCEPTIONS.
 
-=== FRAMING / LAYOUT (PORTRAIT) ===
-- Portrait canvas (1024x1536 / tall format).
-- Center the main subject vertically with small margins (5-10%) at top and bottom.
-- Subject should fill 80-90% of the frame height.
-- Use the vertical space well - don't leave large empty areas.`;
+CRITICAL RULES:
+1. NO solid black fills ANYWHERE - not even small areas
+2. NO filled shapes - every shape must be an OUTLINE only
+3. ALL interior regions must remain WHITE/UNFILLED (ready for coloring)
+4. If the character has dark patches (panda ears, panda eye patches, dark fur):
+   - Draw them as DOUBLE-LINE OUTLINES or OUTLINE SHAPES ONLY
+   - Interior must remain WHITE
+   - Do NOT fill them with black
+5. Eyes/pupils: Use small HOLLOW circles or dots with white centers, NOT filled black circles
+6. Hair/fur: Draw as individual strands or outline shapes, NEVER solid black
+7. No shading, no grayscale, no gradients, no hatching, no crosshatching, no stippling
 
-/**
- * Square framing constraints - appended when size is 1024x1024
- */
-export const SQUARE_FRAMING_CONSTRAINTS = `
+WHAT "OUTLINE-ONLY" MEANS FOR DARK FEATURES:
+- Panda eye patches: Draw as outlined shapes (like goggles outline), leave interior WHITE
+- Panda ears: Draw ear outline with inner ear detail, leave interior WHITE
+- Black fur/hair: Draw the outline/silhouette, leave interior WHITE
+- Dark clothing: Draw the shape outline, leave interior WHITE
+- Shadows: DO NOT draw any shadows - leave area WHITE
 
-=== FRAMING / LAYOUT (SQUARE) ===
-- Square canvas (1024x1024).
-- Center the composition with balanced margins.
-- Subject should fill 85-90% of the frame.`;
+The final output must be PURE LINE ART that a child can color with crayons.`;
 
 // ============================================================
-// NO-FILL CONSTRAINTS - MUST be appended to EVERY generation prompt
+// NO BORDER / FRAME CONSTRAINTS
 // ============================================================
 
 /**
- * These constraints prevent the AI from generating filled black areas.
- * They are added as plain text in the final prompt (not hidden config).
+ * Prevents unwanted borders, frames, and crop lines
  */
-export const NO_FILL_CONSTRAINTS = `
+export const NO_BORDER_CONSTRAINTS = `
 
-=== OUTLINE-ONLY CONSTRAINTS (MANDATORY) ===
-NO solid black fills anywhere.
-NO filled shapes.
-Only black outlines on white background.
-Interior areas must remain white/unfilled.
-If the character has black patches (like a panda), represent them using outlines only (no filled black).
+=== NO BORDER / NO FRAME (MANDATORY) ===
+- NO border around the image
+- NO frame or panel lines
+- NO crop marks or registration marks
+- NO edge lines or page outlines
+- NO decorative border
+- The artwork should extend to the edges with only a small natural margin`;
 
-DO NOT include:
-- Solid black fill
-- Filled areas
-- Large black patches
-- Heavy ink fill
-- Black silhouettes
-- Shading
-- Grayscale
-- Gradients
-- Hatching
-- Textures
-- Solid black hair, fur, or clothing
-
-CRITICAL FILL RULES:
-- Eyes/pupils: Use small hollow circles or tiny dots, NOT filled circles
-- Hair: Draw individual strands or outline shape only, NEVER solid black
-- Dark fur/clothing: Outline the shape and leave interior WHITE
-- Shadows: DO NOT draw any shadows - leave the area white
-- Black animals (pandas, skunks, etc.): Use double-line outlines to indicate dark areas, keep interiors white
-
-The final output must be PURE OUTLINE ART suitable for children to color in with crayons or markers.`;
+// ============================================================
+// FRAMING / FILL THE CANVAS CONSTRAINTS
+// ============================================================
 
 /**
- * Negative prompt for models that support it (appended as "DO NOT" block if not)
+ * Universal framing constraint - applies to ALL sizes
  */
+export const FILL_CANVAS_CONSTRAINTS = `
+
+=== FRAMING / FILL THE CANVAS (MANDATORY) ===
+- Center the main subject and SCALE IT LARGE
+- The drawing must fill 85-95% of the canvas
+- Minimal margins (3-5% on each side)
+- NO large blank white bands at top or bottom
+- NO small floating artwork in the center with excessive white space
+- Subject should be prominent and fill the frame
+- Background elements should extend toward edges (but stay simple)`;
+
+/**
+ * Additional landscape-specific framing (when size is 1536x1024)
+ */
+export const LANDSCAPE_EXTRA_CONSTRAINTS = `
+- LANDSCAPE orientation (1536x1024): Wide composition
+- Spread the scene HORIZONTALLY to use the full width
+- Zoom in so the main subject fills significant vertical space
+- Wide-angle or panoramic composition that fills the frame`;
+
+/**
+ * Additional portrait-specific framing (when size is 1024x1536)
+ */
+export const PORTRAIT_EXTRA_CONSTRAINTS = `
+- PORTRAIT orientation (1024x1536): Tall composition
+- Use the vertical space well - stack elements or show full character
+- Subject fills 80-90% of the frame height`;
+
+/**
+ * Additional square-specific framing (when size is 1024x1024)
+ */
+export const SQUARE_EXTRA_CONSTRAINTS = `
+- SQUARE orientation (1024x1024): Balanced composition
+- Centered subject that fills the square frame`;
+
+// ============================================================
+// NEGATIVE PROMPT LIST (for models that support it)
+// ============================================================
+
 export const NEGATIVE_PROMPT_LIST = [
   "solid black fill",
   "filled areas", 
   "large black patches",
   "heavy ink fill",
   "black silhouettes",
+  "filled black shapes",
   "shading",
   "grayscale",
   "gradients",
@@ -128,33 +141,45 @@ export const NEGATIVE_PROMPT_LIST = [
   "crosshatching",
   "stippling",
   "textures",
-  "solid black shapes",
   "filled circles",
   "dark shadows",
   "color",
   "gray tones",
+  "border",
+  "frame",
+  "crop marks",
+  "edge lines",
 ];
 
+// ============================================================
+// REQUIRED VALIDATION PHRASES
+// ============================================================
+
 /**
- * Required constraint phrases that MUST appear in the final prompt.
- * Used by assertPromptHasConstraints() for validation.
+ * These phrases MUST appear in the final prompt.
+ * Checked by assertPromptHasConstraints()
  */
-const REQUIRED_CONSTRAINT_PHRASES = [
-  "NO solid black fill",
-  "outlines on white background",
-  "Interior areas must remain white",
+const REQUIRED_OUTLINE_PHRASES = [
+  "NO solid black fills ANYWHERE",
+  "interior regions must remain WHITE",
+  "OUTLINE-ONLY",
 ];
 
+const REQUIRED_BORDER_PHRASES = [
+  "NO border",
+];
+
+const REQUIRED_FRAMING_PHRASES = [
+  "fill 85-95% of the canvas",
+];
+
+// ============================================================
+// MAIN PROMPT BUILDER
+// ============================================================
+
 /**
- * Build the final coloring page prompt by appending no-fill constraints
- * and appropriate framing constraints based on the target size.
- * 
- * This function MUST be called for every generation request to ensure
- * consistent outline-only output and proper framing.
- * 
- * @param userPrompt - The user's prompt (can be from text input or image analysis)
- * @param options - Configuration including size for framing constraints
- * @returns The final prompt with all constraints appended
+ * Build the final coloring page prompt with ALL mandatory constraints.
+ * This function MUST be called for every generation request.
  */
 export function buildFinalColoringPrompt(
   userPrompt: string,
@@ -162,39 +187,61 @@ export function buildFinalColoringPrompt(
     includeNegativeBlock?: boolean;
     maxLength?: number;
     size?: ImageSize;
+    isStorybookMode?: boolean;
+    characterConsistencyBlock?: string;
   } = {}
 ): string {
-  const { includeNegativeBlock = true, maxLength = 4000, size = "1024x1536" } = options;
+  const { 
+    includeNegativeBlock = true, 
+    maxLength = 4000, 
+    size = "1024x1536",
+    isStorybookMode = false,
+    characterConsistencyBlock,
+  } = options;
+
+  const parts: string[] = [];
 
   // Start with the user's prompt
-  let finalPrompt = userPrompt.trim();
+  parts.push(userPrompt.trim());
 
-  // Add framing constraints based on size/orientation
+  // Add character consistency block for storybook mode
+  if (isStorybookMode && characterConsistencyBlock) {
+    parts.push(characterConsistencyBlock);
+  }
+
+  // Add NO BORDER constraints (always)
+  parts.push(NO_BORDER_CONSTRAINTS);
+
+  // Add FILL CANVAS constraints (always)
+  parts.push(FILL_CANVAS_CONSTRAINTS);
+
+  // Add orientation-specific framing
   const orientation = getOrientationFromSize(size);
   if (orientation === "landscape") {
-    finalPrompt += LANDSCAPE_FRAMING_CONSTRAINTS;
+    parts.push(LANDSCAPE_EXTRA_CONSTRAINTS);
   } else if (orientation === "portrait") {
-    finalPrompt += PORTRAIT_FRAMING_CONSTRAINTS;
+    parts.push(PORTRAIT_EXTRA_CONSTRAINTS);
   } else {
-    finalPrompt += SQUARE_FRAMING_CONSTRAINTS;
+    parts.push(SQUARE_EXTRA_CONSTRAINTS);
   }
 
-  // Add the mandatory no-fill constraints
-  finalPrompt += NO_FILL_CONSTRAINTS;
+  // Add STRICT OUTLINE-ONLY constraints (always - most important)
+  parts.push(OUTLINE_ONLY_CONSTRAINTS);
 
-  // Optionally add explicit negative block
+  // Add negative block
   if (includeNegativeBlock) {
-    finalPrompt += `\n\nAVOID: ${NEGATIVE_PROMPT_LIST.join(", ")}.`;
+    parts.push(`\nAVOID: ${NEGATIVE_PROMPT_LIST.join(", ")}.`);
   }
+
+  let finalPrompt = parts.join("\n");
 
   // Truncate if over limit while preserving constraints
   if (finalPrompt.length > maxLength) {
-    // Find where framing constraints start (they come first)
-    const framingStart = finalPrompt.indexOf("=== FRAMING / LAYOUT");
-    if (framingStart > 0) {
-      const allConstraints = finalPrompt.substring(framingStart);
-      const availableLength = maxLength - allConstraints.length - 50; // 50 char buffer
-      if (availableLength > 100) {
+    const constraintsStart = finalPrompt.indexOf("=== NO BORDER");
+    if (constraintsStart > 0) {
+      const allConstraints = finalPrompt.substring(constraintsStart);
+      const availableLength = maxLength - allConstraints.length - 100;
+      if (availableLength > 200) {
         finalPrompt = userPrompt.substring(0, availableLength) + "\n\n" + allConstraints;
       }
     } else {
@@ -205,82 +252,79 @@ export function buildFinalColoringPrompt(
   return finalPrompt;
 }
 
-/**
- * Required phrases for landscape framing validation
- */
-const REQUIRED_LANDSCAPE_PHRASES = [
-  "fills 90–95%",
-  "NO large blank white bands",
-];
+// ============================================================
+// VALIDATION FUNCTIONS
+// ============================================================
 
 /**
- * Assert that a prompt contains the required no-fill constraints
- * and (if landscape) the required framing constraints.
- * Throws an error if constraints are missing.
- * 
- * Call this before sending to the image generation API as a safety check.
- * 
- * @param prompt - The final prompt to validate
- * @param size - Optional size to check for landscape framing requirements
- * @throws Error if required constraints are missing
+ * Assert that a prompt contains ALL required constraints.
+ * Throws an error if any constraint is missing.
+ * Call this before sending to the image generation API.
  */
 export function assertPromptHasConstraints(prompt: string, size?: ImageSize): void {
   const missingConstraints: string[] = [];
 
-  // Check no-fill constraints (always required)
-  for (const phrase of REQUIRED_CONSTRAINT_PHRASES) {
+  // Check outline-only constraints
+  for (const phrase of REQUIRED_OUTLINE_PHRASES) {
     if (!prompt.includes(phrase)) {
-      missingConstraints.push(phrase);
+      missingConstraints.push(`[OUTLINE] ${phrase}`);
     }
   }
 
-  // Check landscape framing constraints (only for landscape size)
-  if (size === "1536x1024") {
-    for (const phrase of REQUIRED_LANDSCAPE_PHRASES) {
-      if (!prompt.includes(phrase)) {
-        missingConstraints.push(`[LANDSCAPE] ${phrase}`);
-      }
+  // Check border constraints
+  for (const phrase of REQUIRED_BORDER_PHRASES) {
+    if (!prompt.includes(phrase)) {
+      missingConstraints.push(`[BORDER] ${phrase}`);
+    }
+  }
+
+  // Check framing constraints
+  for (const phrase of REQUIRED_FRAMING_PHRASES) {
+    if (!prompt.includes(phrase)) {
+      missingConstraints.push(`[FRAMING] ${phrase}`);
     }
   }
 
   if (missingConstraints.length > 0) {
     throw new Error(
       `[PROMPT SAFETY] Missing required constraints: ${missingConstraints.join(", ")}. ` +
-      `Use buildFinalColoringPrompt() with size parameter to ensure constraints are included.`
+      `Use buildFinalColoringPrompt() to ensure all constraints are included.`
     );
   }
 }
 
 /**
- * Check if a prompt has constraints (non-throwing version).
- * 
- * @param prompt - The prompt to check
- * @param size - Optional size to check for landscape framing requirements
- * @returns true if all required constraints are present
+ * Check if a prompt has all required constraints (non-throwing version).
  */
 export function hasRequiredConstraints(prompt: string, size?: ImageSize): boolean {
-  const hasNoFillConstraints = REQUIRED_CONSTRAINT_PHRASES.every(phrase => prompt.includes(phrase));
+  const hasOutlineConstraints = REQUIRED_OUTLINE_PHRASES.every(phrase => prompt.includes(phrase));
+  const hasBorderConstraints = REQUIRED_BORDER_PHRASES.every(phrase => prompt.includes(phrase));
+  const hasFramingConstraints = REQUIRED_FRAMING_PHRASES.every(phrase => prompt.includes(phrase));
   
-  if (size === "1536x1024") {
-    const hasLandscapeConstraints = REQUIRED_LANDSCAPE_PHRASES.every(phrase => prompt.includes(phrase));
-    return hasNoFillConstraints && hasLandscapeConstraints;
-  }
-  
-  return hasNoFillConstraints;
+  return hasOutlineConstraints && hasBorderConstraints && hasFramingConstraints;
 }
 
 /**
  * Get the negative prompt as a single string.
- * Use this if the image model supports a separate negative prompt parameter.
  */
 export function getNegativePrompt(): string {
   return NEGATIVE_PROMPT_LIST.join(", ");
 }
 
-/**
- * Structured prompt format for image analysis output.
- * This is the exact format that /api/prompt/from-image should return.
- */
+// ============================================================
+// LEGACY EXPORTS (for backward compatibility)
+// ============================================================
+
+// These are kept for backward compatibility with existing code
+export const NO_FILL_CONSTRAINTS = OUTLINE_ONLY_CONSTRAINTS;
+export const LANDSCAPE_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${LANDSCAPE_EXTRA_CONSTRAINTS}`;
+export const PORTRAIT_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${PORTRAIT_EXTRA_CONSTRAINTS}`;
+export const SQUARE_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${SQUARE_EXTRA_CONSTRAINTS}`;
+
+// ============================================================
+// STRUCTURED PROMPT BUILDING
+// ============================================================
+
 export interface StructuredColoringPrompt {
   scene: string;
   background: string;
@@ -290,12 +334,6 @@ export interface StructuredColoringPrompt {
   output: string;
 }
 
-/**
- * Build a structured prompt from analysis sections.
- * 
- * @param sections - The analysis sections
- * @returns A single prompt string in the required format
- */
 export function buildStructuredPrompt(sections: StructuredColoringPrompt): string {
   return `Create a kids coloring book page in clean black-and-white line art (no grayscale).
 
@@ -318,10 +356,10 @@ Output:
 ${sections.output}`;
 }
 
-/**
- * Vision analysis system prompt for extracting detailed structured prompts from images.
- * Used by /api/prompt/from-image to generate verbose, explicit prompts.
- */
+// ============================================================
+// IMAGE ANALYSIS SYSTEM PROMPT
+// ============================================================
+
 export const IMAGE_ANALYSIS_SYSTEM_PROMPT = `You are an expert at analyzing coloring book pages and describing them in extreme detail.
 
 Your task is to analyze the uploaded image and produce a LONG, DETAILED, STRUCTURED prompt that describes EXACTLY what is visible.
@@ -332,31 +370,78 @@ You MUST follow this EXACT format with headings and line breaks:
 Create a kids coloring book page in clean black-and-white line art (no grayscale).
 
 Scene:
-[Describe the main subject(s) in detail: species/type, proportions, facial expression, accessories, pose, what they're holding/doing. Include every visible object and its position.]
+[Describe the main subject(s) in detail: species/type, proportions, facial expression, accessories, pose, what they're holding/doing. For characters with dark features (pandas, skunks), note that dark areas should be OUTLINES ONLY, not filled.]
 
 Background:
-[Describe EVERY background object: furniture, windows, curtains, shelves, items on shelves, clocks, toys, plants, decorations, patterns, etc. Be exhaustive.]
+[Describe EVERY background object: furniture, windows, items, decorations. Be exhaustive.]
 
 Composition:
-[Describe framing: portrait/landscape, centered/off-center, close-up/medium/wide view, how much white space, margins, where the subject is positioned relative to the frame.]
+[Describe framing: how much the subject fills the frame, centered/off-center, close-up/medium/wide view. The subject should fill most of the frame.]
 
 Line style:
-[Describe line characteristics: thick/thin outlines, clean/sketchy strokes, bold contours, delicate inner details, consistent line weight, etc.]
+[Describe line characteristics: thick/thin outlines, clean/sketchy strokes. All lines should be clean outlines suitable for coloring.]
 
 Floor:
-[Describe the ground/floor: tiles, carpet, grass, wooden planks, plain, or if not visible. Include any floor decorations or objects on the floor.]
+[Describe the ground/floor: tiles, carpet, grass, etc.]
 
 Output:
-Printable coloring page, crisp black outlines on pure white, NO text, NO watermark, NO signature, NO border, NO filled black areas, NO shading, NO gradients. All shapes closed and ready for coloring.
+Printable coloring page, crisp black OUTLINES ONLY on pure white, NO filled black areas anywhere (even for dark patches like panda markings - use outlined shapes only), NO text, NO watermark, NO border, NO frame, NO shading. Subject fills 85-95% of the canvas.
 ---
 
 REQUIREMENTS:
 1. Be EXTREMELY detailed - describe everything you see
-2. Include all major objects and their relative positions
-3. Mention character attributes: species, proportions, expression, accessories, pose
-4. Mention every background object: furniture, decorations, items
-5. Describe framing: portrait, centered subject, medium-wide view, white space
-6. Include explicit output constraints about no fills and print-safe quality
+2. Include explicit output constraints about NO filled black areas
+3. Mention that dark patches (like panda markings) should be OUTLINED shapes, not filled
+4. Specify that the subject should fill most of the frame
+5. Include NO border, NO frame in the output constraints
 
-Return ONLY the prompt text following the format above. No JSON wrapping, no markdown formatting, no extra commentary.`;
+Return ONLY the prompt text following the format above.`;
 
+// ============================================================
+// CHARACTER CONSISTENCY BLOCK BUILDER
+// ============================================================
+
+/**
+ * Build an extremely detailed character consistency block for storybook mode.
+ * This ensures the character looks IDENTICAL across all pages.
+ */
+export function buildStrongCharacterConsistencyBlock(profile: {
+  species: string;
+  keyFeatures: string[];
+  proportions: string;
+  faceStyle: string;
+  clothing?: string;
+  doNotChange?: string[];
+}): string {
+  const features = profile.keyFeatures.slice(0, 8).join(", ");
+  const locked = profile.doNotChange?.join(", ") || "all visual features";
+  
+  return `
+
+=== CHARACTER CONSISTENCY LOCK (CRITICAL - MUST MATCH EXACTLY) ===
+
+The SAME character must appear on EVERY page with IDENTICAL visual design.
+
+CHARACTER IDENTITY:
+- Species/Type: ${profile.species}
+- Key Visual Features: ${features}
+- Body Proportions: ${profile.proportions}
+- Face Design: ${profile.faceStyle}
+${profile.clothing ? `- Outfit/Accessories: ${profile.clothing}` : ""}
+
+LOCKED TRAITS (DO NOT MODIFY):
+${locked}
+
+CONSISTENCY RULES:
+1. Same face shape and size on every page
+2. Same eye style (shape, size, placement)
+3. Same ear shape and placement
+4. Same body-to-head ratio
+5. Same distinctive features (horn, wings, spots, etc.)
+6. Same outfit/accessories unless scene specifies a change
+7. Same line style and level of detail
+8. Only change: POSE and ACTIVITY (not the character design itself)
+
+WARNING: Do NOT redesign the character. Do NOT alter proportions. Do NOT change facial features.
+The character must be instantly recognizable as the SAME individual across all pages.`;
+}

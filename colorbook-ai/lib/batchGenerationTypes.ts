@@ -34,15 +34,18 @@ export type StyleProfile = z.infer<typeof styleProfileSchema>;
 
 /**
  * Character profile - for maintaining character consistency in storybook mode
+ * CRITICAL: Must be extremely detailed to ensure same character across pages
  */
 export const characterProfileSchema = z.object({
-  species: z.string().describe("Type of character (panda, unicorn, bunny, etc.)"),
-  keyFeatures: z.array(z.string()).describe("Distinguishing visual features"),
-  proportions: z.string().describe("Body proportions (chibi, realistic, etc.)"),
-  faceStyle: z.string().describe("Face shape and expression style"),
+  species: z.string().describe("Type of character (panda, unicorn, bunny, pandacorn, etc.)"),
+  keyFeatures: z.array(z.string()).describe("Distinguishing visual features - be VERY specific"),
+  proportions: z.string().describe("Body proportions (chibi with big head, realistic, etc.)"),
+  faceStyle: z.string().describe("Face shape, eye style, nose, mouth - DETAILED"),
+  headDetails: z.string().optional().describe("Horn, ears, hair/tuft, crown - SPECIFIC shapes"),
+  bodyDetails: z.string().optional().describe("Wings, tail, paws, spots - SPECIFIC"),
   clothing: z.string().optional().describe("Outfit or accessories worn"),
   poseVibe: z.string().describe("General pose style (active, calm, playful)"),
-  doNotChange: z.array(z.string()).describe("Traits that MUST stay consistent across pages"),
+  doNotChange: z.array(z.string()).describe("Critical traits that MUST stay identical across pages"),
 });
 
 export type CharacterProfile = z.infer<typeof characterProfileSchema>;
@@ -169,29 +172,66 @@ export const profileFromImageResponseSchema = z.object({
 export type ProfileFromImageResponse = z.infer<typeof profileFromImageResponseSchema>;
 
 // ============================================
-// Character Consistency Block Builder
+// CHARACTER CONSISTENCY BLOCK BUILDER
 // ============================================
 
 /**
- * Build a character consistency block to inject into every storybook page prompt
+ * Build an EXTREMELY DETAILED character consistency block for storybook mode.
+ * This ensures the character looks IDENTICAL across all pages.
+ * 
+ * CRITICAL: This block must be injected into EVERY page prompt in storybook mode.
  */
 export function buildCharacterConsistencyBlock(profile: CharacterProfile): string {
-  const features = profile.keyFeatures.join(", ");
-  const doNotChange = profile.doNotChange.join(", ");
+  // Build a very detailed feature list
+  const allFeatures: string[] = [
+    ...profile.keyFeatures,
+  ];
+  
+  if (profile.headDetails) allFeatures.push(profile.headDetails);
+  if (profile.bodyDetails) allFeatures.push(profile.bodyDetails);
+  
+  const featuresText = allFeatures.slice(0, 10).join("; ");
+  const lockedTraits = profile.doNotChange.length > 0 
+    ? profile.doNotChange.join(", ") 
+    : "face shape, eye style, ear shape, body proportions, all distinctive features";
   
   return `
-=== CHARACTER CONSISTENCY (MUST MATCH EXACTLY) ===
-Character: ${profile.species}
-Key features: ${features}
-Proportions: ${profile.proportions}
-Face style: ${profile.faceStyle}
-${profile.clothing ? `Clothing/accessories: ${profile.clothing}` : ""}
-Pose style: ${profile.poseVibe}
 
-DO NOT CHANGE: ${doNotChange}
-The character must look IDENTICAL across all pages - same face shape, same proportions, same features, same outfit.
-Do not introduce new accessories unless explicitly specified in the scene.
-`;
+=== CHARACTER CONSISTENCY LOCK (CRITICAL - MUST MATCH REFERENCE EXACTLY) ===
+
+The EXACT SAME character must appear on EVERY page with IDENTICAL visual design.
+Do NOT redesign. Do NOT alter. Only change pose and activity.
+
+CHARACTER VISUAL IDENTITY:
+- Species: ${profile.species}
+- Distinguishing Features: ${featuresText}
+- Body Proportions: ${profile.proportions}
+- Face: ${profile.faceStyle}
+${profile.headDetails ? `- Head Details: ${profile.headDetails}` : ""}
+${profile.bodyDetails ? `- Body Details: ${profile.bodyDetails}` : ""}
+${profile.clothing ? `- Outfit: ${profile.clothing}` : ""}
+
+=== LOCKED TRAITS (DO NOT MODIFY UNDER ANY CIRCUMSTANCES) ===
+${lockedTraits}
+
+=== CONSISTENCY REQUIREMENTS ===
+1. SAME face shape and proportions every page
+2. SAME eye style (exact shape, size, placement, expression type)
+3. SAME ear shape, size, and placement
+4. SAME head-to-body ratio (if chibi, stay chibi; if realistic, stay realistic)
+5. SAME distinctive features (horn shape, wing shape, tail style, etc.)
+6. SAME line thickness and drawing style
+7. Character must be INSTANTLY recognizable as the same individual
+8. ONLY change: pose, position, activity, and scene location
+
+=== WHAT TO AVOID ===
+- Do NOT make the character look older or younger
+- Do NOT change facial features or expressions dramatically
+- Do NOT add new accessories unless scene requires it
+- Do NOT alter the character's proportions
+- Do NOT change the character's design style (chibi stays chibi, etc.)
+
+The character should look like they stepped from the reference into a new scene.`;
 }
 
 /**
@@ -200,6 +240,7 @@ Do not introduce new accessories unless explicitly specified in the scene.
 export const DEFAULT_MUST_AVOID = [
   "solid black fills",
   "filled shapes",
+  "filled black areas",
   "shading",
   "grayscale",
   "gradients",
@@ -210,5 +251,7 @@ export const DEFAULT_MUST_AVOID = [
   "filled circles for eyes",
   "shadows",
   "color",
+  "border",
+  "frame",
+  "crop marks",
 ];
-

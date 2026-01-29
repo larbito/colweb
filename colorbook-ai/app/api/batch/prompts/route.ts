@@ -9,11 +9,13 @@ import {
   type StyleProfile,
 } from "@/lib/batchGenerationTypes";
 import { 
-  NO_FILL_CONSTRAINTS, 
+  OUTLINE_ONLY_CONSTRAINTS,
+  NO_BORDER_CONSTRAINTS,
+  FILL_CANVAS_CONSTRAINTS,
+  LANDSCAPE_EXTRA_CONSTRAINTS,
+  PORTRAIT_EXTRA_CONSTRAINTS,
+  SQUARE_EXTRA_CONSTRAINTS,
   NEGATIVE_PROMPT_LIST,
-  LANDSCAPE_FRAMING_CONSTRAINTS,
-  PORTRAIT_FRAMING_CONSTRAINTS,
-  SQUARE_FRAMING_CONSTRAINTS,
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
 
@@ -22,14 +24,17 @@ import {
  * 
  * Generates N page prompts for batch image generation.
  * 
- * Storybook mode: 
- * - Same character across all pages (character consistency)
- * - DIFFERENT scenes with real story progression
+ * STORYBOOK MODE: 
+ * - Same character across all pages (character consistency LOCKED)
+ * - Different scenes with real story progression
  * - Uses Story Plan step to ensure variety
  * 
- * Theme mode: Same style, varied scenes and characters
+ * THEME MODE: Same style, varied scenes and characters
  * 
- * Each prompt follows the structured format and includes no-fill constraints.
+ * ALL prompts enforce:
+ * - Outline-only (no filled black areas)
+ * - No border/frame
+ * - Fill the canvas (85-95%)
  */
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
@@ -63,21 +68,17 @@ export async function POST(request: NextRequest) {
     let pagesData: { pages: Array<{ page: number; title: string; sceneDescription: string; location: string; action: string }> };
 
     if (mode === "storybook") {
-      // STORYBOOK MODE: Two-step process for better variety
-      // Step 1: Generate Story Plan
-      // Step 2: Generate detailed prompts from plan
       pagesData = await generateStorybookPages(count, story, styleProfile, characterProfile!, sceneInventory);
     } else {
-      // THEME MODE: Single step with diverse scenes
       pagesData = await generateThemePages(count, story, styleProfile, sceneInventory, basePrompt);
     }
 
-    // Build character consistency block for storybook mode
+    // Build character consistency block for storybook mode (CRITICAL)
     const characterConsistencyBlock = mode === "storybook" && characterProfile
       ? buildCharacterConsistencyBlock(characterProfile)
       : undefined;
 
-    // Convert scene descriptions to full prompts
+    // Convert scene descriptions to full prompts with ALL constraints
     const imageSize = (size || "1024x1536") as ImageSize;
     const pages: PagePromptItem[] = pagesData.pages.map((page) => {
       const fullPrompt = buildFullPagePrompt({
@@ -131,7 +132,7 @@ async function generateStorybookPages(
   sceneInventory?: string[]
 ): Promise<{ pages: Array<{ page: number; title: string; sceneDescription: string; location: string; action: string }> }> {
   
-  // Diverse location pool based on setting constraint
+  // Diverse location pool
   const indoorLocations = ["bedroom", "living room", "kitchen", "bathroom", "playroom", "classroom", "library", "supermarket", "bakery", "restaurant", "hospital", "toy store", "pet shop", "museum", "art studio"];
   const outdoorLocations = ["park", "garden", "beach", "forest", "playground", "zoo", "farm", "camping site", "mountain trail", "flower meadow", "pond", "neighborhood street", "soccer field", "picnic area", "carnival"];
   
@@ -144,59 +145,64 @@ async function generateStorybookPages(
     locationPool = [...indoorLocations, ...outdoorLocations];
   }
 
-  // Ensure we have at least 4 distinct locations for variety
   const minDistinctLocations = Math.min(4, Math.ceil(count / 2));
   const selectedLocations = locationPool.slice(0, Math.max(minDistinctLocations, count));
 
-  const storyPlanPrompt = `You are creating a STORYBOOK with ${count} pages featuring the SAME character in DIFFERENT locations and doing DIFFERENT activities.
-
-CHARACTER (appears on EVERY page, identical appearance):
-- Species: ${characterProfile.species}
-- Key features: ${characterProfile.keyFeatures.join(", ")}
+  // Build detailed character description for consistency
+  const characterDescription = `
+CHARACTER (MUST APPEAR IDENTICAL ON EVERY PAGE):
+- Type: ${characterProfile.species}
+- Key Features: ${characterProfile.keyFeatures.join(", ")}
 - Proportions: ${characterProfile.proportions}
 - Face: ${characterProfile.faceStyle}
+${characterProfile.headDetails ? `- Head Details: ${characterProfile.headDetails}` : ""}
+${characterProfile.bodyDetails ? `- Body Details: ${characterProfile.bodyDetails}` : ""}
 ${characterProfile.clothing ? `- Outfit: ${characterProfile.clothing}` : ""}
+
+CRITICAL: The character design MUST NOT CHANGE between pages. Same face, same proportions, same features.
+Only change the POSE and ACTIVITY, never the character's appearance.`;
+
+  const storyPlanPrompt = `You are creating a STORYBOOK with ${count} pages.
+
+${characterDescription}
 
 ${story?.title ? `STORY TITLE: "${story.title}"` : ""}
 ${story?.outline ? `STORY OUTLINE: ${story.outline}` : ""}
 
-CRITICAL RULES FOR SCENE DIVERSITY:
+SCENE DIVERSITY RULES:
 1. NEVER repeat the same location more than 2 pages in a row
-2. Use at least ${minDistinctLocations} DIFFERENT locations across the ${count} pages
-3. Each page must have a UNIQUE action (no repeating activities)
-4. Each page must have at least 3 props/background items DIFFERENT from the previous page
+2. Use at least ${minDistinctLocations} DIFFERENT locations across ${count} pages
+3. Each page must have a UNIQUE activity/action
+4. Each page must have at least 3 props DIFFERENT from the previous page
 5. Vary camera framing: alternate between close-up, medium, and wide shots
 
-AVAILABLE LOCATIONS (pick from these, use variety):
-${selectedLocations.join(", ")}
-
+AVAILABLE LOCATIONS: ${selectedLocations.join(", ")}
 ${sceneInventory?.length ? `AVAILABLE PROPS: ${sceneInventory.join(", ")}` : ""}
 
 STORY STRUCTURE:
-- Page 1: Introduction - character waking up or starting their day
+- Page 1: Introduction scene
 - Pages 2-${Math.max(2, Math.floor(count * 0.4))}: Early activities in DIFFERENT locations
-- Pages ${Math.floor(count * 0.4) + 1}-${Math.floor(count * 0.8)}: Main adventure in NEW locations
-- Pages ${Math.floor(count * 0.8) + 1}-${count}: Conclusion with satisfying ending
+- Pages ${Math.floor(count * 0.4) + 1}-${Math.floor(count * 0.8)}: Main adventure scenes
+- Pages ${Math.floor(count * 0.8) + 1}-${count}: Conclusion
 
 Generate exactly ${count} pages. Return ONLY valid JSON:
 {
   "pages": [
     {
       "page": 1,
-      "title": "Title (3-5 words)",
-      "location": "specific location name",
+      "title": "Short Title",
+      "location": "specific location",
       "action": "what character is doing",
-      "sceneDescription": "Detailed scene description (60-100 words). Include: the ${characterProfile.species} doing [specific action] in [specific location]. Props: [list 4-6 specific items]. Background: [2-3 background elements]. Composition: [close-up/medium/wide shot], [centered/off-center]."
+      "sceneDescription": "Detailed scene description (80-120 words). MUST include: The [exact character type] doing [specific action] in [specific location]. Include 4-6 specific props with positions. Include framing (close-up/medium/wide). Do NOT describe the character's design - only their pose and action."
     }
   ]
 }
 
-IMPORTANT:
-- Every sceneDescription must be 60-100 words
-- Every page needs a DIFFERENT location or activity
-- Include specific props and their positions
-- Include framing (close-up/medium/wide)
-- Make it a real story with beginning, middle, end`;
+IMPORTANT for sceneDescription:
+- Do NOT redesign the character in descriptions
+- Only describe WHAT the character is DOING, not what they look like
+- Reference "the ${characterProfile.species}" without re-describing features
+- Focus on: location, action, props, composition, camera angle`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -204,12 +210,11 @@ IMPORTANT:
       { role: "user", content: storyPlanPrompt },
     ],
     max_tokens: 4000,
-    temperature: 0.8, // Higher temperature for more variety
+    temperature: 0.8,
   });
 
   let responseText = response.choices[0]?.message?.content?.trim() || "";
 
-  // Clean up markdown if present
   responseText = responseText
     .replace(/^```json\n?/i, "")
     .replace(/^```\n?/i, "")
@@ -263,9 +268,9 @@ ${story?.title ? `THEME: "${story.title}"` : ""}
 ${sceneInventory?.length ? `AVAILABLE PROPS: ${sceneInventory.join(", ")}` : ""}
 ${basePrompt ? `STYLE REFERENCE: "${basePrompt.slice(0, 300)}..."` : ""}
 
-Generate exactly ${count} pages. Each page should have:
-- A different subject or character
-- A unique activity
+Generate exactly ${count} pages with:
+- Different subjects or characters
+- Unique activities
 - Varied settings
 - 4-8 specific props
 
@@ -277,7 +282,7 @@ Return ONLY valid JSON:
       "title": "Title",
       "location": "location",
       "action": "activity",
-      "sceneDescription": "Detailed description (60-100 words)"
+      "sceneDescription": "Detailed description (80-120 words) including subject, action, props, background, and framing"
     }
   ]
 }`;
@@ -313,7 +318,6 @@ Return ONLY valid JSON:
 function validateStorybookDiversity(
   pages: Array<{ page: number; title: string; sceneDescription: string; location: string; action: string }>
 ): void {
-  // Check for repeated locations more than 2 times in a row
   for (let i = 2; i < pages.length; i++) {
     const loc1 = pages[i - 2]?.location?.toLowerCase() || "";
     const loc2 = pages[i - 1]?.location?.toLowerCase() || "";
@@ -324,19 +328,18 @@ function validateStorybookDiversity(
     }
   }
 
-  // Check for unique locations count
   const uniqueLocations = new Set(pages.map(p => p.location?.toLowerCase()).filter(Boolean));
   const minExpected = Math.min(4, Math.ceil(pages.length / 2));
   
   if (uniqueLocations.size < minExpected) {
-    console.warn(`[batch/prompts] Warning: Only ${uniqueLocations.size} unique locations for ${pages.length} pages (expected ${minExpected}+)`);
+    console.warn(`[batch/prompts] Warning: Only ${uniqueLocations.size} unique locations for ${pages.length} pages`);
   }
 
-  console.log(`[batch/prompts] Diversity check: ${uniqueLocations.size} unique locations across ${pages.length} pages`);
+  console.log(`[batch/prompts] Diversity: ${uniqueLocations.size} unique locations across ${pages.length} pages`);
 }
 
 /**
- * Build the full prompt for a single page with proper structure
+ * Build the full prompt for a single page with ALL constraints
  */
 function buildFullPagePrompt(params: {
   sceneDescription: string;
@@ -350,55 +353,54 @@ function buildFullPagePrompt(params: {
   const parts: string[] = [];
 
   // Title line
-  parts.push("Create a kids coloring book page in clean black-and-white line art (no grayscale).");
+  parts.push("Create a kids coloring book page in clean black-and-white OUTLINE line art (no filled areas, no grayscale).");
 
   // Scene section
   parts.push(`\nScene:\n${sceneDescription}`);
 
-  // Character consistency block (for storybook mode) - CRITICAL
+  // Character consistency block (CRITICAL for storybook mode)
   if (characterConsistencyBlock && characterProfile) {
-    parts.push(`
-=== CHARACTER CONSISTENCY (MUST MATCH EXACTLY) ===
-Character must match the reference: ${characterProfile.species} with ${characterProfile.keyFeatures.slice(0, 4).join(", ")}.
-Face: ${characterProfile.faceStyle}
-Proportions: ${characterProfile.proportions}
-${characterProfile.clothing ? `Outfit: ${characterProfile.clothing}` : ""}
-Same design on EVERY page - do not alter any visual aspect.
-Do not introduce new accessories unless specified in the scene.`);
+    parts.push(characterConsistencyBlock);
   }
 
   // Background section
-  parts.push(`\nBackground:\n${styleProfile.environmentStyle}. Include simple background elements relevant to the scene location.`);
+  parts.push(`\nBackground:\n${styleProfile.environmentStyle}. Simple background elements relevant to the scene.`);
 
   // Composition section
-  parts.push(`\nComposition:\n${styleProfile.compositionRules}. Subject fills most of the frame with small margins.`);
+  parts.push(`\nComposition:\n${styleProfile.compositionRules}. Subject fills most of the frame (85-95%).`);
 
   // Line style section
-  parts.push(`\nLine style:\n${styleProfile.lineStyle}. Clean, smooth outlines suitable for coloring.`);
+  parts.push(`\nLine style:\n${styleProfile.lineStyle}. Clean, smooth OUTLINES ONLY suitable for coloring. No filled areas.`);
 
   // Floor/ground section
-  parts.push(`\nFloor/ground:\nSimple floor indication appropriate to the setting (tiles, grass, carpet, etc.) or leave plain if indoor scene.`);
+  parts.push(`\nFloor/ground:\nSimple floor indication appropriate to the setting.`);
 
-  // Output constraints section
+  // Output constraints
   parts.push(`\nOutput:
-Printable coloring page, crisp black outlines on pure white background.
-NO text, NO watermark, NO signature, NO border.
-All shapes closed and ready for coloring with crayons or markers.`);
+Printable coloring page with crisp black OUTLINES ONLY on pure white background.
+NO text, NO watermark, NO signature.
+All shapes must be closed OUTLINES ready for coloring.`);
 
-  // Add framing constraints based on size
+  // NO BORDER constraints (MANDATORY)
+  parts.push(NO_BORDER_CONSTRAINTS);
+
+  // FILL CANVAS constraints (MANDATORY)
+  parts.push(FILL_CANVAS_CONSTRAINTS);
+
+  // Add orientation-specific framing
   if (size === "1536x1024") {
-    parts.push(LANDSCAPE_FRAMING_CONSTRAINTS);
+    parts.push(LANDSCAPE_EXTRA_CONSTRAINTS);
   } else if (size === "1024x1536") {
-    parts.push(PORTRAIT_FRAMING_CONSTRAINTS);
+    parts.push(PORTRAIT_EXTRA_CONSTRAINTS);
   } else {
-    parts.push(SQUARE_FRAMING_CONSTRAINTS);
+    parts.push(SQUARE_EXTRA_CONSTRAINTS);
   }
 
-  // Add mandatory no-fill constraints
-  parts.push(NO_FILL_CONSTRAINTS);
+  // OUTLINE-ONLY constraints (MANDATORY - most important)
+  parts.push(OUTLINE_ONLY_CONSTRAINTS);
 
-  // Add avoid list
-  parts.push(`\nAVOID: ${[...styleProfile.mustAvoid, ...NEGATIVE_PROMPT_LIST.slice(0, 5)].join(", ")}.`);
+  // Avoid list
+  parts.push(`\nAVOID: ${[...styleProfile.mustAvoid.slice(0, 5), ...NEGATIVE_PROMPT_LIST.slice(0, 10)].join(", ")}.`);
 
   return parts.join("\n");
 }

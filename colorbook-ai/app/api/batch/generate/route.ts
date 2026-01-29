@@ -8,20 +8,22 @@ import {
 import {
   buildFinalColoringPrompt,
   hasRequiredConstraints,
+  assertPromptHasConstraints,
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
 
 /**
  * POST /api/batch/generate
  * 
- * Generates images for multiple pages in sequence or with limited concurrency.
- * Each page prompt is processed through the no-fill constraint enforcer.
+ * Generates images for multiple pages with STRICT enforcement of:
+ * 1. Outline-only (no filled black areas)
+ * 2. No border/frame
+ * 3. Fill the canvas (85-95%)
  * 
- * Input: { pages: [{page, prompt}], size?, concurrency? }
- * Output: { results: [{page, status, imageBase64?, error?}], successCount, failCount }
+ * Each prompt is validated and reinforced with constraints.
+ * Retry logic adds EXTRA reinforcement on failures.
  */
 
-// Rate limiting: delay between generations to avoid API throttling
 const DELAY_BETWEEN_GENERATIONS = 1500; // ms
 
 export async function POST(request: NextRequest) {
@@ -45,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     const { pages, size, concurrency } = parseResult.data;
 
-    console.log(`[batch/generate] Starting generation of ${pages.length} pages with concurrency ${concurrency}`);
+    console.log(`[batch/generate] Starting generation of ${pages.length} pages (size: ${size})`);
 
     const results: PageResult[] = [];
     let successCount = 0;
@@ -56,8 +58,7 @@ export async function POST(request: NextRequest) {
       const batch = pages.slice(i, i + concurrency);
       
       const batchPromises = batch.map(async (pageItem) => {
-        const result = await generateSinglePage(pageItem.page, pageItem.prompt, size);
-        return result;
+        return await generateSinglePage(pageItem.page, pageItem.prompt, size);
       });
 
       const batchResults = await Promise.all(batchPromises);
@@ -71,12 +72,12 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Add delay between batches to avoid rate limiting
+      // Delay between batches
       if (i + concurrency < pages.length) {
         await new Promise(r => setTimeout(r, DELAY_BETWEEN_GENERATIONS));
       }
 
-      console.log(`[batch/generate] Progress: ${results.length}/${pages.length} pages processed`);
+      console.log(`[batch/generate] Progress: ${results.length}/${pages.length}`);
     }
 
     const response: BatchGenerateResponse = {
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Generate a single page image with retry logic
+ * Generate a single page with strong constraint enforcement and retry logic
  */
 async function generateSinglePage(
   pageNumber: number,
@@ -109,10 +110,19 @@ async function generateSinglePage(
   const maxRetries = 2;
   let lastError: string | undefined;
 
-  // Ensure prompt has required constraints (including landscape framing if applicable)
-  let finalPrompt = prompt;
-  if (!hasRequiredConstraints(prompt, size)) {
-    console.log(`[batch/generate] Page ${pageNumber}: Adding missing constraints (size: ${size})`);
+  // ALWAYS apply constraints, even if prompt claims to have them
+  // This ensures consistency across all generations
+  let finalPrompt = buildFinalColoringPrompt(prompt, {
+    includeNegativeBlock: true,
+    maxLength: 4000,
+    size,
+  });
+
+  // Validate constraints are present
+  try {
+    assertPromptHasConstraints(finalPrompt, size);
+  } catch (error) {
+    console.error(`[batch/generate] Page ${pageNumber}: Constraint validation failed, rebuilding prompt`);
     finalPrompt = buildFinalColoringPrompt(prompt, {
       includeNegativeBlock: true,
       maxLength: 4000,
@@ -122,19 +132,31 @@ async function generateSinglePage(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Add stricter constraints on retry
       let attemptPrompt = finalPrompt;
+      
+      // Add EXTRA reinforcement on retries
       if (attempt > 0) {
-        attemptPrompt += `\n\nRETRY ${attempt}: Previous generation had issues. Be EXTRA careful:
-- ABSOLUTELY NO solid black fills
-- ONLY thin black outlines
-- All interiors must be WHITE
-- Simplify the design if needed`;
-        
-        // For landscape, reinforce framing on retry
+        attemptPrompt += `
+
+=== RETRY ${attempt} - EXTRA STRICT RULES ===
+PREVIOUS GENERATION HAD ISSUES. Follow these rules EXACTLY:
+
+1. ABSOLUTELY NO solid black fills - not even tiny areas
+2. ONLY thin black OUTLINES on white
+3. ALL interior regions must be WHITE (for coloring)
+4. If character has dark patches (panda), draw them as OUTLINE SHAPES ONLY
+5. NO shading, NO gradients, NO textures
+6. Subject must FILL 85-95% of the canvas
+7. NO border, NO frame lines
+
+SIMPLIFY the design if needed to ensure pure outlines.`;
+
+        // Extra framing reinforcement for landscape
         if (size === "1536x1024") {
-          attemptPrompt += `\n- FILL THE CANVAS - zoom in so artwork fills 90-95% of the frame
-- NO large white bands at top or bottom`;
+          attemptPrompt += `
+8. LANDSCAPE: Zoom in so artwork fills the FULL WIDTH
+9. NO large white bands at top or bottom
+10. Wide composition that uses all horizontal space`;
         }
       }
 
@@ -179,4 +201,3 @@ async function generateSinglePage(
     error: lastError,
   };
 }
-
