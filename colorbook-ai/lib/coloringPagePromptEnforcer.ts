@@ -82,46 +82,91 @@ export const NO_BORDER_CONSTRAINTS = `
 - The artwork should extend to the edges with only a small natural margin`;
 
 // ============================================================
-// FRAMING / FILL THE CANVAS CONSTRAINTS
+// FRAMING / FILL THE CANVAS CONSTRAINTS (STRONGER VERSION)
 // ============================================================
 
 /**
  * Universal framing constraint - applies to ALL sizes
+ * Updated to be explicit about filling the BOTTOM of the canvas
  */
 export const FILL_CANVAS_CONSTRAINTS = `
 
-=== FRAMING / FILL THE CANVAS (MANDATORY) ===
-- Center the main subject and SCALE IT LARGE
-- The drawing must fill 85-95% of the canvas
-- Minimal margins (3-5% on each side)
-- NO large blank white bands at top or bottom
+=== FRAMING / LAYOUT (MANDATORY - FILL THE ENTIRE CANVAS) ===
+- Scale subject + scene to fill 90-95% of the canvas height and width
+- Minimal top and bottom margins (only 3-5% margin around edges)
+- NO blank white bands at top or bottom
 - NO small floating artwork in the center with excessive white space
-- Subject should be prominent and fill the frame
-- Background elements should extend toward edges (but stay simple)`;
+- Place the main character slightly lower in the frame (lower third)
+- Extend environment/foreground DOWN TO the bottom edge
+- Subject must be prominently scaled and fill the frame`;
+
+/**
+ * NEW: Foreground / Bottom Fill constraint - prevents empty bottom space
+ * This is CRITICAL for ensuring artwork fills the full page
+ */
+export const FOREGROUND_BOTTOM_FILL_CONSTRAINTS = `
+
+=== FOREGROUND / BOTTOM FILL (MANDATORY - NO EMPTY BOTTOM) ===
+- The scene MUST extend to the bottom edge of the canvas
+- Include a clear ground plane (floor/grass/rug/path/water) that reaches near the bottom margin
+- Add 2-5 simple foreground objects near the bottom:
+  Examples: small toys, pebbles, flowers, rug pattern, grass tufts, scattered leaves, small mushrooms, rocks, puddles, floor tiles, carpet edge, table legs, book stacks, cushions, shoes, pet bowl, etc.
+- The main subject must be ANCHORED LOWER (feet/base touching ground in lower third)
+- Scale the subject LARGE so artwork fills 90-95% of vertical canvas
+- NO large blank area at the bottom (keep bottom whitespace under 5% of canvas height)
+- Ground/floor must be VISIBLE and detailed, not implied or empty`;
 
 /**
  * Additional landscape-specific framing (when size is 1536x1024)
  */
 export const LANDSCAPE_EXTRA_CONSTRAINTS = `
-- LANDSCAPE orientation (1536x1024): Wide composition
-- Spread the scene HORIZONTALLY to use the full width
+
+=== LANDSCAPE LAYOUT (1536x1024) ===
+- Wide composition: spread scene HORIZONTALLY to fill the full width
 - Zoom in so the main subject fills significant vertical space
-- Wide-angle or panoramic composition that fills the frame`;
+- NO white bands at left/right or top/bottom
+- Ground line and foreground elements extend across the FULL WIDTH
+- Include foreground props at bottom-left AND bottom-right corners`;
 
 /**
  * Additional portrait-specific framing (when size is 1024x1536)
  */
 export const PORTRAIT_EXTRA_CONSTRAINTS = `
-- PORTRAIT orientation (1024x1536): Tall composition
-- Use the vertical space well - stack elements or show full character
-- Subject fills 80-90% of the frame height`;
+
+=== PORTRAIT LAYOUT (1024x1536) ===
+- Tall composition: use FULL vertical space
+- Subject fills 85-95% of the frame height
+- Character positioned in lower-middle area (not floating at top)
+- Ground/floor visible at bottom with foreground detail
+- Top area can have sky/ceiling elements reaching to edge`;
 
 /**
  * Additional square-specific framing (when size is 1024x1024)
  */
 export const SQUARE_EXTRA_CONSTRAINTS = `
-- SQUARE orientation (1024x1024): Balanced composition
-- Centered subject that fills the square frame`;
+
+=== SQUARE LAYOUT (1024x1024) ===
+- Balanced composition filling the square frame
+- Subject centered but positioned slightly lower
+- Ground/floor detail at bottom edge
+- Background elements reaching to all edges`;
+
+// ============================================================
+// BOTTOM FILL RETRY REINFORCEMENT (used when auto-retrying)
+// ============================================================
+
+/**
+ * Extra reinforcement for bottom fill, used when previous generation had empty bottom
+ */
+export const BOTTOM_FILL_RETRY_REINFORCEMENT = `
+
+=== BOTTOM FILL RETRY - CRITICAL ISSUE ===
+PREVIOUS IMAGE HAD EMPTY BOTTOM SPACE. Fix this:
+1. FILL the bottom area with foreground elements (grass, floor, rug, path, toys, rocks, flowers)
+2. NO empty bottom margin - extend ground/floor/scene to the bottom edge
+3. Place character LOWER in frame with visible ground contact
+4. Add at least 3 foreground props near the bottom corners
+5. Ground texture/detail must be visible at the very bottom of the image`;
 
 // ============================================================
 // NEGATIVE PROMPT LIST (for models that support it)
@@ -149,6 +194,10 @@ export const NEGATIVE_PROMPT_LIST = [
   "frame",
   "crop marks",
   "edge lines",
+  "empty bottom",
+  "blank space",
+  "floating subject",
+  "small centered artwork",
 ];
 
 // ============================================================
@@ -170,7 +219,12 @@ const REQUIRED_BORDER_PHRASES = [
 ];
 
 const REQUIRED_FRAMING_PHRASES = [
-  "fill 85-95% of the canvas",
+  "90-95% of the canvas",
+];
+
+const REQUIRED_BOTTOM_FILL_PHRASES = [
+  "bottom edge",
+  "foreground",
 ];
 
 // ============================================================
@@ -180,6 +234,13 @@ const REQUIRED_FRAMING_PHRASES = [
 /**
  * Build the final coloring page prompt with ALL mandatory constraints.
  * This function MUST be called for every generation request.
+ * 
+ * Includes:
+ * - NO BORDER constraints
+ * - FILL CANVAS constraints (stronger framing)
+ * - FOREGROUND / BOTTOM FILL constraints (prevents empty bottom)
+ * - Orientation-specific layout
+ * - OUTLINE-ONLY constraints
  */
 export function buildFinalColoringPrompt(
   userPrompt: string,
@@ -189,6 +250,7 @@ export function buildFinalColoringPrompt(
     size?: ImageSize;
     isStorybookMode?: boolean;
     characterConsistencyBlock?: string;
+    extraBottomReinforcement?: boolean; // Add extra bottom-fill emphasis (for retries)
   } = {}
 ): string {
   const { 
@@ -197,6 +259,7 @@ export function buildFinalColoringPrompt(
     size = "1024x1536",
     isStorybookMode = false,
     characterConsistencyBlock,
+    extraBottomReinforcement = false,
   } = options;
 
   const parts: string[] = [];
@@ -212,8 +275,11 @@ export function buildFinalColoringPrompt(
   // Add NO BORDER constraints (always)
   parts.push(NO_BORDER_CONSTRAINTS);
 
-  // Add FILL CANVAS constraints (always)
+  // Add FILL CANVAS constraints (stronger framing) (always)
   parts.push(FILL_CANVAS_CONSTRAINTS);
+
+  // Add FOREGROUND / BOTTOM FILL constraints (NEW - prevents empty bottom)
+  parts.push(FOREGROUND_BOTTOM_FILL_CONSTRAINTS);
 
   // Add orientation-specific framing
   const orientation = getOrientationFromSize(size);
@@ -223,6 +289,11 @@ export function buildFinalColoringPrompt(
     parts.push(PORTRAIT_EXTRA_CONSTRAINTS);
   } else {
     parts.push(SQUARE_EXTRA_CONSTRAINTS);
+  }
+
+  // Add extra bottom-fill reinforcement for retries
+  if (extraBottomReinforcement) {
+    parts.push(BOTTOM_FILL_RETRY_REINFORCEMENT);
   }
 
   // Add STRICT OUTLINE-ONLY constraints (always - most important)
@@ -285,6 +356,13 @@ export function assertPromptHasConstraints(prompt: string, size?: ImageSize): vo
     }
   }
 
+  // Check bottom fill constraints
+  for (const phrase of REQUIRED_BOTTOM_FILL_PHRASES) {
+    if (!prompt.toLowerCase().includes(phrase.toLowerCase())) {
+      missingConstraints.push(`[BOTTOM_FILL] ${phrase}`);
+    }
+  }
+
   if (missingConstraints.length > 0) {
     throw new Error(
       `[PROMPT SAFETY] Missing required constraints: ${missingConstraints.join(", ")}. ` +
@@ -300,8 +378,11 @@ export function hasRequiredConstraints(prompt: string, size?: ImageSize): boolea
   const hasOutlineConstraints = REQUIRED_OUTLINE_PHRASES.every(phrase => prompt.includes(phrase));
   const hasBorderConstraints = REQUIRED_BORDER_PHRASES.every(phrase => prompt.includes(phrase));
   const hasFramingConstraints = REQUIRED_FRAMING_PHRASES.every(phrase => prompt.includes(phrase));
+  const hasBottomFillConstraints = REQUIRED_BOTTOM_FILL_PHRASES.every(phrase => 
+    prompt.toLowerCase().includes(phrase.toLowerCase())
+  );
   
-  return hasOutlineConstraints && hasBorderConstraints && hasFramingConstraints;
+  return hasOutlineConstraints && hasBorderConstraints && hasFramingConstraints && hasBottomFillConstraints;
 }
 
 /**
@@ -317,9 +398,9 @@ export function getNegativePrompt(): string {
 
 // These are kept for backward compatibility with existing code
 export const NO_FILL_CONSTRAINTS = OUTLINE_ONLY_CONSTRAINTS;
-export const LANDSCAPE_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${LANDSCAPE_EXTRA_CONSTRAINTS}`;
-export const PORTRAIT_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${PORTRAIT_EXTRA_CONSTRAINTS}`;
-export const SQUARE_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${SQUARE_EXTRA_CONSTRAINTS}`;
+export const LANDSCAPE_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${FOREGROUND_BOTTOM_FILL_CONSTRAINTS}${LANDSCAPE_EXTRA_CONSTRAINTS}`;
+export const PORTRAIT_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${FOREGROUND_BOTTOM_FILL_CONSTRAINTS}${PORTRAIT_EXTRA_CONSTRAINTS}`;
+export const SQUARE_FRAMING_CONSTRAINTS = `${FILL_CANVAS_CONSTRAINTS}${FOREGROUND_BOTTOM_FILL_CONSTRAINTS}${SQUARE_EXTRA_CONSTRAINTS}`;
 
 // ============================================================
 // STRUCTURED PROMPT BUILDING
@@ -370,30 +451,35 @@ You MUST follow this EXACT format with headings and line breaks:
 Create a kids coloring book page in clean black-and-white line art (no grayscale).
 
 Scene:
-[Describe the main subject(s) in detail: species/type, proportions, facial expression, accessories, pose, what they're holding/doing. For characters with dark features (pandas, skunks), note that dark areas should be OUTLINES ONLY, not filled.]
+[Describe the main subject(s) in detail: species/type, proportions, facial expression, accessories, pose, what they're holding/doing. For characters with dark features (pandas, skunks), note that dark areas should be OUTLINES ONLY, not filled. Position the main subject in the lower-middle area of the frame.]
 
 Background:
-[Describe EVERY background object: furniture, windows, items, decorations. Be exhaustive.]
+[Describe EVERY background object: furniture, windows, items, decorations. Be exhaustive. Elements should extend toward the edges.]
 
 Composition:
-[Describe framing: how much the subject fills the frame, centered/off-center, close-up/medium/wide view. The subject should fill most of the frame.]
+[Describe framing: how much the subject fills the frame, centered/off-center, close-up/medium/wide view. The subject should fill 90-95% of the frame. Position the main subject lower in the frame (not floating at top).]
 
 Line style:
 [Describe line characteristics: thick/thin outlines, clean/sketchy strokes. All lines should be clean outlines suitable for coloring.]
 
-Floor:
-[Describe the ground/floor: tiles, carpet, grass, etc.]
+Floor/Ground:
+[Describe the ground/floor in detail: tiles, carpet, grass, path, rug, etc. The floor MUST extend to the bottom edge of the canvas. Include any foreground props near the bottom (toys, flowers, pebbles, etc.) that help fill the lower area.]
+
+Foreground:
+[Describe any foreground elements near the bottom of the scene: small props, ground details, items at character's feet. Include 2-5 items that fill the bottom portion of the canvas.]
 
 Output:
-Printable coloring page, crisp black OUTLINES ONLY on pure white, NO filled black areas anywhere (even for dark patches like panda markings - use outlined shapes only), NO text, NO watermark, NO border, NO frame, NO shading. Subject fills 85-95% of the canvas.
+Printable coloring page, crisp black OUTLINES ONLY on pure white, NO filled black areas anywhere (even for dark patches like panda markings - use outlined shapes only), NO text, NO watermark, NO border, NO frame, NO shading. Subject fills 90-95% of the canvas with minimal margins. Ground/floor extends to the bottom edge with foreground detail. NO empty bottom space.
 ---
 
 REQUIREMENTS:
 1. Be EXTREMELY detailed - describe everything you see
 2. Include explicit output constraints about NO filled black areas
 3. Mention that dark patches (like panda markings) should be OUTLINED shapes, not filled
-4. Specify that the subject should fill most of the frame
+4. Specify that the subject should fill 90-95% of the frame
 5. Include NO border, NO frame in the output constraints
+6. CRITICAL: Describe the floor/ground extending to the bottom edge
+7. CRITICAL: Include foreground props to prevent empty bottom space
 
 Return ONLY the prompt text following the format above.`;
 

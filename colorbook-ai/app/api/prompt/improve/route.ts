@@ -5,6 +5,7 @@ import {
   OUTLINE_ONLY_CONSTRAINTS,
   NO_BORDER_CONSTRAINTS,
   FILL_CANVAS_CONSTRAINTS,
+  FOREGROUND_BOTTOM_FILL_CONSTRAINTS,
 } from "@/lib/coloringPagePromptEnforcer";
 
 /**
@@ -78,22 +79,25 @@ You MUST output a structured prompt in this EXACT format with these section head
 Create a kids coloring book page in clean black-and-white OUTLINE line art (no filled areas, no grayscale).
 
 Scene:
-[Describe the typical scene setup. For storybook: describe the main character in EXTREME detail - species, proportions, face, features, outfit. For theme: describe the general subject type and setting.]
+[Describe the typical scene setup. For storybook: describe the main character in EXTREME detail - species, proportions, face, features, outfit. For theme: describe the general subject type and setting. Position the main subject in the lower-middle area of the frame (not floating at top).]
 
 Background:
-[Describe the style of backgrounds that will appear - simple/detailed, indoor/outdoor types, typical elements.]
+[Describe the style of backgrounds that will appear - simple/detailed, indoor/outdoor types, typical elements. Background elements should extend toward edges.]
 
 Composition:
-[How elements should be arranged - centered vs rule-of-thirds, how much the subject fills the frame, typical camera angle.]
+[How elements should be arranged - centered vs rule-of-thirds, how much the subject fills the frame (90-95%), typical camera angle. Main subject positioned lower in the frame. Scene extends to all edges with minimal margins.]
 
 Line style:
 [Line characteristics - thick/thin, clean/sketchy, level of detail in the lines.]
 
 Floor/ground:
-[How the ground/floor should typically look - simple line, textured, grass, tiles, etc.]
+[How the ground/floor should look - MUST extend to the bottom edge of the canvas. Include floor texture (tiles, grass, wood, rug, path) that reaches near the bottom margin. Simple but visible.]
+
+Foreground / Bottom Fill:
+[Include 2-5 small foreground props near the bottom of the scene (toys, flowers, pebbles, leaves, scattered books, shoes, etc.) to fill the lower area and prevent empty bottom space.]
 
 Output:
-[Output requirements - always include: printable coloring page, crisp black OUTLINES ONLY on pure white, NO filled black areas ANYWHERE, interior regions remain WHITE for coloring, NO text, NO watermark, NO border, NO frame. Subject fills 85-95% of the canvas.]
+[Output requirements - always include: printable coloring page, crisp black OUTLINES ONLY on pure white, NO filled black areas ANYWHERE, interior regions remain WHITE for coloring, NO text, NO watermark, NO border, NO frame. Subject fills 90-95% of the canvas with minimal margins. Ground/floor extends to the bottom edge. NO empty bottom space.]
 ---
 
 CRITICAL REQUIREMENTS:
@@ -101,8 +105,9 @@ CRITICAL REQUIREMENTS:
 2. For storybook mode: character description must be specific enough to ensure consistency
 3. MUST include explicit "NO solid black fills" and "interior regions remain WHITE" in Output section
 4. MUST include "NO border, NO frame" in Output section
-5. MUST include "fills 85-95% of the canvas" in Output section
-6. Style should match what a professional children's coloring book would look like
+5. MUST include "fills 90-95% of the canvas" in Output section
+6. MUST include "bottom edge" and "foreground" to ensure no empty bottom space
+7. Style should match what a professional children's coloring book would look like
 
 Return ONLY the structured prompt text (no JSON, no explanation).`;
 
@@ -128,7 +133,9 @@ Return ONLY the structured prompt text (no JSON, no explanation).`;
       "NO solid black fills",
       "interior regions",
       "NO border",
-      "85-95%",
+      "90-95%",
+      "bottom edge",
+      "foreground",
     ];
 
     const missingPhrases = requiredPhrases.filter(phrase => 
@@ -144,7 +151,8 @@ Return ONLY the structured prompt text (no JSON, no explanation).`;
 === MANDATORY COLORING PAGE CONSTRAINTS ===
 ${OUTLINE_ONLY_CONSTRAINTS}
 ${NO_BORDER_CONSTRAINTS}
-${FILL_CANVAS_CONSTRAINTS}`;
+${FILL_CANVAS_CONSTRAINTS}
+${FOREGROUND_BOTTOM_FILL_CONSTRAINTS}`;
     }
 
     // Extract character info if present (for storybook mode)

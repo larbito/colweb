@@ -12,6 +12,7 @@ import {
   OUTLINE_ONLY_CONSTRAINTS,
   NO_BORDER_CONSTRAINTS,
   FILL_CANVAS_CONSTRAINTS,
+  FOREGROUND_BOTTOM_FILL_CONSTRAINTS,
   LANDSCAPE_EXTRA_CONSTRAINTS,
   PORTRAIT_EXTRA_CONSTRAINTS,
   SQUARE_EXTRA_CONSTRAINTS,
@@ -340,6 +341,18 @@ function validateStorybookDiversity(
 
 /**
  * Build the full prompt for a single page with ALL constraints
+ * 
+ * Includes:
+ * - Scene description
+ * - Character consistency (storybook mode)
+ * - Background/environment
+ * - Composition (fill frame)
+ * - Floor/ground (STRONGER - extends to bottom)
+ * - NO BORDER constraints
+ * - FILL CANVAS constraints (90-95%)
+ * - FOREGROUND / BOTTOM FILL constraints (NO empty bottom)
+ * - Orientation-specific layout
+ * - OUTLINE-ONLY constraints
  */
 function buildFullPagePrompt(params: {
   sceneDescription: string;
@@ -364,28 +377,33 @@ function buildFullPagePrompt(params: {
   }
 
   // Background section
-  parts.push(`\nBackground:\n${styleProfile.environmentStyle}. Simple background elements relevant to the scene.`);
+  parts.push(`\nBackground:\n${styleProfile.environmentStyle}. Simple background elements relevant to the scene, extending toward edges.`);
 
-  // Composition section
-  parts.push(`\nComposition:\n${styleProfile.compositionRules}. Subject fills most of the frame (85-95%).`);
+  // Composition section (STRONGER - emphasize filling the frame and lower positioning)
+  parts.push(`\nComposition:\n${styleProfile.compositionRules}. Subject fills 90-95% of the frame. Position main subject in lower-middle area (not floating at top). Scene extends to all edges.`);
 
   // Line style section
   parts.push(`\nLine style:\n${styleProfile.lineStyle}. Clean, smooth OUTLINES ONLY suitable for coloring. No filled areas.`);
 
-  // Floor/ground section
-  parts.push(`\nFloor/ground:\nSimple floor indication appropriate to the setting.`);
+  // Floor/ground section (STRONGER - must reach bottom edge)
+  parts.push(`\nFloor/ground:
+Visible ground plane that extends to the bottom edge of the canvas. Include floor texture (tiles, wood, grass, path, rug) that reaches near the bottom margin. Add 2-4 small foreground props near the bottom (toys, flowers, pebbles, leaves, etc.) to fill any remaining space.`);
 
   // Output constraints
   parts.push(`\nOutput:
 Printable coloring page with crisp black OUTLINES ONLY on pure white background.
 NO text, NO watermark, NO signature.
-All shapes must be closed OUTLINES ready for coloring.`);
+All shapes must be closed OUTLINES ready for coloring.
+Artwork fills 90-95% of the canvas with minimal margins.`);
 
   // NO BORDER constraints (MANDATORY)
   parts.push(NO_BORDER_CONSTRAINTS);
 
   // FILL CANVAS constraints (MANDATORY)
   parts.push(FILL_CANVAS_CONSTRAINTS);
+
+  // FOREGROUND / BOTTOM FILL constraints (NEW - prevents empty bottom)
+  parts.push(FOREGROUND_BOTTOM_FILL_CONSTRAINTS);
 
   // Add orientation-specific framing
   if (size === "1536x1024") {
@@ -399,8 +417,8 @@ All shapes must be closed OUTLINES ready for coloring.`);
   // OUTLINE-ONLY constraints (MANDATORY - most important)
   parts.push(OUTLINE_ONLY_CONSTRAINTS);
 
-  // Avoid list
-  parts.push(`\nAVOID: ${[...styleProfile.mustAvoid.slice(0, 5), ...NEGATIVE_PROMPT_LIST.slice(0, 10)].join(", ")}.`);
+  // Avoid list (includes new empty space items)
+  parts.push(`\nAVOID: ${[...styleProfile.mustAvoid.slice(0, 5), ...NEGATIVE_PROMPT_LIST.slice(0, 15)].join(", ")}.`);
 
   return parts.join("\n");
 }
