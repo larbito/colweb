@@ -1,8 +1,8 @@
 import { GradientBackground } from "@/components/gradient-bg";
 import { HeroBento } from "@/components/hero-bento";
 import { BuiltForStrip } from "@/components/built-for-strip";
+import { PlatformsStrip } from "@/components/platforms-strip";
 import { FeatureBento } from "@/components/feature-bento";
-import { StyleCloneSection } from "@/components/style-clone-section";
 import { HowItWorks } from "@/components/how-it-works";
 import { Testimonials } from "@/components/testimonials";
 import { Pricing } from "@/components/pricing";
@@ -15,8 +15,8 @@ export default function HomePage() {
       <GradientBackground />
       <HeroBento />
       <BuiltForStrip />
+      <PlatformsStrip />
       <FeatureBento />
-      <StyleCloneSection />
       <HowItWorks />
       <Testimonials />
       <Pricing />

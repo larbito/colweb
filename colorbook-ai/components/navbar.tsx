@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Menu } from "lucide-react";
+import { Menu, Sparkles } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -32,17 +32,17 @@ export function Navbar() {
     <header
       className={cn(
         "fixed left-0 right-0 top-0 z-50 transition-all duration-300",
-        scrolled && "border-b border-border/40 bg-background/80 backdrop-blur-xl"
+        scrolled && "border-b border-border/40 bg-background/80 backdrop-blur-xl shadow-sm"
       )}
     >
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-2.5 font-semibold">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="text-primary">
-            <rect width="28" height="28" rx="8" fill="currentColor" fillOpacity="0.15"/>
-            <path d="M8 10C8 8.89543 8.89543 8 10 8H18C19.1046 8 20 8.89543 20 10V18C20 19.1046 19.1046 20 18 20H10C8.89543 20 8 19.1046 8 18V10Z" stroke="currentColor" strokeWidth="1.5"/>
-            <path d="M11 12H17M11 15H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-          <span>ColorBook AI</span>
+        <Link href="/" className="flex items-center gap-3 font-semibold group">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 shadow-lg shadow-primary/20 group-hover:shadow-primary/30 transition-shadow">
+            <Sparkles className="h-5 w-5 text-white" />
+          </div>
+          <span className="text-lg font-bold">
+            ColorBook<span className="text-primary">AI</span>
+          </span>
         </Link>
 
         <div className="hidden items-center gap-8 text-sm md:flex">
@@ -50,7 +50,7 @@ export function Navbar() {
             <Link 
               key={link.label} 
               href={link.href} 
-              className="text-muted-foreground transition hover:text-foreground"
+              className="text-muted-foreground transition-colors hover:text-foreground font-medium"
             >
               {link.label}
             </Link>
@@ -65,7 +65,7 @@ export function Navbar() {
                 <Menu className="h-5 w-5" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="w-48">
               {navLinks.map((link) => (
                 <DropdownMenuItem key={link.label} asChild>
                   <Link href={link.href}>{link.label}</Link>
@@ -79,7 +79,10 @@ export function Navbar() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button asChild size="sm" className="hidden rounded-full px-4 md:inline-flex">
+          <Button asChild variant="outline" size="sm" className="hidden rounded-full px-4 md:inline-flex">
+            <Link href="/auth">Sign In</Link>
+          </Button>
+          <Button asChild size="sm" className="hidden rounded-full px-5 md:inline-flex gradient-primary border-0 text-white shadow-lg shadow-primary/25">
             <Link href="/auth">Get Started</Link>
           </Button>
         </div>
