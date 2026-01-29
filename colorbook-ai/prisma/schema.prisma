@@ -46,6 +46,69 @@ model Project {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   pages                 Page[]
+  batches               Batch[]
+}
+
+// Batch generation model for multi-page generation from a reference image
+model Batch {
+  id                    String   @id @default(uuid())
+  projectId             String?
+  project               Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  
+  // Configuration
+  mode                  String   @default("theme") // "storybook" or "theme"
+  referenceImageUrl     String?
+  
+  // Extracted profiles (stored as JSON)
+  styleProfileJson      Json?
+  characterProfileJson  Json?
+  sceneInventoryJson    Json?
+  
+  // Story/theme configuration
+  storyTitle            String?
+  storyOutline          String?
+  targetAge             String   @default("all-ages")
+  sceneVariety          String   @default("medium")
+  settingConstraint     String   @default("mixed")
+  
+  // Status
+  status                String   @default("draft") // draft, generating, completed, failed
+  totalPages            Int      @default(0)
+  completedPages        Int      @default(0)
+  failedPages           Int      @default(0)
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  batchPages            BatchPage[]
+  
+  @@index([projectId])
+  @@index([status])
+}
+
+// Individual pages within a batch
+model BatchPage {
+  id                    String   @id @default(uuid())
+  batchId               String
+  batch                 Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  
+  pageNumber            Int
+  title                 String?
+  prompt                String   @db.Text
+  sceneDescription      String?  @db.Text
+  
+  // Generation result
+  status                String   @default("pending") // pending, generating, done, failed
+  imageUrl              String?
+  imageBase64           String?  @db.Text
+  error                 String?
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  @@unique([batchId, pageNumber])
+  @@index([batchId])
+  @@index([status])
 }
 
 model Page {
