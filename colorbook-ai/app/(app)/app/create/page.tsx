@@ -287,8 +287,12 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  // ==================== Step 4: Generate Images ====================
+  // ==================== Step 4: Generate Images (One-by-One) ====================
 
+  /**
+   * Generate all images one-by-one with real-time preview updates.
+   * This avoids timeout issues by making separate API calls per image.
+   */
   const generateAllImages = async () => {
     if (pages.length === 0) {
       toast.error("No prompts to generate");
@@ -302,57 +306,75 @@ export default function CreateColoringBookPage() {
     }
 
     setIsGenerating(true);
+    let successCount = 0;
+    let failCount = 0;
 
-    try {
-      // Mark pages as generating
+    toast.info(`Starting generation of ${pendingPages.length} images...`);
+
+    // Generate images one-by-one for real-time preview
+    for (const pageItem of pendingPages) {
+      // Mark this page as generating
       setPages(prev => prev.map(p =>
-        pendingPages.some(pp => pp.page === p.page)
-          ? { ...p, status: "generating" as PageStatus }
-          : p
+        p.page === pageItem.page ? { ...p, status: "generating" as PageStatus } : p
       ));
 
-      const response = await fetch("/api/batch/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pages: pendingPages.map(p => ({ page: p.page, prompt: p.prompt })),
-          size: getImageSize(),
-          concurrency: 1,
-        }),
-      });
+      try {
+        const response = await fetch("/api/batch/generate-one", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            page: pageItem.page,
+            prompt: pageItem.prompt,
+            size: getImageSize(),
+          }),
+        });
 
-      const data = await safeJsonParse(response);
+        const data = await safeJsonParse(response);
 
-      if (!response.ok) {
-        throw new Error(data.error || "Generation failed");
+        if (response.ok && data.status === "done" && data.imageBase64) {
+          // Success - update with image immediately
+          setPages(prev => prev.map(p =>
+            p.page === pageItem.page
+              ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: undefined }
+              : p
+          ));
+          successCount++;
+          toast.success(`Page ${pageItem.page} generated!`);
+        } else {
+          // Failed
+          setPages(prev => prev.map(p =>
+            p.page === pageItem.page
+              ? { ...p, status: "failed" as PageStatus, error: data.error || "Generation failed" }
+              : p
+          ));
+          failCount++;
+        }
+      } catch (error) {
+        // Error
+        setPages(prev => prev.map(p =>
+          p.page === pageItem.page
+            ? { ...p, status: "failed" as PageStatus, error: error instanceof Error ? error.message : "Generation failed" }
+            : p
+        ));
+        failCount++;
       }
 
-      // Update pages with results
-      const results = data.results as PageResult[];
-      setPages(prev => prev.map(p => {
-        const result = results.find(r => r.page === p.page);
-        if (result) {
-          return {
-            ...p,
-            status: result.status,
-            imageBase64: result.imageBase64,
-            error: result.error,
-          };
-        }
-        return p;
-      }));
+      // Small delay between requests to avoid rate limiting
+      await new Promise(r => setTimeout(r, 300));
+    }
 
-      toast.success(`Generated ${data.successCount} images! ${data.failCount > 0 ? `${data.failCount} failed.` : ""}`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Generation failed");
-      setPages(prev => prev.map(p =>
-        p.status === "generating" ? { ...p, status: "failed" as PageStatus } : p
-      ));
-    } finally {
-      setIsGenerating(false);
+    setIsGenerating(false);
+
+    if (failCount === 0) {
+      toast.success(`All ${successCount} images generated successfully!`);
+    } else {
+      toast.info(`Generated ${successCount} images, ${failCount} failed.`);
     }
   };
 
+  /**
+   * Generate a single page image using the one-by-one endpoint.
+   */
   const generateSinglePage = async (pageNumber: number) => {
     const page = pages.find(p => p.page === pageNumber);
     if (!page) return;
@@ -362,33 +384,32 @@ export default function CreateColoringBookPage() {
     ));
 
     try {
-      const response = await fetch("/api/batch/generate", {
+      const response = await fetch("/api/batch/generate-one", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pages: [{ page: page.page, prompt: page.prompt }],
+          page: page.page,
+          prompt: page.prompt,
           size: getImageSize(),
-          concurrency: 1,
         }),
       });
 
       const data = await safeJsonParse(response);
 
-      if (!response.ok) {
-        throw new Error(data.error || "Generation failed");
-      }
-
-      const result = data.results[0] as PageResult;
-      setPages(prev => prev.map(p =>
-        p.page === pageNumber
-          ? { ...p, status: result.status, imageBase64: result.imageBase64, error: result.error }
-          : p
-      ));
-
-      if (result.status === "done") {
+      if (response.ok && data.status === "done" && data.imageBase64) {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: undefined }
+            : p
+        ));
         toast.success(`Page ${pageNumber} generated!`);
       } else {
-        toast.error(`Page ${pageNumber} failed: ${result.error}`);
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? { ...p, status: "failed" as PageStatus, error: data.error || "Generation failed" }
+            : p
+        ));
+        toast.error(`Page ${pageNumber} failed: ${data.error || "Unknown error"}`);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Generation failed");
