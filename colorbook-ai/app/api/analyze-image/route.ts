@@ -269,3 +269,4 @@ function buildStyleLock(parsed: Record<string, unknown>): string {
   return `cute kids coloring book, ${outerWeight} clean outline, ${style}, no shading, white background, print-ready coloring page`;
 }
 
+

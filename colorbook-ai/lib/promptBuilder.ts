@@ -1,10 +1,13 @@
 /**
  * promptBuilder.ts - Canonical prompt builder for coloring book generation
  * Always appends strict KDP-style suffix to ensure print-safe output
+ * 
+ * All prompts include mandatory no-fill constraints from coloringPagePromptEnforcer.
  */
 
 import type { GenerationSpec, Complexity, LineThickness } from "./generationSpec";
 import type { CharacterLock } from "./schemas";
+import { NEGATIVE_PROMPT_LIST } from "./coloringPagePromptEnforcer";
 
 /**
  * Complexity descriptions for prompt injection
@@ -60,6 +63,7 @@ LINE THICKNESS (BOLD):
 
 /**
  * Mandatory KDP print-safe suffix - ALWAYS appended
+ * Includes explicit no-fill constraints to prevent solid black areas
  */
 const KDP_PRINT_SAFE_SUFFIX = `
 
@@ -73,20 +77,30 @@ REQUIRED:
 ✓ Character centered with safe margins from edges
 ✓ Portrait orientation
 
+=== OUTLINE-ONLY CONSTRAINTS (MANDATORY) ===
+NO solid black fills anywhere.
+NO filled shapes.
+Only black outlines on white background.
+Interior areas must remain white/unfilled.
+If the character has black patches (like a panda), represent them using outlines only (no filled black).
+
 STRICTLY FORBIDDEN (will cause rejection):
 ✗ ANY color - not even gray, beige, or off-white
 ✗ ANY shading, gradients, or halftones
 ✗ ANY crosshatching or stippling
 ✗ ANY large solid black filled areas (shadows, silhouettes, dark backgrounds)
+✗ ANY solid black fills - everything must be OUTLINES ONLY
 ✗ ANY text, letters, numbers, logos, or watermarks
 ✗ Sideways or landscape orientation
 ✗ Complex overlapping elements that create dark masses
 
 SPECIAL RULES FOR BLACK AREAS:
-- Pupils/eyes: small dots only, NOT fully filled circles
-- Hair: outline only, NOT solid black
-- Shadows: DO NOT draw any shadows at all
-- Dark objects: outline only, leave interior white
+- Pupils/eyes: small hollow circles or tiny dots only, NOT fully filled circles
+- Hair: outline only with individual strands, NEVER solid black
+- Dark fur (pandas, skunks): use double-line outlines, keep interiors WHITE
+- Shadows: DO NOT draw any shadows at all - leave the area white
+- Dark objects (shoes, hats): outline only, leave interior white
+- Black clothing: outline the shape only, interior stays white
 
 The final image must pass a print-safe check where:
 1. Converting to grayscale and thresholding produces ONLY pure black and white

@@ -4,6 +4,7 @@ import {
   generateCharacterSheetRequestSchema,
   type GenerateCharacterSheetResponse,
 } from "@/lib/schemas";
+import { buildFinalColoringPrompt, assertPromptHasConstraints } from "@/lib/coloringPagePromptEnforcer";
 
 export async function POST(request: NextRequest) {
   if (!isOpenAIImageGenConfigured()) {
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
     const { canonicalName, visualRules, negativeRules } = characterLock;
 
     // Build the character sheet prompt
-    const prompt = `Character reference sheet for "${canonicalName}":
+    const basePrompt = `Character reference sheet for "${canonicalName}":
 
 CHARACTER DESIGN:
 - Proportions: ${visualRules.proportions}
@@ -54,9 +55,26 @@ STYLE REQUIREMENTS:
 
 ${negativeRules.map(rule => `- AVOID: ${rule}`).join("\n")}`;
 
+    // Apply no-fill constraints
+    const finalPrompt = buildFinalColoringPrompt(basePrompt, {
+      includeNegativeBlock: true,
+      maxLength: 4000,
+    });
+
+    // Safety check: validate constraints are present
+    try {
+      assertPromptHasConstraints(finalPrompt);
+    } catch (constraintError) {
+      console.error("[generate-character-sheet] Constraint validation failed:", constraintError);
+      return NextResponse.json(
+        { error: "Internal error: prompt constraints validation failed" },
+        { status: 500 }
+      );
+    }
+
     // Use centralized OpenAI service
     const genResult = await generateImage({
-      prompt: prompt,
+      prompt: finalPrompt,
       n: 1,
       size: "1024x1536", // Portrait for character sheet (GPT Image 1.5 format)
     });

@@ -6,6 +6,11 @@ import {
   assertOpenAIOnlyProvider,
   type ImageSize 
 } from "@/lib/services/openaiImageGen";
+import {
+  buildFinalColoringPrompt,
+  assertPromptHasConstraints,
+  hasRequiredConstraints,
+} from "@/lib/coloringPagePromptEnforcer";
 
 /**
  * ============================================================
@@ -15,11 +20,11 @@ import {
  * ⚠️  STRICT RULES:
  * 
  * 1. Uses ONLY OpenAI DALL-E for image generation
- * 2. Sends the prompt EXACTLY as provided - NO MODIFICATIONS
- * 3. No hidden system prompts or style injection
- * 4. The prompt parameter is the single source of truth
+ * 2. ALL prompts go through buildFinalColoringPrompt() to enforce no-fill constraints
+ * 3. Validates that constraints are present before sending to OpenAI
+ * 4. The prompt parameter is enhanced with mandatory outline-only constraints
  * 
- * Input:  { prompt: string, n?: number, size?: string }
+ * Input:  { prompt: string, n?: number, size?: string, skipConstraints?: boolean }
  * Output: { images: string[] } (base64 encoded)
  * 
  * ============================================================
@@ -29,6 +34,8 @@ const requestSchema = z.object({
   prompt: z.string().min(1, "Prompt is required").max(4000, "Prompt too long"),
   n: z.number().int().min(1).max(4).default(1),
   size: z.enum(["1024x1024", "1024x1536", "1536x1024", "auto"]).default("1024x1536"),
+  // If true, skip adding constraints (useful if caller already applied them)
+  skipConstraints: z.boolean().default(false),
 });
 
 export async function POST(request: NextRequest) {
@@ -54,18 +61,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { prompt, n, size } = parseResult.data;
+    const { prompt, n, size, skipConstraints } = parseResult.data;
+
+    // Build the final prompt with no-fill constraints
+    let finalPrompt: string;
+    
+    if (skipConstraints && hasRequiredConstraints(prompt)) {
+      // Prompt already has constraints, use as-is
+      finalPrompt = prompt;
+      console.log(`[/api/image/generate] Using pre-constrained prompt`);
+    } else {
+      // Apply constraints
+      finalPrompt = buildFinalColoringPrompt(prompt, {
+        includeNegativeBlock: true,
+        maxLength: 4000,
+      });
+      console.log(`[/api/image/generate] Applied no-fill constraints to prompt`);
+    }
+
+    // Safety check: validate constraints are present
+    try {
+      assertPromptHasConstraints(finalPrompt);
+    } catch (constraintError) {
+      console.error("[/api/image/generate] Constraint validation failed:", constraintError);
+      return NextResponse.json(
+        { error: "Internal error: prompt constraints validation failed" },
+        { status: 500 }
+      );
+    }
 
     // Log the exact prompt being used (for transparency)
     console.log(`[/api/image/generate] Request received`);
     console.log(`[/api/image/generate] n=${n}, size=${size}`);
-    console.log(`[/api/image/generate] EXACT PROMPT SENT TO OPENAI:`);
-    console.log(`"${prompt}"`);
-    console.log(`[/api/image/generate] --- END PROMPT ---`);
+    console.log(`[/api/image/generate] FINAL PROMPT LENGTH: ${finalPrompt.length} chars`);
+    console.log(`[/api/image/generate] PROMPT PREVIEW: "${finalPrompt.substring(0, 300)}..."`);
 
     // Generate using OpenAI ONLY
     const result = await generateImage({
-      prompt, // EXACT prompt, no modifications
+      prompt: finalPrompt,
       n,
       size: size as ImageSize,
     });

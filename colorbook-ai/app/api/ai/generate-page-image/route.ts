@@ -3,6 +3,7 @@ import { z } from "zod";
 import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
 import { characterLockSchema } from "@/lib/schemas";
 import { buildPrompt, buildStricterSuffix } from "@/lib/promptBuilder";
+import { hasRequiredConstraints } from "@/lib/coloringPagePromptEnforcer";
 import type { GenerationSpec } from "@/lib/generationSpec";
 
 // Accept GenerationSpec
@@ -58,11 +59,20 @@ export async function POST(request: NextRequest) {
     const { prompt, characterLock, spec } = parseResult.data;
 
     // Build the full prompt with all rules injected
-    const fullPrompt = buildPrompt({
+    let fullPrompt = buildPrompt({
       sceneDescription: prompt,
       characterLock,
       spec: spec as GenerationSpec,
     });
+
+    // Runtime assertion: verify prompt has required no-fill constraints
+    if (!hasRequiredConstraints(fullPrompt)) {
+      console.warn(`[generate-page-image] Prompt missing required constraints, adding manually`);
+      fullPrompt += `\n\n=== OUTLINE-ONLY CONSTRAINTS ===
+NO solid black fills anywhere. NO filled shapes.
+Only black outlines on white background.
+Interior areas must remain white/unfilled.`;
+    }
 
     // Get the appropriate image size (always portrait)
     const imageSize = SIZE_MAP[spec.pixelSize] || "1024x1536";

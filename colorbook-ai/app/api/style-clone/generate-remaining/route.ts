@@ -5,6 +5,7 @@ import { buildFinalImagePrompt, buildCharacterBible } from "@/lib/styleCloneProm
 import { validateImageQuality, getQualityThresholds } from "@/lib/qualityGates";
 import { KDP_SIZE_PRESETS, type StyleContract, type ThemePack, type StyleCloneImage } from "@/lib/styleClone";
 import type { Complexity, LineThickness, GenerationSpec } from "@/lib/generationSpec";
+import { hasRequiredConstraints } from "@/lib/coloringPagePromptEnforcer";
 import crypto from "crypto";
 
 /**
@@ -95,6 +96,15 @@ async function generateSinglePage(params: {
         isAnchor: false,
         retryAttempt: retry,
       });
+
+      // Runtime assertion: verify prompt has required no-fill constraints
+      if (!hasRequiredConstraints(finalPromptUsed)) {
+        console.warn(`[generate-remaining] Page ${pageIndex} missing required constraints, adding manually`);
+        finalPromptUsed += `\n\n=== OUTLINE-ONLY CONSTRAINTS ===
+NO solid black fills anywhere. NO filled shapes.
+Only black outlines on white background.
+Interior areas must remain white/unfilled.`;
+      }
 
       // Use centralized OpenAI service
       const genResult = await generateImage({

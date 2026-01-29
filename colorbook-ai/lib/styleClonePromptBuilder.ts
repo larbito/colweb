@@ -6,10 +6,13 @@
  * Stage 2: Generation (prompts, generate-sample, generate-remaining)
  * 
  * IMPORTANT: DALL-E 3 has 4000 char limit - keep prompts compact!
+ * 
+ * All prompts now include mandatory no-fill constraints from coloringPagePromptEnforcer.
  */
 
 import type { GenerationSpec, Complexity, LineThickness } from "./generationSpec";
 import type { StyleContract, ThemePack } from "./styleClone";
+import { NO_FILL_CONSTRAINTS, NEGATIVE_PROMPT_LIST } from "./coloringPagePromptEnforcer";
 
 /**
  * Build the FINAL prompt for DALL-E 3 image generation
@@ -75,25 +78,44 @@ Centered composition, 10% margins, all shapes closed for coloring.`);
     parts.push("VERY SIMPLE: Minimal detail, thin lines, maximum white space, only 2-3 props, empty background.");
   }
   
-  // 8. FORBIDDEN (negatives)
+  // 8. MANDATORY NO-FILL CONSTRAINTS (from shared enforcer)
+  // These are critical to prevent solid black fills in output
+  parts.push(`=== OUTLINE-ONLY RULES ===
+NO solid black fills anywhere. NO filled shapes.
+Only black outlines on white background.
+Interior areas must remain white/unfilled.
+If the character has black patches (like a panda), represent them using outlines only (no filled black).
+Eyes: small hollow circles or tiny dots, NOT filled.
+Hair/fur: outline only, NEVER solid black.
+Shadows: DO NOT draw any - leave white.`);
+
+  // 9. FORBIDDEN (negatives - combine shared + style-specific)
   const forbidden = [
-    "NO color", "NO gray", "NO shading", "NO gradients",
-    "NO solid black fills", "NO texture", "NO crosshatching"
+    ...NEGATIVE_PROMPT_LIST.slice(0, 8), // Core negatives from shared enforcer
   ];
   if (styleContract?.forbiddenList?.length) {
     forbidden.push(...styleContract.forbiddenList.slice(0, 3));
   }
-  parts.push(forbidden.join(", "));
+  parts.push(`AVOID: ${forbidden.join(", ")}`);
   
-  // 9. ANCHOR note
+  // 10. ANCHOR note
   if (isAnchor) {
     parts.push("This is the SAMPLE page - make it exemplary.");
   }
   
   const finalPrompt = parts.join("\n\n");
   
-  // Safety: truncate if over limit
+  // Safety: truncate if over limit (preserve the constraints at the end)
   if (finalPrompt.length > 3900) {
+    // Find where constraints start and preserve them
+    const constraintIndex = finalPrompt.indexOf("=== OUTLINE-ONLY RULES ===");
+    if (constraintIndex > 0) {
+      const constraints = finalPrompt.substring(constraintIndex);
+      const availableLength = 3900 - constraints.length - 20;
+      if (availableLength > 200) {
+        return finalPrompt.substring(0, availableLength) + "\n\n" + constraints;
+      }
+    }
     return finalPrompt.substring(0, 3900);
   }
   

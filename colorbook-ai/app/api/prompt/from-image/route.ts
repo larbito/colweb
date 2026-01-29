@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
+import { 
+  IMAGE_ANALYSIS_SYSTEM_PROMPT,
+  buildFinalColoringPrompt,
+} from "@/lib/coloringPagePromptEnforcer";
 
 const requestSchema = z.object({
   imageBase64: z.string().min(1, "Image is required"),
@@ -9,11 +13,24 @@ const requestSchema = z.object({
 /**
  * POST /api/prompt/from-image
  * 
- * Analyzes an image and returns a single prompt string that describes
- * how to recreate a similar image. No hidden system instructions.
+ * Analyzes an image and returns a DETAILED, STRUCTURED prompt that describes
+ * EXACTLY what's visible in the uploaded image.
+ * 
+ * The returned prompt follows this exact format:
+ * - Title line: "Create a kids coloring book page in clean black-and-white line art (no grayscale)."
+ * - Sections: Scene, Background, Composition, Line style, Floor, Output
+ * 
+ * The prompt is very detailed and includes:
+ * 1. All major objects and their relative positions
+ * 2. Character attributes: species, proportions, facial expression, accessories, pose
+ * 3. Every background object: furniture, windows, decorations, etc.
+ * 4. Framing: portrait, centered, medium-wide view, white space
+ * 5. Explicit output constraints: printable, crisp, no text, no watermark, no fills
  * 
  * Input: { imageBase64: string }
  * Output: { prompt: string }
+ * 
+ * NO extra commentary. NO markdown. ONLY JSON with the prompt string.
  */
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
@@ -31,6 +48,10 @@ export async function POST(request: NextRequest) {
     let mediaType = "image/png";
     if (imageBase64.startsWith("/9j/")) {
       mediaType = "image/jpeg";
+    } else if (imageBase64.startsWith("R0lGOD")) {
+      mediaType = "image/gif";
+    } else if (imageBase64.startsWith("UklGR")) {
+      mediaType = "image/webp";
     }
 
     const response = await openai.chat.completions.create({
@@ -41,15 +62,7 @@ export async function POST(request: NextRequest) {
           content: [
             {
               type: "text",
-              text: `Analyze this image and write a single prompt that would generate a similar image.
-
-The prompt should describe:
-- The main subject(s) and what they're doing
-- The setting/background
-- The art style and visual characteristics you observe
-- Any important composition details
-
-Return ONLY the prompt text, nothing else. No explanations, no quotes, no formatting.`,
+              text: IMAGE_ANALYSIS_SYSTEM_PROMPT,
             },
             {
               type: "image_url",
@@ -61,20 +74,36 @@ Return ONLY the prompt text, nothing else. No explanations, no quotes, no format
           ],
         },
       ],
-      max_tokens: 800,
+      max_tokens: 2000, // Increased for detailed output
       temperature: 0.3,
     });
 
-    const prompt = response.choices[0]?.message?.content?.trim() || "";
+    let rawPrompt = response.choices[0]?.message?.content?.trim() || "";
 
-    if (!prompt) {
+    if (!rawPrompt) {
       return NextResponse.json(
         { error: "Failed to analyze image" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ prompt });
+    // Clean up the prompt - remove any markdown formatting or extra quotes
+    rawPrompt = rawPrompt
+      .replace(/^```[\s\S]*?\n/gm, "") // Remove opening code blocks
+      .replace(/```$/gm, "") // Remove closing code blocks
+      .replace(/^["']|["']$/g, "") // Remove surrounding quotes
+      .trim();
+
+    // Apply the no-fill constraints to the analyzed prompt
+    const finalPrompt = buildFinalColoringPrompt(rawPrompt, {
+      includeNegativeBlock: true,
+      maxLength: 4000,
+    });
+
+    console.log(`[prompt/from-image] Generated structured prompt (${finalPrompt.length} chars)`);
+    console.log(`[prompt/from-image] Prompt preview: "${finalPrompt.substring(0, 200)}..."`);
+
+    return NextResponse.json({ prompt: finalPrompt });
 
   } catch (error) {
     console.error("[prompt/from-image] Error:", error);
@@ -84,4 +113,3 @@ Return ONLY the prompt text, nothing else. No explanations, no quotes, no format
     );
   }
 }
-

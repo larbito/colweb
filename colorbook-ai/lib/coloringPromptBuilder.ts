@@ -3,10 +3,13 @@
  * 
  * Generates high-quality prompts for kids coloring book pages
  * with strict style consistency and professional output quality.
+ * 
+ * All prompts include mandatory no-fill constraints from coloringPagePromptEnforcer.
  */
 
 import type { ImageAnalysis, GeneratedPrompt } from "./coloringPageTypes";
 import { SCENE_PRESETS, ACTIVITY_PRESETS } from "./coloringPageTypes";
+import { NO_FILL_CONSTRAINTS, NEGATIVE_PROMPT_LIST } from "./coloringPagePromptEnforcer";
 
 /**
  * Build a complete coloring page prompt from analysis
@@ -156,41 +159,8 @@ function buildCompositionPrompt(
 }
 
 function buildNegativePrompt(): string {
-  return [
-    "color",
-    "colored",
-    "grayscale",
-    "gray",
-    "shading",
-    "shadows",
-    "gradients",
-    "cross-hatching",
-    "hatching",
-    "stippling",
-    "sketchy lines",
-    "rough lines",
-    "messy",
-    "realistic",
-    "photograph",
-    "3D render",
-    "watercolor",
-    "painting",
-    "text",
-    "words",
-    "letters",
-    "watermark",
-    "signature",
-    "logo",
-    "border",
-    "frame",
-    "busy background",
-    "cluttered",
-    "complex patterns",
-    "tiny details",
-    "fine details",
-    "texture",
-    "noise",
-  ].join(", ");
+  // Use shared negative prompt list for consistency across all generation routes
+  return NEGATIVE_PROMPT_LIST.join(", ");
 }
 
 function buildFullPrompt(
@@ -199,7 +169,7 @@ function buildFullPrompt(
   compositionPrompt: string,
   styleLock: string
 ): string {
-  // Structure optimized for DALL-E 3
+  // Structure optimized for DALL-E 3 with mandatory no-fill constraints
   const fullPrompt = `${mainPrompt}
 
 ${stylePrompt}
@@ -207,6 +177,16 @@ ${stylePrompt}
 ${compositionPrompt}
 
 CRITICAL STYLE REQUIREMENTS: ${styleLock}
+
+=== OUTLINE-ONLY CONSTRAINTS (MANDATORY) ===
+NO solid black fills anywhere.
+NO filled shapes.
+Only black outlines on white background.
+Interior areas must remain white/unfilled.
+If the character has black patches (like a panda), represent them using outlines only (no filled black).
+Eyes: small hollow circles or tiny dots, NOT filled circles.
+Hair: outline only, NEVER solid black.
+Shadows: DO NOT draw any - leave the area white.
 
 OUTPUT MUST BE: Pure black lines on pure white background. Absolutely NO color, NO gray, NO shading of any kind. Every shape must be closed with clean outlines suitable for children to color with crayons or markers. This is a professional coloring book page.`;
 
@@ -240,6 +220,7 @@ function getRandomActivity(seed: number): string {
 
 /**
  * Build a prompt specifically for DALL-E 3 with maximum B&W enforcement
+ * and mandatory no-fill constraints
  */
 export function buildDalle3Prompt(generatedPrompt: GeneratedPrompt): string {
   return `Kids coloring book page illustration:
@@ -264,6 +245,20 @@ ABSOLUTE REQUIREMENTS:
 - Child-friendly, cute, appealing design
 - Print-ready at 300 DPI
 
+=== OUTLINE-ONLY CONSTRAINTS (MANDATORY) ===
+NO solid black fills anywhere.
+NO filled shapes.
+Only black outlines on white background.
+Interior areas must remain white/unfilled.
+If the character has black patches (like a panda), represent them using outlines only (no filled black).
+Eyes: small hollow circles or tiny dots, NOT filled circles.
+Hair: outline only with strands, NEVER solid black.
+Dark fur/clothing: outline shape only, leave interior WHITE.
+Shadows: DO NOT draw any shadows - leave the area white.
+
+AVOID: ${NEGATIVE_PROMPT_LIST.join(", ")}.
+
 This MUST look like a professional children's coloring book page that can be printed and colored with crayons.`;
 }
+
 

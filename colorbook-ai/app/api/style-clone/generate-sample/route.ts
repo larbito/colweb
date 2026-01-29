@@ -5,6 +5,7 @@ import { buildFinalImagePrompt, buildCharacterBible } from "@/lib/styleCloneProm
 import { validateImageQuality, getQualityThresholds } from "@/lib/qualityGates";
 import { KDP_SIZE_PRESETS, type StyleContract, type ThemePack } from "@/lib/styleClone";
 import type { Complexity, LineThickness, GenerationSpec } from "@/lib/generationSpec";
+import { hasRequiredConstraints } from "@/lib/coloringPagePromptEnforcer";
 import crypto from "crypto";
 
 /**
@@ -129,6 +130,15 @@ export async function POST(request: NextRequest) {
           isAnchor: true,
           retryAttempt: retry,
         });
+
+        // Runtime assertion: verify prompt has required no-fill constraints
+        if (!hasRequiredConstraints(finalPromptUsed)) {
+          console.warn(`[generate-sample] Prompt missing required constraints, adding manually`);
+          finalPromptUsed += `\n\n=== OUTLINE-ONLY CONSTRAINTS ===
+NO solid black fills anywhere. NO filled shapes.
+Only black outlines on white background.
+Interior areas must remain white/unfilled.`;
+        }
 
         console.log(`[generate-sample] Attempt ${retry + 1}/${maxRetries}, prompt length: ${finalPromptUsed.length}`);
 

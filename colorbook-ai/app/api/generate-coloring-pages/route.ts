@@ -3,6 +3,7 @@ import { z } from "zod";
 import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
 import { buildColoringPrompt, buildDalle3Prompt } from "@/lib/coloringPromptBuilder";
 import { validateColoringPage } from "@/lib/coloringPageValidator";
+import { hasRequiredConstraints } from "@/lib/coloringPagePromptEnforcer";
 import type { ImageAnalysis, GeneratedPrompt, GenerationResult, ValidationResult } from "@/lib/coloringPageTypes";
 
 const analysisSchema = z.object({
@@ -135,6 +136,15 @@ async function generateSinglePage(
     try {
       // Build the prompt - add stricter constraints on retry
       let finalPrompt = buildDalle3Prompt(prompt);
+      
+      // Runtime assertion: verify prompt has required no-fill constraints
+      if (!hasRequiredConstraints(finalPrompt)) {
+        console.warn(`[generate-coloring-pages] Prompt missing required constraints, adding manually`);
+        finalPrompt += `\n\n=== OUTLINE-ONLY CONSTRAINTS ===
+NO solid black fills anywhere. NO filled shapes.
+Only black outlines on white background.
+Interior areas must remain white/unfilled.`;
+      }
       
       if (attempt > 0) {
         // Add stronger constraints on retry

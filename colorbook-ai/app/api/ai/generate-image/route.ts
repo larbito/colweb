@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
+import {
+  buildFinalColoringPrompt,
+  assertPromptHasConstraints,
+} from "@/lib/coloringPagePromptEnforcer";
 
 /**
  * ⚠️ DEPRECATED ROUTE
@@ -8,8 +12,7 @@ import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openai
  * This route is kept for backwards compatibility but is deprecated.
  * New code should use POST /api/image/generate instead.
  * 
- * This route previously injected hidden style prompts.
- * It now passes the prompt directly to the OpenAI service.
+ * This route now applies no-fill constraints before sending to OpenAI.
  */
 
 const requestSchema = z.object({
@@ -42,9 +45,28 @@ export async function POST(request: NextRequest) {
 
     const { prompt } = parseResult.data;
 
-    // Use centralized OpenAI service - NO hidden prompts added
+    // Apply no-fill constraints to the prompt
+    const finalPrompt = buildFinalColoringPrompt(prompt, {
+      includeNegativeBlock: true,
+      maxLength: 4000,
+    });
+
+    // Safety check: validate constraints are present
+    try {
+      assertPromptHasConstraints(finalPrompt);
+    } catch (constraintError) {
+      console.error("[/api/ai/generate-image] Constraint validation failed:", constraintError);
+      return NextResponse.json(
+        { error: "Internal error: prompt constraints validation failed" },
+        { status: 500 }
+      );
+    }
+
+    console.log(`[/api/ai/generate-image] Applied no-fill constraints, final length: ${finalPrompt.length}`);
+
+    // Use centralized OpenAI service with constrained prompt
     const result = await generateImage({
-      prompt, // Exact prompt, no modifications
+      prompt: finalPrompt,
       n: 1,
       size: "1024x1024",
     });
