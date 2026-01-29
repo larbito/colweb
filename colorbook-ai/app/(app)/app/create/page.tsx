@@ -52,11 +52,17 @@ import type {
 
 type PageStatus = "pending" | "generating" | "done" | "failed";
 
+type EnhanceStatus = "none" | "enhancing" | "enhanced" | "failed";
+
 interface PageState extends PagePromptItem {
   status: PageStatus;
   imageBase64?: string;
   error?: string;
   isEditing?: boolean;
+  // Enhanced image fields
+  enhancedImageBase64?: string;
+  enhanceStatus: EnhanceStatus;
+  activeVersion: "original" | "enhanced";
 }
 
 interface GeneratedIdea {
@@ -341,6 +347,8 @@ export default function CreateColoringBookPage() {
       const pageStates: PageState[] = batchResponse.pages.map((p) => ({
         ...p,
         status: "pending" as PageStatus,
+        enhanceStatus: "none" as EnhanceStatus,
+        activeVersion: "original" as const,
       }));
 
       setPages(pageStates);
@@ -518,6 +526,145 @@ export default function CreateColoringBookPage() {
     ));
   };
 
+  // ==================== Enhance Images ====================
+
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhancingPageId, setEnhancingPageId] = useState<number | null>(null);
+
+  /**
+   * Enhance a single page image
+   */
+  const enhanceSinglePage = async (pageNumber: number) => {
+    const page = pages.find(p => p.page === pageNumber);
+    if (!page || !page.imageBase64 || page.enhanceStatus === "enhancing") return;
+
+    setEnhancingPageId(pageNumber);
+    setPages(prev => prev.map(p =>
+      p.page === pageNumber ? { ...p, enhanceStatus: "enhancing" as EnhanceStatus } : p
+    ));
+
+    try {
+      const response = await fetch("/api/image/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: page.imageBase64,
+          scale: 2,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.enhancedImageBase64) {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? {
+                ...p,
+                enhancedImageBase64: data.enhancedImageBase64,
+                enhanceStatus: "enhanced" as EnhanceStatus,
+                activeVersion: "enhanced" as const,
+              }
+            : p
+        ));
+        toast.success(`Page ${pageNumber} enhanced!`);
+      } else {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+        ));
+        toast.error(`Failed to enhance page ${pageNumber}: ${data.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      setPages(prev => prev.map(p =>
+        p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+      ));
+      toast.error(error instanceof Error ? error.message : "Enhancement failed");
+    } finally {
+      setEnhancingPageId(null);
+    }
+  };
+
+  /**
+   * Enhance all pages that have images but aren't enhanced yet
+   */
+  const enhanceAllPages = async () => {
+    const pagesToEnhance = pages.filter(
+      p => p.status === "done" && p.imageBase64 && p.enhanceStatus !== "enhanced"
+    );
+
+    if (pagesToEnhance.length === 0) {
+      toast.info("All pages are already enhanced!");
+      return;
+    }
+
+    setIsEnhancing(true);
+    let successCount = 0;
+
+    for (const page of pagesToEnhance) {
+      setEnhancingPageId(page.page);
+      setPages(prev => prev.map(p =>
+        p.page === page.page ? { ...p, enhanceStatus: "enhancing" as EnhanceStatus } : p
+      ));
+
+      try {
+        const response = await fetch("/api/image/enhance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageBase64: page.imageBase64,
+            scale: 2,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.enhancedImageBase64) {
+          setPages(prev => prev.map(p =>
+            p.page === page.page
+              ? {
+                  ...p,
+                  enhancedImageBase64: data.enhancedImageBase64,
+                  enhanceStatus: "enhanced" as EnhanceStatus,
+                  activeVersion: "enhanced" as const,
+                }
+              : p
+          ));
+          successCount++;
+        } else {
+          setPages(prev => prev.map(p =>
+            p.page === page.page ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+          ));
+        }
+      } catch {
+        setPages(prev => prev.map(p =>
+          p.page === page.page ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+        ));
+      }
+
+      // Small delay between enhancements
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    setIsEnhancing(false);
+    setEnhancingPageId(null);
+
+    if (successCount === pagesToEnhance.length) {
+      toast.success(`All ${successCount} pages enhanced!`);
+    } else {
+      toast.warning(`Enhanced ${successCount}/${pagesToEnhance.length} pages`);
+    }
+  };
+
+  /**
+   * Toggle between original and enhanced version for a page
+   */
+  const togglePageVersion = (pageNumber: number) => {
+    setPages(prev => prev.map(p =>
+      p.page === pageNumber && p.enhancedImageBase64
+        ? { ...p, activeVersion: p.activeVersion === "enhanced" ? "original" : "enhanced" }
+        : p
+    ));
+  };
+
   // ==================== Download ====================
 
   const downloadAll = () => {
@@ -566,6 +713,7 @@ export default function CreateColoringBookPage() {
 
   const doneCount = pages.filter(p => p.status === "done").length;
   const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed").length;
+  const enhancedCount = pages.filter(p => p.enhanceStatus === "enhanced").length;
 
   // ==================== Render ====================
 
@@ -1014,6 +1162,31 @@ export default function CreateColoringBookPage() {
 
                   {doneCount > 0 && (
                     <>
+                      {/* Enhance All button */}
+                      <Button
+                        variant="outline"
+                        onClick={enhanceAllPages}
+                        disabled={isEnhancing || enhancedCount === doneCount}
+                        className="rounded-xl"
+                      >
+                        {isEnhancing ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Enhancing {enhancingPageId ? `(${enhancingPageId})` : "..."}
+                          </>
+                        ) : enhancedCount === doneCount ? (
+                          <>
+                            <Sparkles className="mr-2 h-4 w-4 text-amber-500" />
+                            All Enhanced ✓
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="mr-2 h-4 w-4" />
+                            Enhance All {enhancedCount > 0 && `(${enhancedCount}/${doneCount})`}
+                          </>
+                        )}
+                      </Button>
+
                       <Button
                         variant="outline"
                         onClick={downloadAll}
@@ -1083,22 +1256,61 @@ export default function CreateColoringBookPage() {
                       <div className="p-3">
                         {page.status === "done" && page.imageBase64 ? (
                           <div className="space-y-2">
+                            {/* Enhanced badge */}
+                            {page.enhanceStatus === "enhanced" && (
+                              <div className="flex items-center justify-between">
+                                <Badge variant="outline" className="text-xs bg-amber-50 border-amber-200 text-amber-700">
+                                  <Sparkles className="mr-1 h-3 w-3" /> Enhanced
+                                </Badge>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-xs"
+                                  onClick={() => togglePageVersion(page.page)}
+                                >
+                                  {page.activeVersion === "enhanced" ? "View Original" : "View Enhanced"}
+                                </Button>
+                              </div>
+                            )}
+                            
+                            {/* Image preview - shows enhanced or original based on activeVersion */}
                             <div
-                              className="aspect-[2/3] bg-white rounded-lg border overflow-hidden cursor-pointer"
-                              onClick={() => setPreviewImage(`data:image/png;base64,${page.imageBase64}`)}
+                              className="aspect-[2/3] bg-white rounded-lg border overflow-hidden cursor-pointer relative"
+                              onClick={() => {
+                                const img = page.activeVersion === "enhanced" && page.enhancedImageBase64
+                                  ? page.enhancedImageBase64
+                                  : page.imageBase64;
+                                setPreviewImage(`data:image/png;base64,${img}`);
+                              }}
                             >
                               <img
-                                src={`data:image/png;base64,${page.imageBase64}`}
+                                src={`data:image/png;base64,${
+                                  page.activeVersion === "enhanced" && page.enhancedImageBase64
+                                    ? page.enhancedImageBase64
+                                    : page.imageBase64
+                                }`}
                                 alt={`Page ${page.page}`}
                                 className="w-full h-full object-contain"
                               />
+                              {page.enhanceStatus === "enhancing" && (
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                  <Loader2 className="h-8 w-8 animate-spin text-white" />
+                                </div>
+                              )}
                             </div>
+                            
+                            {/* Action buttons */}
                             <div className="flex gap-1">
                               <Button
                                 variant="outline"
                                 size="sm"
                                 className="flex-1 rounded-lg text-xs"
-                                onClick={() => setPreviewImage(`data:image/png;base64,${page.imageBase64}`)}
+                                onClick={() => {
+                                  const img = page.activeVersion === "enhanced" && page.enhancedImageBase64
+                                    ? page.enhancedImageBase64
+                                    : page.imageBase64;
+                                  setPreviewImage(`data:image/png;base64,${img}`);
+                                }}
                               >
                                 <Eye className="mr-1 h-3 w-3" /> View
                               </Button>
@@ -1107,9 +1319,12 @@ export default function CreateColoringBookPage() {
                                 size="sm"
                                 className="flex-1 rounded-lg text-xs"
                                 onClick={() => {
+                                  const img = page.activeVersion === "enhanced" && page.enhancedImageBase64
+                                    ? page.enhancedImageBase64
+                                    : page.imageBase64;
                                   const link = document.createElement("a");
-                                  link.href = `data:image/png;base64,${page.imageBase64}`;
-                                  link.download = `coloring-page-${page.page}.png`;
+                                  link.href = `data:image/png;base64,${img}`;
+                                  link.download = `coloring-page-${page.page}${page.activeVersion === "enhanced" ? "-enhanced" : ""}.png`;
                                   link.click();
                                 }}
                               >
@@ -1125,6 +1340,31 @@ export default function CreateColoringBookPage() {
                                 <RefreshCw className="h-3 w-3" />
                               </Button>
                             </div>
+                            
+                            {/* Enhance button (if not enhanced yet) */}
+                            {page.enhanceStatus !== "enhanced" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full rounded-lg text-xs"
+                                onClick={() => enhanceSinglePage(page.page)}
+                                disabled={page.enhanceStatus === "enhancing" || isEnhancing}
+                              >
+                                {page.enhanceStatus === "enhancing" ? (
+                                  <>
+                                    <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Enhancing...
+                                  </>
+                                ) : page.enhanceStatus === "failed" ? (
+                                  <>
+                                    <RefreshCw className="mr-1 h-3 w-3" /> Retry Enhance
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="mr-1 h-3 w-3" /> Enhance Quality
+                                  </>
+                                )}
+                              </Button>
+                            )}
                           </div>
                         ) : (
                           <div className="space-y-2">
@@ -1216,7 +1456,12 @@ export default function CreateColoringBookPage() {
         onClose={() => setShowExportModal(false)}
         coloringPages={pages
           .filter(p => p.status === "done" && p.imageBase64)
-          .map(p => ({ page: p.page, imageBase64: p.imageBase64! }))}
+          .map(p => ({
+            page: p.page,
+            imageBase64: p.imageBase64!,
+            enhancedImageBase64: p.enhancedImageBase64,
+            activeVersion: p.activeVersion,
+          }))}
         characterProfile={characterIdentityProfile ? {
           species: characterIdentityProfile.species,
           faceShape: characterIdentityProfile.faceShape,
@@ -1224,6 +1469,7 @@ export default function CreateColoringBookPage() {
           proportions: characterIdentityProfile.proportions,
         } : undefined}
         defaultTitle={storyConfig.title || generatedIdea?.title || "My Coloring Book"}
+        onEnhancePages={enhanceAllPages}
       />
     </>
   );

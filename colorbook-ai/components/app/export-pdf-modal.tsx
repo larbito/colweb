@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -12,9 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Download, FileText, BookOpen } from "lucide-react";
+import { Loader2, Download, FileText, BookOpen, Eye, AlertTriangle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { PDFPreviewModal } from "./pdf-preview-modal";
 
 // Page sizes in points (72 points = 1 inch)
 const PAGE_SIZES = {
@@ -22,11 +23,18 @@ const PAGE_SIZES = {
   letter: { width: 612, height: 792 },
 };
 
+interface PageData {
+  page: number;
+  imageBase64: string;
+  enhancedImageBase64?: string;
+  activeVersion?: "original" | "enhanced";
+}
+
 interface ExportPDFModalProps {
   isOpen: boolean;
   onClose: () => void;
   // Pages to export (with base64 images)
-  coloringPages: Array<{ page: number; imageBase64: string }>;
+  coloringPages: PageData[];
   // Character profile for belongs-to page
   characterProfile?: {
     species?: string;
@@ -37,6 +45,8 @@ interface ExportPDFModalProps {
   // Default values
   defaultTitle?: string;
   defaultAuthor?: string;
+  // Callback to enhance pages
+  onEnhancePages?: () => Promise<void>;
 }
 
 export function ExportPDFModal({
@@ -46,6 +56,7 @@ export function ExportPDFModal({
   characterProfile,
   defaultTitle = "My Coloring Book",
   defaultAuthor = "",
+  onEnhancePages,
 }: ExportPDFModalProps) {
   // Form state
   const [title, setTitle] = useState(defaultTitle);
@@ -58,11 +69,20 @@ export function ExportPDFModal({
   const [includeCopyright, setIncludeCopyright] = useState(true);
   const [includePageNumbers, setIncludePageNumbers] = useState(false);
   const [includeCreatedWith, setIncludeCreatedWith] = useState(false);
+  const [useEnhancedImages, setUseEnhancedImages] = useState(true);
 
   // Export state
   const [isExporting, setIsExporting] = useState(false);
   const [belongsToImage, setBelongsToImage] = useState<string | null>(null);
   const [exportStep, setExportStep] = useState<string>("");
+  
+  // Preview state
+  const [showPreview, setShowPreview] = useState(false);
+  const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
+
+  // Check if any pages need enhancement
+  const enhancedCount = coloringPages.filter(p => p.enhancedImageBase64).length;
+  const needsEnhancement = useEnhancedImages && enhancedCount < coloringPages.length;
 
   // Generate the belongs-to page
   const generateBelongsToPage = async (): Promise<string | null> => {
@@ -110,8 +130,16 @@ export function ExportPDFModal({
     return bytes;
   };
 
+  // Get the appropriate image for a page (enhanced or original)
+  const getPageImage = (page: PageData): string => {
+    if (useEnhancedImages && page.enhancedImageBase64 && page.activeVersion === "enhanced") {
+      return page.enhancedImageBase64;
+    }
+    return page.imageBase64;
+  };
+
   // Generate PDF client-side using pdf-lib
-  const generatePDF = async () => {
+  const generatePDF = async (): Promise<{ pdfDoc: PDFDocument; pageCount: number }> => {
     const dimensions = PAGE_SIZES[pageSize];
     const margins = 36; // 0.5 inch
 
@@ -268,7 +296,9 @@ export function ExportPDFModal({
         const coloringPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
         currentPageNum++;
         
-        const imageBytes = base64ToUint8Array(pageData.imageBase64);
+        // Get the appropriate image (enhanced or original)
+        const imageToUse = getPageImage(pageData);
+        const imageBytes = base64ToUint8Array(imageToUse);
         const pngImage = await pdfDoc.embedPng(imageBytes);
         
         const availableWidth = dimensions.width - (margins * 2);
@@ -306,8 +336,57 @@ export function ExportPDFModal({
     return { pdfDoc, pageCount: currentPageNum };
   };
 
-  // Export to PDF
-  const handleExport = async () => {
+  // Generate PDF and show preview
+  const handlePreview = async () => {
+    if (coloringPages.length === 0) {
+      toast.error("No pages to preview");
+      return;
+    }
+
+    if (!title.trim()) {
+      toast.error("Please enter a book title");
+      return;
+    }
+
+    setIsExporting(true);
+    setExportStep("Generating PDF preview...");
+
+    try {
+      const { pdfDoc, pageCount } = await generatePDF();
+      const pdfBytes = await pdfDoc.save();
+      setPdfData(pdfBytes);
+      setShowPreview(true);
+      toast.success(`Preview ready! (${pageCount} pages)`);
+    } catch (error) {
+      console.error("Preview error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate preview");
+    } finally {
+      setIsExporting(false);
+      setExportStep("");
+    }
+  };
+
+  // Download the generated PDF
+  const handleDownload = useCallback(() => {
+    if (!pdfData) return;
+    
+    const blob = new Blob([pdfData as BlobPart], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${title.replace(/[^a-zA-Z0-9]/g, "_")}_coloring_book.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    toast.success("PDF downloaded!");
+    onClose();
+    setShowPreview(false);
+  }, [pdfData, title, onClose]);
+
+  // Export directly without preview
+  const handleDirectExport = async () => {
     if (coloringPages.length === 0) {
       toast.error("No pages to export");
       return;
@@ -322,15 +401,11 @@ export function ExportPDFModal({
 
     try {
       setExportStep("Creating PDF...");
-      
       const { pdfDoc, pageCount } = await generatePDF();
       
       setExportStep("Downloading...");
-      
-      // Generate PDF bytes
       const pdfBytes = await pdfDoc.save();
       
-      // Download
       const blob = new Blob([pdfBytes as BlobPart], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -356,194 +431,259 @@ export function ExportPDFModal({
   const availablePages = coloringPages.filter(p => p.imageBase64);
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <BookOpen className="h-5 w-5" />
-            Export Coloring Book PDF
-          </DialogTitle>
-          <DialogDescription>
-            Create a print-ready PDF with {availablePages.length} coloring pages
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={isOpen && !showPreview} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BookOpen className="h-5 w-5" />
+              Export Coloring Book PDF
+            </DialogTitle>
+            <DialogDescription>
+              Create a print-ready PDF with {availablePages.length} coloring pages
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          {/* Book Info */}
-          <div className="space-y-4">
-            <h4 className="text-sm font-medium flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Book Information
-            </h4>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <label htmlFor="title" className="text-sm font-medium">Book Title *</label>
-                <Input
-                  id="title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="My Coloring Book"
-                  className="mt-1"
-                />
-              </div>
+          <div className="space-y-6 py-4">
+            {/* Book Info */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Book Information
+              </h4>
               
-              <div>
-                <label htmlFor="author" className="text-sm font-medium">Author / Company</label>
-                <Input
-                  id="author"
-                  value={author}
-                  onChange={(e) => setAuthor(e.target.value)}
-                  placeholder="Your name"
-                  className="mt-1"
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="year" className="text-sm font-medium">Year</label>
-                <Input
-                  id="year"
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                  placeholder="2026"
-                  className="mt-1"
-                />
-              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label htmlFor="title" className="text-sm font-medium">Book Title *</label>
+                  <Input
+                    id="title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="My Coloring Book"
+                    className="mt-1"
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="author" className="text-sm font-medium">Author / Company</label>
+                  <Input
+                    id="author"
+                    value={author}
+                    onChange={(e) => setAuthor(e.target.value)}
+                    placeholder="Your name"
+                    className="mt-1"
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="year" className="text-sm font-medium">Year</label>
+                  <Input
+                    id="year"
+                    value={year}
+                    onChange={(e) => setYear(e.target.value)}
+                    placeholder="2026"
+                    className="mt-1"
+                  />
+                </div>
 
-              <div className="col-span-2">
-                <label htmlFor="website" className="text-sm font-medium">Website (optional)</label>
-                <Input
-                  id="website"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder="www.example.com"
-                  className="mt-1"
-                />
+                <div className="col-span-2">
+                  <label htmlFor="website" className="text-sm font-medium">Website (optional)</label>
+                  <Input
+                    id="website"
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
+                    placeholder="www.example.com"
+                    className="mt-1"
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Page Options */}
-          <div className="space-y-4">
-            <h4 className="text-sm font-medium">Page Options</h4>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium">Page Size</label>
-                <select
-                  value={pageSize}
-                  onChange={(e) => setPageSize(e.target.value as "a4" | "letter")}
-                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                >
-                  <option value="a4">A4 (210 × 297 mm)</option>
-                  <option value="letter">US Letter (8.5 × 11 in)</option>
-                </select>
+            {/* Page Options */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium">Page Options</h4>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Page Size</label>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(e.target.value as "a4" | "letter")}
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  >
+                    <option value="a4">A4 (210 × 297 mm)</option>
+                    <option value="letter">US Letter (8.5 × 11 in)</option>
+                  </select>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Content Options */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium">Content Options</h4>
-            
+            {/* Content Options */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label htmlFor="blankPages" className="flex items-center gap-2 cursor-pointer text-sm">
-                  Insert blank pages between drawings
-                  <span className="text-xs text-muted-foreground">(prevents bleed-through)</span>
-                </label>
-                <Switch
-                  id="blankPages"
-                  checked={insertBlankPages}
-                  onCheckedChange={setInsertBlankPages}
-                />
-              </div>
+              <h4 className="text-sm font-medium">Content Options</h4>
+              
+              <div className="space-y-3">
+                {/* Enhanced images option */}
+                <div className="flex items-center justify-between">
+                  <label htmlFor="useEnhanced" className="flex items-center gap-2 cursor-pointer text-sm">
+                    <Sparkles className="h-4 w-4 text-amber-500" />
+                    Use enhanced images (recommended)
+                    {enhancedCount > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        ({enhancedCount}/{coloringPages.length} enhanced)
+                      </span>
+                    )}
+                  </label>
+                  <Switch
+                    id="useEnhanced"
+                    checked={useEnhancedImages}
+                    onCheckedChange={setUseEnhancedImages}
+                  />
+                </div>
 
-              <div className="flex items-center justify-between">
-                <label htmlFor="belongsTo" className="flex items-center gap-2 cursor-pointer text-sm">
-                  Include &quot;Belongs To&quot; page
-                  {characterProfile?.species && (
-                    <span className="text-xs text-muted-foreground">
-                      (featuring {characterProfile.species})
-                    </span>
-                  )}
-                </label>
-                <Switch
-                  id="belongsTo"
-                  checked={includeBelongsTo}
-                  onCheckedChange={setIncludeBelongsTo}
-                />
-              </div>
+                {/* Warning if some pages not enhanced */}
+                {needsEnhancement && onEnhancePages && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p>Some pages are not enhanced yet.</p>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="h-auto p-0 text-amber-800 underline"
+                        onClick={onEnhancePages}
+                      >
+                        Enhance all pages now
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
-              <div className="flex items-center justify-between">
-                <label htmlFor="copyright" className="cursor-pointer text-sm">
-                  Include copyright page
-                </label>
-                <Switch
-                  id="copyright"
-                  checked={includeCopyright}
-                  onCheckedChange={setIncludeCopyright}
-                />
-              </div>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="blankPages" className="flex items-center gap-2 cursor-pointer text-sm">
+                    Insert blank pages between drawings
+                    <span className="text-xs text-muted-foreground">(prevents bleed-through)</span>
+                  </label>
+                  <Switch
+                    id="blankPages"
+                    checked={insertBlankPages}
+                    onCheckedChange={setInsertBlankPages}
+                  />
+                </div>
 
-              <div className="flex items-center justify-between">
-                <label htmlFor="pageNumbers" className="cursor-pointer text-sm">
-                  Include page numbers
-                </label>
-                <Switch
-                  id="pageNumbers"
-                  checked={includePageNumbers}
-                  onCheckedChange={setIncludePageNumbers}
-                />
-              </div>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="belongsTo" className="flex items-center gap-2 cursor-pointer text-sm">
+                    Include &quot;Belongs To&quot; page
+                    {characterProfile?.species && (
+                      <span className="text-xs text-muted-foreground">
+                        (featuring {characterProfile.species})
+                      </span>
+                    )}
+                  </label>
+                  <Switch
+                    id="belongsTo"
+                    checked={includeBelongsTo}
+                    onCheckedChange={setIncludeBelongsTo}
+                  />
+                </div>
 
-              <div className="flex items-center justify-between">
-                <label htmlFor="createdWith" className="cursor-pointer text-sm text-muted-foreground">
-                  Include &quot;Created with ColorBookAI&quot;
-                </label>
-                <Switch
-                  id="createdWith"
-                  checked={includeCreatedWith}
-                  onCheckedChange={setIncludeCreatedWith}
-                />
+                <div className="flex items-center justify-between">
+                  <label htmlFor="copyright" className="cursor-pointer text-sm">
+                    Include copyright page
+                  </label>
+                  <Switch
+                    id="copyright"
+                    checked={includeCopyright}
+                    onCheckedChange={setIncludeCopyright}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <label htmlFor="pageNumbers" className="cursor-pointer text-sm">
+                    Include page numbers
+                  </label>
+                  <Switch
+                    id="pageNumbers"
+                    checked={includePageNumbers}
+                    onCheckedChange={setIncludePageNumbers}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <label htmlFor="createdWith" className="cursor-pointer text-sm text-muted-foreground">
+                    Include &quot;Created with ColorBookAI&quot;
+                  </label>
+                  <Switch
+                    id="createdWith"
+                    checked={includeCreatedWith}
+                    onCheckedChange={setIncludeCreatedWith}
+                  />
+                </div>
               </div>
+            </div>
+
+            {/* Preview Summary */}
+            <div className="rounded-lg bg-muted/50 p-3 text-sm">
+              <p className="font-medium">PDF Preview:</p>
+              <ul className="mt-1 space-y-1 text-muted-foreground">
+                {includeBelongsTo && <li>• &quot;Belongs To&quot; page</li>}
+                {includeCopyright && <li>• Copyright page</li>}
+                <li>• {availablePages.length} coloring pages {useEnhancedImages && enhancedCount > 0 && `(${enhancedCount} enhanced)`}</li>
+                {insertBlankPages && <li>• {Math.max(0, availablePages.length - 1)} blank pages (between drawings)</li>}
+                <li className="pt-1 text-xs">
+                  Total: ~{(includeBelongsTo ? 1 : 0) + (includeCopyright ? 1 : 0) + availablePages.length + (insertBlankPages ? Math.max(0, availablePages.length - 1) : 0)} pages
+                </li>
+              </ul>
             </div>
           </div>
 
-          {/* Preview Summary */}
-          <div className="rounded-lg bg-muted/50 p-3 text-sm">
-            <p className="font-medium">PDF Preview:</p>
-            <ul className="mt-1 space-y-1 text-muted-foreground">
-              {includeBelongsTo && <li>• &quot;Belongs To&quot; page</li>}
-              {includeCopyright && <li>• Copyright page</li>}
-              <li>• {availablePages.length} coloring pages</li>
-              {insertBlankPages && <li>• {Math.max(0, availablePages.length - 1)} blank pages (between drawings)</li>}
-              <li className="pt-1 text-xs">
-                Total: ~{(includeBelongsTo ? 1 : 0) + (includeCopyright ? 1 : 0) + availablePages.length + (insertBlankPages ? Math.max(0, availablePages.length - 1) : 0)} pages
-              </li>
-            </ul>
-          </div>
-        </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={onClose} disabled={isExporting}>
+              Cancel
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handlePreview}
+              disabled={isExporting || availablePages.length === 0}
+            >
+              {isExporting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {exportStep || "Generating..."}
+                </>
+              ) : (
+                <>
+                  <Eye className="mr-2 h-4 w-4" />
+                  Preview PDF
+                </>
+              )}
+            </Button>
+            <Button onClick={handleDirectExport} disabled={isExporting || availablePages.length === 0}>
+              {isExporting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {exportStep || "Exporting..."}
+                </>
+              ) : (
+                <>
+                  <Download className="mr-2 h-4 w-4" />
+                  Export PDF
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isExporting}>
-            Cancel
-          </Button>
-          <Button onClick={handleExport} disabled={isExporting || availablePages.length === 0}>
-            {isExporting ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {exportStep || "Exporting..."}
-              </>
-            ) : (
-              <>
-                <Download className="mr-2 h-4 w-4" />
-                Export PDF
-              </>
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {/* PDF Preview Modal */}
+      <PDFPreviewModal
+        isOpen={showPreview}
+        onClose={() => setShowPreview(false)}
+        pdfData={pdfData}
+        title={title}
+        onDownload={handleDownload}
+        isGenerating={isExporting}
+      />
+    </>
   );
 }

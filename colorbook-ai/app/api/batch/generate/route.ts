@@ -158,8 +158,10 @@ RETRY: OUTLINE-ONLY line art, NO fills, fill 90% of canvas, ground at bottom.`;
         console.log(`[batch/generate] Page ${pageNumber}: Success`);
         return {
           page: pageNumber,
-          status: "done",
+          status: "done" as const,
           imageBase64: result.images[0],
+          enhanceStatus: "none" as const,
+          activeVersion: "original" as const,
         };
       }
 
@@ -183,7 +185,9 @@ RETRY: OUTLINE-ONLY line art, NO fills, fill 90% of canvas, ground at bottom.`;
   console.log(`[batch/generate] Page ${pageNumber}: Failed`);
   return {
     page: pageNumber,
-    status: "failed",
+    status: "failed" as const,
     error: lastError,
+    enhanceStatus: "none" as const,
+    activeVersion: "original" as const,
   };
 }

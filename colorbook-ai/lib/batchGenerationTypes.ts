@@ -139,9 +139,23 @@ export const pageResultSchema = z.object({
   status: z.enum(["pending", "generating", "done", "failed"]),
   imageBase64: z.string().optional(),
   error: z.string().optional(),
+  // Enhanced image fields
+  enhancedImageBase64: z.string().optional(),
+  enhanceStatus: z.enum(["none", "enhancing", "enhanced", "failed"]).default("none"),
+  activeVersion: z.enum(["original", "enhanced"]).default("original"),
 });
 
 export type PageResult = z.infer<typeof pageResultSchema>;
+
+/**
+ * Get the active image for a page result (prefers enhanced if available)
+ */
+export function getActiveImage(page: PageResult): string | undefined {
+  if (page.activeVersion === "enhanced" && page.enhancedImageBase64) {
+    return page.enhancedImageBase64;
+  }
+  return page.imageBase64;
+}
 
 export const batchGenerateResponseSchema = z.object({
   results: z.array(pageResultSchema),

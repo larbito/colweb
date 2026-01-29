@@ -48,12 +48,17 @@ import type {
 } from "@/lib/batchGenerationTypes";
 
 type PageStatus = "pending" | "generating" | "done" | "failed";
+type EnhanceStatus = "none" | "enhancing" | "enhanced" | "failed";
 
 interface PageState extends PagePromptItem {
   status: PageStatus;
   imageBase64?: string;
   error?: string;
   isEditing?: boolean;
+  // Enhanced image fields
+  enhancedImageBase64?: string;
+  enhanceStatus: EnhanceStatus;
+  activeVersion: "original" | "enhanced";
 }
 
 export default function BatchGenerationPage() {
@@ -230,6 +235,8 @@ export default function BatchGenerationPage() {
       const pageStates: PageState[] = batchResponse.pages.map((p) => ({
         ...p,
         status: "pending" as PageStatus,
+        enhanceStatus: "none" as EnhanceStatus,
+        activeVersion: "original" as const,
       }));
 
       setPages(pageStates);
@@ -414,6 +421,135 @@ export default function BatchGenerationPage() {
     ));
   };
 
+  // ==================== Enhance Images ====================
+
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhancingPageId, setEnhancingPageId] = useState<number | null>(null);
+
+  const enhanceSinglePage = async (pageNumber: number) => {
+    const page = pages.find(p => p.page === pageNumber);
+    if (!page || !page.imageBase64 || page.enhanceStatus === "enhancing") return;
+
+    setEnhancingPageId(pageNumber);
+    setPages(prev => prev.map(p =>
+      p.page === pageNumber ? { ...p, enhanceStatus: "enhancing" as EnhanceStatus } : p
+    ));
+
+    try {
+      const response = await fetch("/api/image/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: page.imageBase64,
+          scale: 2,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.enhancedImageBase64) {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? {
+                ...p,
+                enhancedImageBase64: data.enhancedImageBase64,
+                enhanceStatus: "enhanced" as EnhanceStatus,
+                activeVersion: "enhanced" as const,
+              }
+            : p
+        ));
+        toast.success(`Page ${pageNumber} enhanced!`);
+      } else {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+        ));
+        toast.error(`Failed to enhance page ${pageNumber}`);
+      }
+    } catch (error) {
+      setPages(prev => prev.map(p =>
+        p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+      ));
+      toast.error(error instanceof Error ? error.message : "Enhancement failed");
+    } finally {
+      setEnhancingPageId(null);
+    }
+  };
+
+  const enhanceAllPages = async () => {
+    const pagesToEnhance = pages.filter(
+      p => p.status === "done" && p.imageBase64 && p.enhanceStatus !== "enhanced"
+    );
+
+    if (pagesToEnhance.length === 0) {
+      toast.info("All pages are already enhanced!");
+      return;
+    }
+
+    setIsEnhancing(true);
+    let successCount = 0;
+
+    for (const page of pagesToEnhance) {
+      setEnhancingPageId(page.page);
+      setPages(prev => prev.map(p =>
+        p.page === page.page ? { ...p, enhanceStatus: "enhancing" as EnhanceStatus } : p
+      ));
+
+      try {
+        const response = await fetch("/api/image/enhance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageBase64: page.imageBase64,
+            scale: 2,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.enhancedImageBase64) {
+          setPages(prev => prev.map(p =>
+            p.page === page.page
+              ? {
+                  ...p,
+                  enhancedImageBase64: data.enhancedImageBase64,
+                  enhanceStatus: "enhanced" as EnhanceStatus,
+                  activeVersion: "enhanced" as const,
+                }
+              : p
+          ));
+          successCount++;
+        } else {
+          setPages(prev => prev.map(p =>
+            p.page === page.page ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+          ));
+        }
+      } catch {
+        setPages(prev => prev.map(p =>
+          p.page === page.page ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+        ));
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    setIsEnhancing(false);
+    setEnhancingPageId(null);
+
+    if (successCount === pagesToEnhance.length) {
+      toast.success(`All ${successCount} pages enhanced!`);
+    } else {
+      toast.warning(`Enhanced ${successCount}/${pagesToEnhance.length} pages`);
+    }
+  };
+
+  const togglePageVersion = (pageNumber: number) => {
+    setPages(prev => prev.map(p =>
+      p.page === pageNumber && p.enhancedImageBase64
+        ? { ...p, activeVersion: p.activeVersion === "enhanced" ? "original" : "enhanced" }
+        : p
+    ));
+  };
+
   // ==================== Download All ====================
 
   const downloadAll = () => {
@@ -462,6 +598,7 @@ export default function BatchGenerationPage() {
 
   const doneCount = pages.filter(p => p.status === "done").length;
   const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed").length;
+  const enhancedCount = pages.filter(p => p.enhanceStatus === "enhanced").length;
 
   // ==================== Render ====================
 
@@ -857,6 +994,31 @@ export default function BatchGenerationPage() {
 
                   {doneCount > 0 && (
                     <>
+                      {/* Enhance All button */}
+                      <Button
+                        variant="outline"
+                        onClick={enhanceAllPages}
+                        disabled={isEnhancing || enhancedCount === doneCount}
+                        className="rounded-xl"
+                      >
+                        {isEnhancing ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Enhancing {enhancingPageId ? `(${enhancingPageId})` : "..."}
+                          </>
+                        ) : enhancedCount === doneCount ? (
+                          <>
+                            <Sparkles className="mr-2 h-4 w-4 text-amber-500" />
+                            All Enhanced ✓
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="mr-2 h-4 w-4" />
+                            Enhance All {enhancedCount > 0 && `(${enhancedCount}/${doneCount})`}
+                          </>
+                        )}
+                      </Button>
+
                       <Button
                         variant="outline"
                         onClick={downloadAll}
@@ -1059,7 +1221,12 @@ export default function BatchGenerationPage() {
         onClose={() => setShowExportModal(false)}
         coloringPages={pages
           .filter(p => p.status === "done" && p.imageBase64)
-          .map(p => ({ page: p.page, imageBase64: p.imageBase64! }))}
+          .map(p => ({
+            page: p.page,
+            imageBase64: p.imageBase64!,
+            enhancedImageBase64: p.enhancedImageBase64,
+            activeVersion: p.activeVersion,
+          }))}
         characterProfile={characterIdentityProfile ? {
           species: characterIdentityProfile.species,
           faceShape: characterIdentityProfile.faceShape,
@@ -1070,6 +1237,7 @@ export default function BatchGenerationPage() {
           proportions: profile.characterProfile.proportions,
         } : undefined}
         defaultTitle={storyConfig.title || "My Coloring Book"}
+        onEnhancePages={enhanceAllPages}
       />
     </>
   );
