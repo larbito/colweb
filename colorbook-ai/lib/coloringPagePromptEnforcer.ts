@@ -1,21 +1,83 @@
 /**
  * coloringPagePromptEnforcer.ts
  * 
- * Shared prompt builder that enforces "no filled black areas" constraints.
+ * Shared prompt builder that enforces "no filled black areas" constraints
+ * and proper framing for different orientations (portrait/landscape/square).
+ * 
  * ALL coloring page generation must go through this module to ensure
  * consistent, outline-only output with no solid black fills.
  * 
  * Usage:
  *   import { buildFinalColoringPrompt, assertPromptHasConstraints } from "@/lib/coloringPagePromptEnforcer";
- *   const finalPrompt = buildFinalColoringPrompt(userPrompt);
- *   assertPromptHasConstraints(finalPrompt); // throws if missing required constraints
+ *   const finalPrompt = buildFinalColoringPrompt(userPrompt, { size: "1536x1024" });
+ *   assertPromptHasConstraints(finalPrompt, "1536x1024"); // throws if missing required constraints
  */
 
+// ============================================================
+// ORIENTATION / SIZE TYPES
+// ============================================================
+
+export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024";
+export type Orientation = "portrait" | "landscape" | "square";
+
+export function getOrientationFromSize(size: ImageSize): Orientation {
+  if (size === "1536x1024") return "landscape";
+  if (size === "1024x1536") return "portrait";
+  return "square";
+}
+
+export function getSizeFromOrientation(orientation: Orientation): ImageSize {
+  if (orientation === "landscape") return "1536x1024";
+  if (orientation === "portrait") return "1024x1536";
+  return "1024x1024";
+}
+
+// ============================================================
+// LANDSCAPE FRAMING CONSTRAINTS
+// ============================================================
+
 /**
- * ============================================================
- * NO-FILL CONSTRAINTS - MUST be appended to EVERY generation prompt
- * ============================================================
- * 
+ * Landscape framing constraints - appended when size is 1536x1024
+ * Prevents small artwork with large white bands at top/bottom
+ */
+export const LANDSCAPE_FRAMING_CONSTRAINTS = `
+
+=== FRAMING / LAYOUT (MANDATORY FOR LANDSCAPE) ===
+- Landscape canvas (1536x1024 / wide format).
+- Zoom in and scale the main subject + important background so the drawing fills 90–95% of the canvas.
+- Keep only a small clean margin (3–5%) around edges.
+- NO large blank white bands at top or bottom.
+- Foreground subject should be LARGE and fill significant vertical space.
+- Background elements scaled up to reach near edges while staying simple.
+- Spread the composition horizontally - use the full width.
+- The artwork must FILL THE FRAME, not float small in the center.`;
+
+/**
+ * Portrait framing constraints - appended when size is 1024x1536
+ */
+export const PORTRAIT_FRAMING_CONSTRAINTS = `
+
+=== FRAMING / LAYOUT (PORTRAIT) ===
+- Portrait canvas (1024x1536 / tall format).
+- Center the main subject vertically with small margins (5-10%) at top and bottom.
+- Subject should fill 80-90% of the frame height.
+- Use the vertical space well - don't leave large empty areas.`;
+
+/**
+ * Square framing constraints - appended when size is 1024x1024
+ */
+export const SQUARE_FRAMING_CONSTRAINTS = `
+
+=== FRAMING / LAYOUT (SQUARE) ===
+- Square canvas (1024x1024).
+- Center the composition with balanced margins.
+- Subject should fill 85-90% of the frame.`;
+
+// ============================================================
+// NO-FILL CONSTRAINTS - MUST be appended to EVERY generation prompt
+// ============================================================
+
+/**
  * These constraints prevent the AI from generating filled black areas.
  * They are added as plain text in the final prompt (not hidden config).
  */
@@ -84,13 +146,14 @@ const REQUIRED_CONSTRAINT_PHRASES = [
 ];
 
 /**
- * Build the final coloring page prompt by appending no-fill constraints.
+ * Build the final coloring page prompt by appending no-fill constraints
+ * and appropriate framing constraints based on the target size.
  * 
  * This function MUST be called for every generation request to ensure
- * consistent outline-only output.
+ * consistent outline-only output and proper framing.
  * 
  * @param userPrompt - The user's prompt (can be from text input or image analysis)
- * @param options - Optional configuration
+ * @param options - Configuration including size for framing constraints
  * @returns The final prompt with all constraints appended
  */
 export function buildFinalColoringPrompt(
@@ -98,12 +161,23 @@ export function buildFinalColoringPrompt(
   options: {
     includeNegativeBlock?: boolean;
     maxLength?: number;
+    size?: ImageSize;
   } = {}
 ): string {
-  const { includeNegativeBlock = true, maxLength = 4000 } = options;
+  const { includeNegativeBlock = true, maxLength = 4000, size = "1024x1536" } = options;
 
   // Start with the user's prompt
   let finalPrompt = userPrompt.trim();
+
+  // Add framing constraints based on size/orientation
+  const orientation = getOrientationFromSize(size);
+  if (orientation === "landscape") {
+    finalPrompt += LANDSCAPE_FRAMING_CONSTRAINTS;
+  } else if (orientation === "portrait") {
+    finalPrompt += PORTRAIT_FRAMING_CONSTRAINTS;
+  } else {
+    finalPrompt += SQUARE_FRAMING_CONSTRAINTS;
+  }
 
   // Add the mandatory no-fill constraints
   finalPrompt += NO_FILL_CONSTRAINTS;
@@ -115,13 +189,13 @@ export function buildFinalColoringPrompt(
 
   // Truncate if over limit while preserving constraints
   if (finalPrompt.length > maxLength) {
-    // Find where constraints start
-    const constraintStart = finalPrompt.indexOf("=== OUTLINE-ONLY CONSTRAINTS");
-    if (constraintStart > 0) {
-      const constraints = finalPrompt.substring(constraintStart);
-      const availableLength = maxLength - constraints.length - 50; // 50 char buffer
+    // Find where framing constraints start (they come first)
+    const framingStart = finalPrompt.indexOf("=== FRAMING / LAYOUT");
+    if (framingStart > 0) {
+      const allConstraints = finalPrompt.substring(framingStart);
+      const availableLength = maxLength - allConstraints.length - 50; // 50 char buffer
       if (availableLength > 100) {
-        finalPrompt = userPrompt.substring(0, availableLength) + "\n\n" + constraints;
+        finalPrompt = userPrompt.substring(0, availableLength) + "\n\n" + allConstraints;
       }
     } else {
       finalPrompt = finalPrompt.substring(0, maxLength);
@@ -132,27 +206,47 @@ export function buildFinalColoringPrompt(
 }
 
 /**
- * Assert that a prompt contains the required no-fill constraints.
+ * Required phrases for landscape framing validation
+ */
+const REQUIRED_LANDSCAPE_PHRASES = [
+  "fills 90–95%",
+  "NO large blank white bands",
+];
+
+/**
+ * Assert that a prompt contains the required no-fill constraints
+ * and (if landscape) the required framing constraints.
  * Throws an error if constraints are missing.
  * 
  * Call this before sending to the image generation API as a safety check.
  * 
  * @param prompt - The final prompt to validate
+ * @param size - Optional size to check for landscape framing requirements
  * @throws Error if required constraints are missing
  */
-export function assertPromptHasConstraints(prompt: string): void {
+export function assertPromptHasConstraints(prompt: string, size?: ImageSize): void {
   const missingConstraints: string[] = [];
 
+  // Check no-fill constraints (always required)
   for (const phrase of REQUIRED_CONSTRAINT_PHRASES) {
     if (!prompt.includes(phrase)) {
       missingConstraints.push(phrase);
     }
   }
 
+  // Check landscape framing constraints (only for landscape size)
+  if (size === "1536x1024") {
+    for (const phrase of REQUIRED_LANDSCAPE_PHRASES) {
+      if (!prompt.includes(phrase)) {
+        missingConstraints.push(`[LANDSCAPE] ${phrase}`);
+      }
+    }
+  }
+
   if (missingConstraints.length > 0) {
     throw new Error(
-      `[PROMPT SAFETY] Missing required no-fill constraints: ${missingConstraints.join(", ")}. ` +
-      `Use buildFinalColoringPrompt() to ensure constraints are included.`
+      `[PROMPT SAFETY] Missing required constraints: ${missingConstraints.join(", ")}. ` +
+      `Use buildFinalColoringPrompt() with size parameter to ensure constraints are included.`
     );
   }
 }
@@ -161,10 +255,18 @@ export function assertPromptHasConstraints(prompt: string): void {
  * Check if a prompt has constraints (non-throwing version).
  * 
  * @param prompt - The prompt to check
+ * @param size - Optional size to check for landscape framing requirements
  * @returns true if all required constraints are present
  */
-export function hasRequiredConstraints(prompt: string): boolean {
-  return REQUIRED_CONSTRAINT_PHRASES.every(phrase => prompt.includes(phrase));
+export function hasRequiredConstraints(prompt: string, size?: ImageSize): boolean {
+  const hasNoFillConstraints = REQUIRED_CONSTRAINT_PHRASES.every(phrase => prompt.includes(phrase));
+  
+  if (size === "1536x1024") {
+    const hasLandscapeConstraints = REQUIRED_LANDSCAPE_PHRASES.every(phrase => prompt.includes(phrase));
+    return hasNoFillConstraints && hasLandscapeConstraints;
+  }
+  
+  return hasNoFillConstraints;
 }
 
 /**

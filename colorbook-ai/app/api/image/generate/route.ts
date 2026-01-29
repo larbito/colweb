@@ -10,6 +10,7 @@ import {
   buildFinalColoringPrompt,
   assertPromptHasConstraints,
   hasRequiredConstraints,
+  type ImageSize as EnforcerImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
 
 /**
@@ -62,26 +63,30 @@ export async function POST(request: NextRequest) {
     }
 
     const { prompt, n, size, skipConstraints } = parseResult.data;
+    
+    // Normalize size for constraint checking (auto defaults to portrait)
+    const normalizedSize = (size === "auto" ? "1024x1536" : size) as EnforcerImageSize;
 
-    // Build the final prompt with no-fill constraints
+    // Build the final prompt with no-fill constraints and framing constraints
     let finalPrompt: string;
     
-    if (skipConstraints && hasRequiredConstraints(prompt)) {
+    if (skipConstraints && hasRequiredConstraints(prompt, normalizedSize)) {
       // Prompt already has constraints, use as-is
       finalPrompt = prompt;
       console.log(`[/api/image/generate] Using pre-constrained prompt`);
     } else {
-      // Apply constraints
+      // Apply constraints including framing for landscape
       finalPrompt = buildFinalColoringPrompt(prompt, {
         includeNegativeBlock: true,
         maxLength: 4000,
+        size: normalizedSize,
       });
-      console.log(`[/api/image/generate] Applied no-fill constraints to prompt`);
+      console.log(`[/api/image/generate] Applied constraints to prompt (size: ${normalizedSize})`);
     }
 
-    // Safety check: validate constraints are present
+    // Safety check: validate constraints are present (including landscape framing if applicable)
     try {
-      assertPromptHasConstraints(finalPrompt);
+      assertPromptHasConstraints(finalPrompt, normalizedSize);
     } catch (constraintError) {
       console.error("[/api/image/generate] Constraint validation failed:", constraintError);
       return NextResponse.json(

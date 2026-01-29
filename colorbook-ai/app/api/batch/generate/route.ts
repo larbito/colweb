@@ -8,6 +8,7 @@ import {
 import {
   buildFinalColoringPrompt,
   hasRequiredConstraints,
+  type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
 
 /**
@@ -103,18 +104,19 @@ export async function POST(request: NextRequest) {
 async function generateSinglePage(
   pageNumber: number,
   prompt: string,
-  size: "1024x1024" | "1024x1536" | "1536x1024"
+  size: ImageSize
 ): Promise<PageResult> {
   const maxRetries = 2;
   let lastError: string | undefined;
 
-  // Ensure prompt has required constraints
+  // Ensure prompt has required constraints (including landscape framing if applicable)
   let finalPrompt = prompt;
-  if (!hasRequiredConstraints(prompt)) {
-    console.log(`[batch/generate] Page ${pageNumber}: Adding missing constraints`);
+  if (!hasRequiredConstraints(prompt, size)) {
+    console.log(`[batch/generate] Page ${pageNumber}: Adding missing constraints (size: ${size})`);
     finalPrompt = buildFinalColoringPrompt(prompt, {
       includeNegativeBlock: true,
       maxLength: 4000,
+      size,
     });
   }
 
@@ -128,6 +130,12 @@ async function generateSinglePage(
 - ONLY thin black outlines
 - All interiors must be WHITE
 - Simplify the design if needed`;
+        
+        // For landscape, reinforce framing on retry
+        if (size === "1536x1024") {
+          attemptPrompt += `\n- FILL THE CANVAS - zoom in so artwork fills 90-95% of the frame
+- NO large white bands at top or bottom`;
+        }
       }
 
       console.log(`[batch/generate] Page ${pageNumber}: Attempt ${attempt + 1}/${maxRetries + 1}`);

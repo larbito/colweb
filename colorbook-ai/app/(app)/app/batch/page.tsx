@@ -68,6 +68,7 @@ export default function BatchGenerationPage() {
   // Batch configuration
   const [mode, setMode] = useState<GenerationMode>("storybook");
   const [pageCount, setPageCount] = useState(6);
+  const [orientation, setOrientation] = useState<"portrait" | "landscape" | "square">("portrait");
   const [storyConfig, setStoryConfig] = useState<StoryConfig>({
     title: "",
     outline: "",
@@ -75,6 +76,13 @@ export default function BatchGenerationPage() {
     sceneVariety: "medium",
     settingConstraint: "mixed",
   });
+
+  // Helper to get image size from orientation
+  const getImageSize = () => {
+    if (orientation === "landscape") return "1536x1024";
+    if (orientation === "portrait") return "1024x1536";
+    return "1024x1024";
+  };
 
   // Pages and prompts
   const [pages, setPages] = useState<PageState[]>([]);
@@ -187,6 +195,7 @@ export default function BatchGenerationPage() {
           characterProfile: profile.characterProfile,
           sceneInventory: profile.sceneInventory,
           basePrompt: profile.basePrompt,
+          size: getImageSize(),
         }),
       });
 
@@ -243,7 +252,7 @@ export default function BatchGenerationPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pages: pendingPages.map(p => ({ page: p.page, prompt: p.prompt })),
-          size: "1024x1536",
+          size: getImageSize(),
           concurrency: 1,
         }),
       });
@@ -574,6 +583,60 @@ export default function BatchGenerationPage() {
                     <span>1 page</span>
                     <span>30 pages</span>
                   </div>
+                </div>
+
+                {/* Orientation / Size */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium">Page Orientation</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setOrientation("portrait")}
+                      className={`p-3 rounded-xl border-2 text-center transition-all ${
+                        orientation === "portrait"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-6 h-8 border-2 border-current rounded-sm" />
+                        <span className="text-xs font-medium">Portrait</span>
+                        <span className="text-[10px] text-muted-foreground">1024×1536</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setOrientation("landscape")}
+                      className={`p-3 rounded-xl border-2 text-center transition-all ${
+                        orientation === "landscape"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-8 h-6 border-2 border-current rounded-sm" />
+                        <span className="text-xs font-medium">Landscape</span>
+                        <span className="text-[10px] text-muted-foreground">1536×1024</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setOrientation("square")}
+                      className={`p-3 rounded-xl border-2 text-center transition-all ${
+                        orientation === "square"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-6 h-6 border-2 border-current rounded-sm" />
+                        <span className="text-xs font-medium">Square</span>
+                        <span className="text-[10px] text-muted-foreground">1024×1024</span>
+                      </div>
+                    </button>
+                  </div>
+                  {orientation === "landscape" && (
+                    <p className="text-xs text-amber-600">
+                      Landscape mode includes special framing to fill the wide canvas
+                    </p>
+                  )}
                 </div>
 
                 {/* Expandable Settings */}

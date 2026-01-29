@@ -92,6 +92,7 @@ export const batchPromptsRequestSchema = z.object({
   characterProfile: characterProfileSchema.optional(),
   sceneInventory: sceneInventorySchema.optional(),
   basePrompt: z.string().optional().describe("Original prompt from reference image analysis"),
+  size: z.enum(["1024x1024", "1024x1536", "1536x1024"]).default("1024x1536").describe("Image size/orientation"),
 });
 
 export type BatchPromptsRequest = z.infer<typeof batchPromptsRequestSchema>;
