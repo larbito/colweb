@@ -4,6 +4,7 @@ import { z } from "zod";
 
 /**
  * Route segment config
+ * Note: PDF is now generated client-side. This route is kept for potential future use.
  */
 export const maxDuration = 120;
 

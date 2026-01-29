@@ -14,6 +14,13 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, Download, FileText, BookOpen } from "lucide-react";
 import { toast } from "sonner";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+
+// Page sizes in points (72 points = 1 inch)
+const PAGE_SIZES = {
+  a4: { width: 595.28, height: 841.89 },
+  letter: { width: 612, height: 792 },
+};
 
 interface ExportPDFModalProps {
   isOpen: boolean;
@@ -54,15 +61,13 @@ export function ExportPDFModal({
 
   // Export state
   const [isExporting, setIsExporting] = useState(false);
-  const [isGeneratingBelongsTo, setIsGeneratingBelongsTo] = useState(false);
   const [belongsToImage, setBelongsToImage] = useState<string | null>(null);
   const [exportStep, setExportStep] = useState<string>("");
 
   // Generate the belongs-to page
-  const generateBelongsToPage = async () => {
-    if (belongsToImage) return belongsToImage; // Already generated
+  const generateBelongsToPage = async (): Promise<string | null> => {
+    if (belongsToImage) return belongsToImage;
     
-    setIsGeneratingBelongsTo(true);
     setExportStep("Generating 'Belongs To' page...");
     
     try {
@@ -74,27 +79,231 @@ export function ExportPDFModal({
           characterDescription: characterProfile?.species 
             ? `a cute ${characterProfile.species}` 
             : "a friendly cartoon animal",
-          size: pageSize === "letter" ? "1024x1536" : "1024x1536", // Portrait for books
+          size: "1024x1536",
           labelText: "This book belongs to:",
           style: "cute",
         }),
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
         throw new Error(data.error || "Failed to generate belongs-to page");
       }
 
+      const data = await response.json();
       setBelongsToImage(data.imageBase64);
       return data.imageBase64;
     } catch (error) {
       console.error("Failed to generate belongs-to page:", error);
-      toast.error("Failed to generate 'Belongs To' page");
+      toast.error("Failed to generate 'Belongs To' page. Continuing without it.");
       return null;
-    } finally {
-      setIsGeneratingBelongsTo(false);
     }
+  };
+
+  // Convert base64 to Uint8Array
+  const base64ToUint8Array = (base64: string): Uint8Array => {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  };
+
+  // Generate PDF client-side using pdf-lib
+  const generatePDF = async () => {
+    const dimensions = PAGE_SIZES[pageSize];
+    const margins = 36; // 0.5 inch
+
+    const pdfDoc = await PDFDocument.create();
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    let currentPageNum = 0;
+
+    // Helper to add page numbers
+    const addPageNumber = (page: Awaited<ReturnType<typeof pdfDoc.addPage>>, num: number) => {
+      if (!includePageNumbers) return;
+      const { width } = page.getSize();
+      page.drawText(String(num), {
+        x: width / 2 - 10,
+        y: 30,
+        size: 10,
+        font: font,
+        color: rgb(0.5, 0.5, 0.5),
+      });
+    };
+
+    // 1. BELONGS TO PAGE (if enabled)
+    if (includeBelongsTo) {
+      let finalBelongsToImage = belongsToImage;
+      if (!finalBelongsToImage) {
+        finalBelongsToImage = await generateBelongsToPage();
+      }
+
+      if (finalBelongsToImage) {
+        try {
+          const belongsToPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
+          currentPageNum++;
+          
+          const imageBytes = base64ToUint8Array(finalBelongsToImage);
+          const pngImage = await pdfDoc.embedPng(imageBytes);
+          
+          const availableWidth = dimensions.width - (margins * 2);
+          const availableHeight = dimensions.height - (margins * 2);
+          const scale = Math.min(
+            availableWidth / pngImage.width,
+            availableHeight / pngImage.height
+          );
+          const scaledWidth = pngImage.width * scale;
+          const scaledHeight = pngImage.height * scale;
+          
+          const x = (dimensions.width - scaledWidth) / 2;
+          const y = (dimensions.height - scaledHeight) / 2;
+          
+          belongsToPage.drawImage(pngImage, {
+            x,
+            y,
+            width: scaledWidth,
+            height: scaledHeight,
+          });
+          
+          addPageNumber(belongsToPage, currentPageNum);
+        } catch (imgError) {
+          console.error("Failed to embed belongs-to image:", imgError);
+        }
+      }
+    }
+
+    // 2. COPYRIGHT PAGE (if enabled)
+    if (includeCopyright) {
+      setExportStep("Adding copyright page...");
+      const copyrightPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
+      currentPageNum++;
+      
+      const { width, height } = copyrightPage.getSize();
+      const centerX = width / 2;
+      let textY = height / 2 + 50;
+      const lineHeight = 20;
+      
+      // Copyright line
+      const copyrightLine = `Copyright © ${year} ${author || ""}`.trim();
+      const copyrightWidth = fontBold.widthOfTextAtSize(copyrightLine, 12);
+      copyrightPage.drawText(copyrightLine, {
+        x: centerX - copyrightWidth / 2,
+        y: textY,
+        size: 12,
+        font: fontBold,
+        color: rgb(0, 0, 0),
+      });
+      textY -= lineHeight * 2;
+      
+      // All rights reserved
+      const rightsText = "All rights reserved.";
+      const rightsWidth = font.widthOfTextAtSize(rightsText, 10);
+      copyrightPage.drawText(rightsText, {
+        x: centerX - rightsWidth / 2,
+        y: textY,
+        size: 10,
+        font: font,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+      textY -= lineHeight * 2;
+      
+      // No reproduction text
+      const lines = [
+        "No part of this book may be reproduced, stored, or",
+        "transmitted in any form without written permission,",
+        "except for personal use.",
+      ];
+      
+      lines.forEach(line => {
+        const lineWidth = font.widthOfTextAtSize(line, 9);
+        copyrightPage.drawText(line, {
+          x: centerX - lineWidth / 2,
+          y: textY,
+          size: 9,
+          font: font,
+          color: rgb(0.3, 0.3, 0.3),
+        });
+        textY -= lineHeight;
+      });
+      
+      // Website
+      if (website) {
+        textY -= lineHeight;
+        const websiteWidth = font.widthOfTextAtSize(website, 9);
+        copyrightPage.drawText(website, {
+          x: centerX - websiteWidth / 2,
+          y: textY,
+          size: 9,
+          font: font,
+          color: rgb(0.3, 0.3, 0.3),
+        });
+      }
+      
+      // Created with
+      if (includeCreatedWith) {
+        textY -= lineHeight * 2;
+        const createdText = "Created with ColorBookAI";
+        const createdWidth = font.widthOfTextAtSize(createdText, 8);
+        copyrightPage.drawText(createdText, {
+          x: centerX - createdWidth / 2,
+          y: textY,
+          size: 8,
+          font: font,
+          color: rgb(0.5, 0.5, 0.5),
+        });
+      }
+      
+      addPageNumber(copyrightPage, currentPageNum);
+    }
+
+    // 3. COLORING PAGES
+    for (let i = 0; i < coloringPages.length; i++) {
+      setExportStep(`Adding page ${i + 1} of ${coloringPages.length}...`);
+      const pageData = coloringPages[i];
+      
+      try {
+        const coloringPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
+        currentPageNum++;
+        
+        const imageBytes = base64ToUint8Array(pageData.imageBase64);
+        const pngImage = await pdfDoc.embedPng(imageBytes);
+        
+        const availableWidth = dimensions.width - (margins * 2);
+        const availableHeight = dimensions.height - (margins * 2);
+        const scale = Math.min(
+          availableWidth / pngImage.width,
+          availableHeight / pngImage.height
+        );
+        const scaledWidth = pngImage.width * scale;
+        const scaledHeight = pngImage.height * scale;
+        
+        const x = (dimensions.width - scaledWidth) / 2;
+        const y = (dimensions.height - scaledHeight) / 2;
+        
+        coloringPage.drawImage(pngImage, {
+          x,
+          y,
+          width: scaledWidth,
+          height: scaledHeight,
+        });
+        
+        addPageNumber(coloringPage, currentPageNum);
+        
+        // Add blank page after (if enabled and not the last page)
+        if (insertBlankPages && i < coloringPages.length - 1) {
+          pdfDoc.addPage([dimensions.width, dimensions.height]);
+          currentPageNum++;
+        }
+      } catch (imgError) {
+        console.error(`Failed to embed page ${pageData.page}:`, imgError);
+        toast.error(`Failed to add page ${pageData.page}`);
+      }
+    }
+
+    return { pdfDoc, pageCount: currentPageNum };
   };
 
   // Export to PDF
@@ -112,50 +321,18 @@ export function ExportPDFModal({
     setIsExporting(true);
 
     try {
-      // Generate belongs-to page if needed
-      let finalBelongsToImage = belongsToImage;
-      if (includeBelongsTo && !belongsToImage) {
-        finalBelongsToImage = await generateBelongsToPage();
-      }
-
       setExportStep("Creating PDF...");
-
-      // Call the PDF export endpoint
-      const response = await fetch("/api/export/pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          author: author || undefined,
-          year: parseInt(year) || new Date().getFullYear(),
-          website: website || undefined,
-          pageSize,
-          orientation: "portrait",
-          margins: 36, // 0.5 inch
-          insertBlankPages,
-          includeBelongsTo: includeBelongsTo && !!finalBelongsToImage,
-          includeCopyright,
-          includePageNumbers,
-          includeCreatedWith,
-          belongsToImage: finalBelongsToImage || undefined,
-          coloringPages,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to create PDF");
-      }
-
+      
+      const { pdfDoc, pageCount } = await generatePDF();
+      
       setExportStep("Downloading...");
-
-      // Download the PDF
-      const pdfBlob = new Blob(
-        [Buffer.from(data.pdfBase64, "base64")],
-        { type: "application/pdf" }
-      );
-      const url = URL.createObjectURL(pdfBlob);
+      
+      // Generate PDF bytes
+      const pdfBytes = await pdfDoc.save();
+      
+      // Download
+      const blob = new Blob([pdfBytes as BlobPart], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = `${title.replace(/[^a-zA-Z0-9]/g, "_")}_coloring_book.pdf`;
@@ -164,10 +341,11 @@ export function ExportPDFModal({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      toast.success(`PDF exported! (${data.pageCount} pages)`);
+      toast.success(`PDF exported! (${pageCount} pages)`);
       onClose();
 
     } catch (error) {
+      console.error("Export error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to export PDF");
     } finally {
       setIsExporting(false);
@@ -336,12 +514,12 @@ export function ExportPDFModal({
           <div className="rounded-lg bg-muted/50 p-3 text-sm">
             <p className="font-medium">PDF Preview:</p>
             <ul className="mt-1 space-y-1 text-muted-foreground">
-              {includeBelongsTo && <li>• "Belongs To" page</li>}
+              {includeBelongsTo && <li>• &quot;Belongs To&quot; page</li>}
               {includeCopyright && <li>• Copyright page</li>}
               <li>• {availablePages.length} coloring pages</li>
-              {insertBlankPages && <li>• {availablePages.length - 1} blank pages (between drawings)</li>}
+              {insertBlankPages && <li>• {Math.max(0, availablePages.length - 1)} blank pages (between drawings)</li>}
               <li className="pt-1 text-xs">
-                Total: ~{(includeBelongsTo ? 1 : 0) + (includeCopyright ? 1 : 0) + availablePages.length + (insertBlankPages ? availablePages.length - 1 : 0)} pages
+                Total: ~{(includeBelongsTo ? 1 : 0) + (includeCopyright ? 1 : 0) + availablePages.length + (insertBlankPages ? Math.max(0, availablePages.length - 1) : 0)} pages
               </li>
             </ul>
           </div>
@@ -369,4 +547,3 @@ export function ExportPDFModal({
     </Dialog>
   );
 }
-
