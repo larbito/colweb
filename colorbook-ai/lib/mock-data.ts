@@ -40,7 +40,6 @@ export interface UserProfile {
   name: string;
   email: string;
   avatarInitials: string;
-  avatarUrl?: string;
   plan: "free" | "creator" | "pro";
   createdAt: string;
 }
@@ -51,8 +50,7 @@ export const mockUser: UserProfile = {
   name: "Alex Johnson",
   email: "alex@example.com",
   avatarInitials: "AJ",
-  avatarUrl: undefined, // Set to a URL string if user has uploaded an avatar
-  plan: "creator",
+  plan: "free",
   createdAt: "2024-01-01",
 };
 
@@ -182,16 +180,3 @@ export function formatRelativeTime(dateString: string): string {
   return formatDate(dateString);
 }
 
-// Avatar helper - generates gradient based on initials
-export function getAvatarGradient(initials: string): string {
-  const colors = [
-    "from-violet-500 to-purple-600",
-    "from-blue-500 to-cyan-500",
-    "from-pink-500 to-rose-500",
-    "from-amber-500 to-orange-500",
-    "from-emerald-500 to-teal-500",
-    "from-indigo-500 to-violet-500",
-  ];
-  const index = initials.charCodeAt(0) % colors.length;
-  return colors[index];
-}

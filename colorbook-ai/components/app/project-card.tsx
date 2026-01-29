@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusPill } from "./status-pill";
 import { ProgressBar } from "./progress-bar";
-import { MoreHorizontal, Play, Download, Eye, FolderOpen } from "lucide-react";
+import { MoreHorizontal, Play, Download, Eye } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,64 +24,40 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const readyPages = project.pages.filter((p) => p.status === "ready").length;
   const totalPages = project.pages.length;
 
-  // Get first ready page image as thumbnail
-  const thumbnailPage = project.pages.find(p => p.imageUrl);
-
   return (
-    <Card className="group overflow-hidden transition-all hover:border-primary/20 hover:shadow-lg hover:shadow-primary/5">
-      {/* Thumbnail area */}
-      <div className="aspect-[4/3] bg-muted/50 relative overflow-hidden">
-        {thumbnailPage?.imageUrl ? (
-          <img 
-            src={thumbnailPage.imageUrl} 
-            alt={project.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <FolderOpen className="h-12 w-12 text-muted-foreground/30" />
-          </div>
-        )}
-        {/* Status overlay */}
-        <div className="absolute top-2 right-2">
-          <StatusPill status={project.status} />
-        </div>
-      </div>
-      
-      <CardContent className="p-4">
-        <div className="mb-3 flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
+    <Card className="group border-border/50 bg-card/60 backdrop-blur transition-all hover:border-border hover:bg-card hover:shadow-lg">
+      <CardContent className="p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <div className="flex-1">
             <Link
               href={`/app/projects/${project.id}`}
-              className="font-semibold hover:text-primary transition-colors line-clamp-1"
+              className="font-semibold hover:text-primary"
             >
               {project.title}
             </Link>
-            <div className="mt-1.5 flex items-center gap-2">
-              <Badge variant="secondary" className="text-[10px] font-medium">
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="text-xs">
                 {project.trimSize}
               </Badge>
-              <span className="text-xs text-muted-foreground">
-                {totalPages} pages
-              </span>
+              <StatusPill status={project.status} />
             </div>
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem asChild className="cursor-pointer">
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
                 <Link href={`/app/projects/${project.id}`}>
                   <Eye className="mr-2 h-4 w-4" /> View Project
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
+              <DropdownMenuItem>
                 <Play className="mr-2 h-4 w-4" /> Continue Generating
               </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
+              <DropdownMenuItem>
                 <Download className="mr-2 h-4 w-4" /> Export PDF
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -94,10 +70,12 @@ export function ProjectCard({ project }: ProjectCardProps) {
           </div>
         )}
 
-        <div className="text-[11px] text-muted-foreground">
-          Updated {formatDate(project.updatedAt)}
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{totalPages} pages</span>
+          <span>Updated {formatDate(project.updatedAt)}</span>
         </div>
       </CardContent>
     </Card>
   );
 }
+

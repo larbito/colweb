@@ -3,20 +3,23 @@
 import Link from "next/link";
 import { SidebarNav } from "./sidebar-nav";
 import { UserMenu } from "./user-menu";
-import { Sparkles } from "lucide-react";
 
 export function AppSidebar() {
   return (
-    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-64 flex-col border-r border-border/50 bg-card/80 backdrop-blur-xl lg:flex">
+    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-64 flex-col border-r border-border bg-card/50 backdrop-blur-sm lg:flex">
       {/* Logo */}
-      <div className="flex h-16 items-center gap-3 border-b border-border/50 px-6">
-        <Link href="/app" className="flex items-center gap-3 font-semibold group">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 shadow-lg shadow-primary/25 group-hover:shadow-primary/40 transition-shadow">
-            <Sparkles className="h-5 w-5 text-white" />
-          </div>
-          <span className="text-lg font-bold">
-            ColorBook<span className="text-primary">AI</span>
-          </span>
+      <div className="flex h-16 items-center gap-2.5 border-b border-border px-6">
+        <Link href="/app" className="flex items-center gap-2.5 font-semibold">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="text-primary">
+            <rect width="28" height="28" rx="8" fill="currentColor" fillOpacity="0.15" />
+            <path
+              d="M8 10C8 8.89543 8.89543 8 10 8H18C19.1046 8 20 8.89543 20 10V18C20 19.1046 19.1046 20 18 20H10C8.89543 20 8 19.1046 8 18V10Z"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+            <path d="M11 12H17M11 15H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          <span>ColorBook AI</span>
         </Link>
       </div>
 
@@ -25,24 +28,11 @@ export function AppSidebar() {
         <SidebarNav />
       </div>
 
-      {/* Upgrade Banner (for free users) */}
-      <div className="mx-3 mb-3">
-        <div className="rounded-xl bg-gradient-to-br from-violet-500/10 to-purple-600/10 border border-primary/20 p-4">
-          <p className="text-sm font-semibold mb-1">Upgrade to Pro</p>
-          <p className="text-xs text-muted-foreground mb-3">Unlock unlimited pages and premium features</p>
-          <Link 
-            href="/pricing" 
-            className="inline-flex items-center justify-center text-xs font-medium px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            View Plans
-          </Link>
-        </div>
-      </div>
-
       {/* User */}
-      <div className="border-t border-border/50 p-3">
+      <div className="border-t border-border p-3">
         <UserMenu />
       </div>
     </aside>
   );
 }
+

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { AppTopbar } from "@/components/app/app-topbar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -16,10 +17,12 @@ import {
   X,
   Book,
   Palette,
+  ArrowRight,
   Download,
   RefreshCw,
   Eye,
   Play,
+  Settings2,
   CheckCircle2,
   XCircle,
   Clock,
@@ -30,10 +33,6 @@ import {
   Home,
   TreePine,
   Shuffle,
-  Settings2,
-  Layers,
-  Zap,
-  HelpCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ImagePreviewModal } from "@/components/app/image-preview-modal";
@@ -55,7 +54,7 @@ interface PageState extends PagePromptItem {
   isEditing?: boolean;
 }
 
-export default function StyleClonePage() {
+export default function BatchGenerationPage() {
   // ==================== State ====================
   
   // Image upload
@@ -162,7 +161,7 @@ export default function StyleClonePage() {
       }
 
       setProfile(data as ProfileFromImageResponse);
-      toast.success("Style extracted! Configure your batch and generate prompts.");
+      toast.success("Profile extracted! Configure your batch and generate prompts.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to extract profile");
     } finally {
@@ -306,7 +305,7 @@ export default function StyleClonePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pages: [{ page: page.page, prompt: page.prompt }],
-          size: getImageSize(),
+          size: "1024x1536",
           concurrency: 1,
         }),
       });
@@ -377,21 +376,21 @@ export default function StyleClonePage() {
   const getStatusIcon = (status: PageStatus) => {
     switch (status) {
       case "pending": return <Clock className="h-4 w-4 text-muted-foreground" />;
-      case "generating": return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
+      case "generating": return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
       case "done": return <CheckCircle2 className="h-4 w-4 text-green-500" />;
       case "failed": return <XCircle className="h-4 w-4 text-red-500" />;
     }
   };
 
   const getStatusBadge = (status: PageStatus) => {
-    const config: Record<PageStatus, { variant: "secondary" | "default" | "destructive" | "outline"; className: string }> = {
-      pending: { variant: "secondary", className: "bg-muted text-muted-foreground" },
-      generating: { variant: "default", className: "bg-primary/10 text-primary border-primary/20" },
-      done: { variant: "default", className: "bg-green-500/10 text-green-600 border-green-500/20" },
-      failed: { variant: "destructive", className: "" },
+    const variants: Record<PageStatus, "secondary" | "default" | "destructive" | "outline"> = {
+      pending: "secondary",
+      generating: "default",
+      done: "default",
+      failed: "destructive",
     };
     return (
-      <Badge variant={config[status].variant} className={`text-[10px] font-medium ${config[status].className}`}>
+      <Badge variant={variants[status]} className="text-xs">
         {status}
       </Badge>
     );
@@ -404,118 +403,47 @@ export default function StyleClonePage() {
 
   return (
     <>
-      {/* Page Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="mx-auto max-w-6xl px-6 py-6">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-                  <Wand2 className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <h1 className="text-2xl font-semibold tracking-tight">Style Clone</h1>
-                  <p className="text-sm text-muted-foreground">
-                    Generate multiple coloring pages from one reference image
-                  </p>
-                </div>
-              </div>
-            </div>
-            {pages.length > 0 && (
-              <div className="flex items-center gap-2">
-                <div className="text-right mr-4">
-                  <p className="text-2xl font-semibold tabular-nums">
-                    {doneCount}<span className="text-muted-foreground text-base">/{pages.length}</span>
-                  </p>
-                  <p className="text-xs text-muted-foreground">Pages complete</p>
-                </div>
-                {doneCount > 0 && (
-                  <Button onClick={downloadAll} variant="outline" className="rounded-xl gap-2">
-                    <Download className="h-4 w-4" />
-                    Download All
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+      <AppTopbar 
+        title="Style Clone" 
+        subtitle="Generate multiple coloring pages from one reference" 
+      />
 
-      <main className="py-8 px-6">
-        <div className="mx-auto max-w-6xl">
-          {/* Workflow Steps */}
-          <div className="grid gap-6 lg:grid-cols-3 mb-8">
-            {/* Step 1 */}
-            <div className={`relative rounded-2xl border-2 transition-all duration-300 ${
-              !profile ? "border-primary bg-primary/5" : "border-green-500/50 bg-green-500/5"
-            }`}>
-              <div className="absolute -top-3 left-4">
-                <Badge className={`rounded-full px-3 ${!profile ? "bg-primary" : "bg-green-500"}`}>
-                  {!profile ? "Step 1" : <CheckCircle2 className="h-3 w-3" />}
-                </Badge>
-              </div>
-              <div className="p-5 pt-6">
-                <h3 className="font-semibold mb-1">Upload Reference</h3>
-                <p className="text-xs text-muted-foreground mb-4">
-                  Upload a coloring page to extract its style
-                </p>
-                
+      <main className="p-4 lg:p-6">
+        <div className="mx-auto max-w-6xl space-y-6">
+          
+          {/* Step 1: Upload Reference Image */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Upload className="h-5 w-5" />
+                Step 1: Upload Reference Image
+              </CardTitle>
+              <CardDescription>
+                Upload a coloring page to use as a style and character reference
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-4 items-start">
                 {uploadedImagePreview ? (
-                  <div className="flex gap-4">
-                    <div className="relative shrink-0 group">
-                      <img
-                        src={uploadedImagePreview}
-                        alt="Reference"
-                        className="w-24 h-32 object-contain rounded-xl border bg-white shadow-sm"
-                      />
-                      <Button
-                        variant="destructive"
-                        size="icon"
-                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={removeUploadedImage}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      {profile ? (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-1.5 text-green-600">
-                            <CheckCircle2 className="h-4 w-4" />
-                            <span className="text-sm font-medium">Style Extracted</span>
-                          </div>
-                          {profile.characterProfile && (
-                            <p className="text-xs text-muted-foreground truncate">
-                              Character: <span className="text-foreground">{profile.characterProfile.species}</span>
-                            </p>
-                          )}
-                          {profile.extractedTheme && (
-                            <p className="text-xs text-muted-foreground truncate">
-                              Theme: <span className="text-foreground">{profile.extractedTheme}</span>
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <Button
-                          onClick={extractProfile}
-                          disabled={extractingProfile}
-                          size="sm"
-                          className="rounded-xl w-full gradient-primary border-0"
-                        >
-                          {extractingProfile ? (
-                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing...</>
-                          ) : (
-                            <><Sparkles className="mr-2 h-4 w-4" /> Extract Style</>
-                          )}
-                        </Button>
-                      )}
-                    </div>
+                  <div className="relative shrink-0">
+                    <img
+                      src={uploadedImagePreview}
+                      alt="Reference"
+                      className="w-40 h-52 object-contain rounded-xl border border-border bg-white"
+                    />
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      className="absolute -top-2 -right-2 h-7 w-7 rounded-full"
+                      onClick={removeUploadedImage}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
                   </div>
                 ) : (
-                  <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed rounded-xl cursor-pointer hover:border-primary hover:bg-primary/5 transition-all bg-background/50">
-                    <Upload className="h-6 w-6 text-muted-foreground mb-2" />
-                    <span className="text-xs text-muted-foreground">Click to upload</span>
-                    <span className="text-[10px] text-muted-foreground/60 mt-1">PNG, JPG up to 10MB</span>
+                  <label className="flex flex-col items-center justify-center w-40 h-52 border-2 border-dashed border-border rounded-xl cursor-pointer hover:border-primary transition-colors bg-muted/30">
+                    <ImageIcon className="h-8 w-8 text-muted-foreground mb-2" />
+                    <span className="text-xs text-muted-foreground text-center px-2">Click to upload</span>
                     <input
                       type="file"
                       accept="image/png,image/jpeg,image/jpg"
@@ -524,461 +452,519 @@ export default function StyleClonePage() {
                     />
                   </label>
                 )}
-              </div>
-            </div>
 
-            {/* Step 2 */}
-            <div className={`relative rounded-2xl border-2 transition-all duration-300 ${
-              !profile ? "border-muted opacity-60" : 
-              pages.length === 0 ? "border-primary bg-primary/5" : "border-green-500/50 bg-green-500/5"
-            }`}>
-              <div className="absolute -top-3 left-4">
-                <Badge className={`rounded-full px-3 ${
-                  !profile ? "bg-muted text-muted-foreground" : 
-                  pages.length === 0 ? "bg-primary" : "bg-green-500"
-                }`}>
-                  {pages.length > 0 ? <CheckCircle2 className="h-3 w-3" /> : "Step 2"}
-                </Badge>
-              </div>
-              <div className="p-5 pt-6">
-                <h3 className="font-semibold mb-1">Configure Pages</h3>
-                <p className="text-xs text-muted-foreground mb-4">
-                  Choose mode, page count, and settings
-                </p>
-                
-                {profile ? (
-                  <div className="space-y-4">
-                    {/* Mode Toggle */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => setMode("storybook")}
-                        disabled={!profile.characterProfile}
-                        className={`p-2.5 rounded-xl border-2 text-left transition-all ${
-                          mode === "storybook" 
-                            ? "border-primary bg-primary/10" 
-                            : "border-border hover:border-primary/50"
-                        } ${!profile.characterProfile ? "opacity-50" : ""}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Book className="h-4 w-4" />
-                          <span className="text-xs font-medium">Storybook</span>
-                        </div>
-                      </button>
-                      <button
-                        onClick={() => setMode("theme")}
-                        className={`p-2.5 rounded-xl border-2 text-left transition-all ${
-                          mode === "theme" 
-                            ? "border-primary bg-primary/10" 
-                            : "border-border hover:border-primary/50"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Palette className="h-4 w-4" />
-                          <span className="text-xs font-medium">Theme</span>
-                        </div>
-                      </button>
-                    </div>
-
-                    {/* Page Count */}
-                    <div>
-                      <div className="flex justify-between text-xs mb-2">
-                        <span className="text-muted-foreground">Pages</span>
-                        <span className="font-mono font-semibold">{pageCount}</span>
+                <div className="flex-1 space-y-3">
+                  {profile ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
+                        <span className="font-medium">Profile Extracted</span>
                       </div>
-                      <Slider
-                        value={[pageCount]}
-                        onValueChange={(v) => setPageCount(v[0])}
-                        min={1}
-                        max={30}
-                        step={1}
-                      />
+                      {profile.characterProfile && (
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Character:</span>{" "}
+                          <span className="font-medium">{profile.characterProfile.species}</span>
+                          <span className="text-muted-foreground ml-2">
+                            ({profile.characterProfile.keyFeatures.slice(0, 3).join(", ")})
+                          </span>
+                        </div>
+                      )}
+                      {profile.extractedTheme && (
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Theme:</span>{" "}
+                          <span>{profile.extractedTheme}</span>
+                        </div>
+                      )}
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Scene elements:</span>{" "}
+                        <span>{profile.sceneInventory.slice(0, 5).join(", ")}</span>
+                      </div>
                     </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Upload an image, then click "Extract Profile" to analyze the style and character.
+                    </p>
+                  )}
 
-                    {/* Orientation Quick Select */}
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {(["portrait", "landscape", "square"] as const).map((o) => (
-                        <button
-                          key={o}
-                          onClick={() => setOrientation(o)}
-                          className={`p-2 rounded-lg border text-center transition-all ${
-                            orientation === o ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
-                          }`}
-                        >
-                          <div className={`mx-auto mb-1 border-2 border-current rounded-sm ${
-                            o === "portrait" ? "w-3 h-4" : o === "landscape" ? "w-4 h-3" : "w-3 h-3"
-                          }`} />
-                          <span className="text-[10px] capitalize">{o}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="h-32 flex items-center justify-center text-muted-foreground text-xs">
-                    Upload an image first
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Step 3 */}
-            <div className={`relative rounded-2xl border-2 transition-all duration-300 ${
-              pages.length === 0 ? "border-muted opacity-60" : "border-primary bg-primary/5"
-            }`}>
-              <div className="absolute -top-3 left-4">
-                <Badge className={`rounded-full px-3 ${pages.length === 0 ? "bg-muted text-muted-foreground" : "bg-primary"}`}>
-                  Step 3
-                </Badge>
-              </div>
-              <div className="p-5 pt-6">
-                <h3 className="font-semibold mb-1">Generate Pages</h3>
-                <p className="text-xs text-muted-foreground mb-4">
-                  Review prompts and generate images
-                </p>
-                
-                {pages.length > 0 ? (
-                  <div className="space-y-3">
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={generateAllImages}
-                        disabled={isGenerating || pendingCount === 0}
-                        size="sm"
-                        className="flex-1 rounded-xl gradient-primary border-0"
-                      >
-                        {isGenerating ? (
-                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                        ) : (
-                          <><Zap className="mr-2 h-4 w-4" /> Generate ({pendingCount})</>
-                        )}
-                      </Button>
-                    </div>
+                  {uploadedImageBase64 && !profile && (
                     <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={generatePrompts}
-                      disabled={generatingPrompts}
-                      className="w-full rounded-xl"
+                      onClick={extractProfile}
+                      disabled={extractingProfile}
+                      className="rounded-xl"
                     >
-                      <RefreshCw className="mr-2 h-3 w-3" /> Regenerate Prompts
+                      {extractingProfile ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing...</>
+                      ) : (
+                        <><Wand2 className="mr-2 h-4 w-4" /> Extract Profile</>
+                      )}
                     </Button>
-                  </div>
-                ) : profile ? (
-                  <Button
-                    onClick={generatePrompts}
-                    disabled={generatingPrompts}
-                    size="sm"
-                    className="w-full rounded-xl gradient-primary border-0"
-                  >
-                    {generatingPrompts ? (
-                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</>
-                    ) : (
-                      <><Sparkles className="mr-2 h-4 w-4" /> Create {pageCount} Prompts</>
-                    )}
-                  </Button>
-                ) : (
-                  <div className="h-20 flex items-center justify-center text-muted-foreground text-xs">
-                    Configure pages first
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Advanced Settings (Collapsible) */}
-          {profile && (
-            <Card className="mb-8 border-dashed">
-              <button
-                onClick={() => setExpandedSettings(!expandedSettings)}
-                className="w-full p-4 flex items-center justify-between text-sm font-medium hover:bg-muted/50 rounded-xl transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <Settings2 className="h-4 w-4 text-muted-foreground" />
-                  <span>Advanced Settings</span>
+                  )}
                 </div>
-                {expandedSettings ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </button>
+              </div>
+            </CardContent>
+          </Card>
 
-              {expandedSettings && (
-                <CardContent className="pt-0 pb-4 space-y-4 border-t">
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 pt-4">
-                    {/* Story Title */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-muted-foreground">Story/Theme Title</label>
-                      <Input
-                        placeholder="e.g., Luna's Adventure"
-                        value={storyConfig.title || ""}
-                        onChange={(e) => setStoryConfig({ ...storyConfig, title: e.target.value })}
-                        className="rounded-xl h-9 text-sm"
-                      />
-                    </div>
-
-                    {/* Target Age */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-muted-foreground">Target Age</label>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {(["3-6", "6-9", "9-12", "all-ages"] as const).map((age) => (
-                          <Button
-                            key={age}
-                            variant={storyConfig.targetAge === age ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setStoryConfig({ ...storyConfig, targetAge: age })}
-                            className="rounded-lg h-7 text-xs px-2"
-                          >
-                            {age === "all-ages" ? "All" : age}
-                          </Button>
-                        ))}
+          {/* Step 2: Configure Batch */}
+          {profile && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Settings2 className="h-5 w-5" />
+                  Step 2: Configure Batch
+                </CardTitle>
+                <CardDescription>
+                  Choose mode, page count, and story settings
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Mode Selection */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium">Generation Mode</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => setMode("storybook")}
+                      disabled={!profile.characterProfile}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${
+                        mode === "storybook" 
+                          ? "border-primary bg-primary/5" 
+                          : "border-border hover:border-primary/50"
+                      } ${!profile.characterProfile ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Book className="h-5 w-5" />
+                        <span className="font-medium">Storybook</span>
+                        {mode === "storybook" && <CheckCircle2 className="h-4 w-4 text-primary ml-auto" />}
                       </div>
-                    </div>
+                      <p className="text-xs text-muted-foreground">
+                        Same character on every page, story progression
+                      </p>
+                      {!profile.characterProfile && (
+                        <p className="text-xs text-amber-600 mt-1">
+                          No character detected in image
+                        </p>
+                      )}
+                    </button>
 
-                    {/* Scene Variety */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-muted-foreground">Scene Variety</label>
-                      <div className="flex gap-1.5">
-                        {(["low", "medium", "high"] as const).map((level) => (
-                          <Button
-                            key={level}
-                            variant={storyConfig.sceneVariety === level ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setStoryConfig({ ...storyConfig, sceneVariety: level })}
-                            className="rounded-lg h-7 text-xs px-2 capitalize"
-                          >
-                            {level}
-                          </Button>
-                        ))}
+                    <button
+                      onClick={() => setMode("theme")}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${
+                        mode === "theme" 
+                          ? "border-primary bg-primary/5" 
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Palette className="h-5 w-5" />
+                        <span className="font-medium">Theme Scenes</span>
+                        {mode === "theme" && <CheckCircle2 className="h-4 w-4 text-primary ml-auto" />}
                       </div>
-                    </div>
-
-                    {/* Setting */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-muted-foreground">Setting</label>
-                      <div className="flex gap-1.5">
-                        <Button
-                          variant={storyConfig.settingConstraint === "indoors" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "indoors" })}
-                          className="rounded-lg h-7 text-xs px-2"
-                        >
-                          <Home className="mr-1 h-3 w-3" /> In
-                        </Button>
-                        <Button
-                          variant={storyConfig.settingConstraint === "outdoors" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "outdoors" })}
-                          className="rounded-lg h-7 text-xs px-2"
-                        >
-                          <TreePine className="mr-1 h-3 w-3" /> Out
-                        </Button>
-                        <Button
-                          variant={storyConfig.settingConstraint === "mixed" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "mixed" })}
-                          className="rounded-lg h-7 text-xs px-2"
-                        >
-                          <Shuffle className="mr-1 h-3 w-3" /> Mix
-                        </Button>
-                      </div>
-                    </div>
+                      <p className="text-xs text-muted-foreground">
+                        Same style, varied scenes and characters
+                      </p>
+                    </button>
                   </div>
-                </CardContent>
-              )}
+                </div>
+
+                {/* Page Count */}
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <label className="text-sm font-medium">Number of Pages</label>
+                    <span className="text-sm font-mono bg-muted px-2 rounded">{pageCount}</span>
+                  </div>
+                  <Slider
+                    value={[pageCount]}
+                    onValueChange={(v) => setPageCount(v[0])}
+                    min={1}
+                    max={30}
+                    step={1}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>1 page</span>
+                    <span>30 pages</span>
+                  </div>
+                </div>
+
+                {/* Orientation / Size */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium">Page Orientation</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setOrientation("portrait")}
+                      className={`p-3 rounded-xl border-2 text-center transition-all ${
+                        orientation === "portrait"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-6 h-8 border-2 border-current rounded-sm" />
+                        <span className="text-xs font-medium">Portrait</span>
+                        <span className="text-[10px] text-muted-foreground">1024×1536</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setOrientation("landscape")}
+                      className={`p-3 rounded-xl border-2 text-center transition-all ${
+                        orientation === "landscape"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-8 h-6 border-2 border-current rounded-sm" />
+                        <span className="text-xs font-medium">Landscape</span>
+                        <span className="text-[10px] text-muted-foreground">1536×1024</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setOrientation("square")}
+                      className={`p-3 rounded-xl border-2 text-center transition-all ${
+                        orientation === "square"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-6 h-6 border-2 border-current rounded-sm" />
+                        <span className="text-xs font-medium">Square</span>
+                        <span className="text-[10px] text-muted-foreground">1024×1024</span>
+                      </div>
+                    </button>
+                  </div>
+                  {orientation === "landscape" && (
+                    <p className="text-xs text-amber-600">
+                      Landscape mode includes special framing to fill the wide canvas
+                    </p>
+                  )}
+                </div>
+
+                {/* Expandable Settings */}
+                <div className="border rounded-xl">
+                  <button
+                    onClick={() => setExpandedSettings(!expandedSettings)}
+                    className="w-full p-3 flex items-center justify-between text-sm font-medium hover:bg-muted/50 rounded-xl"
+                  >
+                    <span>Advanced Settings</span>
+                    {expandedSettings ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </button>
+
+                  {expandedSettings && (
+                    <div className="p-4 pt-0 space-y-4 border-t">
+                      {/* Story Title */}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Story/Theme Title (optional)</label>
+                        <Input
+                          placeholder="e.g., 'Luna's Magical Day'"
+                          value={storyConfig.title || ""}
+                          onChange={(e) => setStoryConfig({ ...storyConfig, title: e.target.value })}
+                          className="rounded-xl"
+                        />
+                      </div>
+
+                      {/* Target Age */}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Target Age Group</label>
+                        <div className="flex gap-2 flex-wrap">
+                          {(["3-6", "6-9", "9-12", "all-ages"] as const).map((age) => (
+                            <Button
+                              key={age}
+                              variant={storyConfig.targetAge === age ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setStoryConfig({ ...storyConfig, targetAge: age })}
+                              className="rounded-lg"
+                            >
+                              <Users className="mr-1 h-3 w-3" />
+                              {age === "all-ages" ? "All Ages" : `Ages ${age}`}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Scene Variety */}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Scene Variety</label>
+                        <div className="flex gap-2">
+                          {(["low", "medium", "high"] as const).map((level) => (
+                            <Button
+                              key={level}
+                              variant={storyConfig.sceneVariety === level ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setStoryConfig({ ...storyConfig, sceneVariety: level })}
+                              className="rounded-lg capitalize"
+                            >
+                              <Shuffle className="mr-1 h-3 w-3" />
+                              {level}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Setting Constraint */}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Setting</label>
+                        <div className="flex gap-2">
+                          <Button
+                            variant={storyConfig.settingConstraint === "indoors" ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "indoors" })}
+                            className="rounded-lg"
+                          >
+                            <Home className="mr-1 h-3 w-3" /> Indoors
+                          </Button>
+                          <Button
+                            variant={storyConfig.settingConstraint === "outdoors" ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "outdoors" })}
+                            className="rounded-lg"
+                          >
+                            <TreePine className="mr-1 h-3 w-3" /> Outdoors
+                          </Button>
+                          <Button
+                            variant={storyConfig.settingConstraint === "mixed" ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "mixed" })}
+                            className="rounded-lg"
+                          >
+                            <Shuffle className="mr-1 h-3 w-3" /> Mixed
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Generate Prompts Button */}
+                <Button
+                  onClick={generatePrompts}
+                  disabled={generatingPrompts}
+                  size="lg"
+                  className="w-full rounded-xl"
+                >
+                  {generatingPrompts ? (
+                    <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Prompts...</>
+                  ) : (
+                    <><Sparkles className="mr-2 h-5 w-5" /> Generate {pageCount} Prompts</>
+                  )}
+                </Button>
+              </CardContent>
             </Card>
           )}
 
-          {/* Pages Grid */}
+          {/* Step 3: Review & Generate */}
           {pages.length > 0 && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <Layers className="h-5 w-5" />
-                  Generated Pages
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  {mode === "storybook" ? "Same character, different scenes" : "Same theme, varied content"}
-                </p>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {pages.map((page) => (
-                  <Card
-                    key={page.page}
-                    className={`overflow-hidden transition-all hover:shadow-lg ${
-                      page.status === "done" ? "border-green-500/30" : ""
-                    }`}
-                  >
-                    {/* Page Header */}
-                    <div className="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {getStatusIcon(page.status)}
-                        <span className="font-medium text-sm">Page {page.page}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {getStatusBadge(page.status)}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={() => toggleEditPage(page.page)}
-                        >
-                          <Edit3 className="h-3 w-3" />
-                        </Button>
-                      </div>
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <ImageIcon className="h-5 w-5" />
+                      Step 3: Review & Generate
+                    </CardTitle>
+                    <CardDescription>
+                      Edit prompts if needed, then generate images
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-sm">
+                      <span className="text-green-600 font-medium">{doneCount}</span>
+                      <span className="text-muted-foreground"> done</span>
+                      <span className="mx-1 text-muted-foreground">/</span>
+                      <span className="font-medium">{pages.length}</span>
+                      <span className="text-muted-foreground"> total</span>
                     </div>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Action Buttons */}
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    onClick={generateAllImages}
+                    disabled={isGenerating || pendingCount === 0}
+                    className="rounded-xl"
+                  >
+                    {isGenerating ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                    ) : (
+                      <><Play className="mr-2 h-4 w-4" /> Generate {pendingCount} Images</>
+                    )}
+                  </Button>
 
-                    {/* Content */}
-                    <CardContent className="p-3">
-                      {page.status === "done" && page.imageBase64 ? (
-                        <div className="space-y-2">
-                          <div 
-                            className={`bg-white rounded-xl border overflow-hidden cursor-pointer hover:shadow-md transition-shadow ${
-                              orientation === "landscape" ? "aspect-[3/2]" : 
-                              orientation === "square" ? "aspect-square" : "aspect-[2/3]"
-                            }`}
-                            onClick={() => setPreviewImage(`data:image/png;base64,${page.imageBase64}`)}
+                  {doneCount > 0 && (
+                    <Button
+                      variant="outline"
+                      onClick={downloadAll}
+                      className="rounded-xl"
+                    >
+                      <Download className="mr-2 h-4 w-4" /> Download All ({doneCount})
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    onClick={generatePrompts}
+                    disabled={generatingPrompts}
+                    className="rounded-xl"
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" /> Regenerate Prompts
+                  </Button>
+                </div>
+
+                {/* Pages Grid */}
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {pages.map((page) => (
+                    <div
+                      key={page.page}
+                      className="border rounded-xl overflow-hidden bg-card"
+                    >
+                      {/* Page Header */}
+                      <div className="p-3 border-b bg-muted/30 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {getStatusIcon(page.status)}
+                          <span className="font-medium text-sm">Page {page.page}</span>
+                          {getStatusBadge(page.status)}
+                        </div>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => toggleEditPage(page.page)}
                           >
-                            <img
-                              src={`data:image/png;base64,${page.imageBase64}`}
-                              alt={`Page ${page.page}`}
-                              className="w-full h-full object-contain"
-                            />
-                          </div>
-                          <div className="flex gap-1">
+                            <Edit3 className="h-3 w-3" />
+                          </Button>
+                          {(page.status === "pending" || page.status === "failed") && (
                             <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1 rounded-lg text-xs h-7"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => generateSinglePage(page.page)}
+                              disabled={isGenerating}
+                            >
+                              <Play className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className="p-3">
+                        {page.status === "done" && page.imageBase64 ? (
+                          <div className="space-y-2">
+                            <div 
+                              className="aspect-[2/3] bg-white rounded-lg border overflow-hidden cursor-pointer"
                               onClick={() => setPreviewImage(`data:image/png;base64,${page.imageBase64}`)}
                             >
-                              <Eye className="mr-1 h-3 w-3" /> View
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1 rounded-lg text-xs h-7"
-                              onClick={() => {
-                                const link = document.createElement("a");
-                                link.href = `data:image/png;base64,${page.imageBase64}`;
-                                link.download = `coloring-page-${page.page}.png`;
-                                link.click();
-                              }}
-                            >
-                              <Download className="mr-1 h-3 w-3" /> Save
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="rounded-lg text-xs h-7 px-2"
-                              onClick={() => generateSinglePage(page.page)}
-                              disabled={isGenerating}
-                            >
-                              <RefreshCw className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {page.title && (
-                            <p className="text-xs font-medium">{page.title}</p>
-                          )}
-                          {page.isEditing ? (
-                            <div className="space-y-2">
-                              <Textarea
-                                value={page.prompt}
-                                onChange={(e) => setPages(prev => prev.map(p => 
-                                  p.page === page.page ? { ...p, prompt: e.target.value } : p
-                                ))}
-                                className="text-xs min-h-[100px] rounded-lg resize-none"
+                              <img
+                                src={`data:image/png;base64,${page.imageBase64}`}
+                                alt={`Page ${page.page}`}
+                                className="w-full h-full object-contain"
                               />
-                              <div className="flex gap-1">
-                                <Button
-                                  size="sm"
-                                  onClick={() => updatePagePrompt(page.page, page.prompt)}
-                                  className="flex-1 rounded-lg text-xs h-7"
-                                >
-                                  Save
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => toggleEditPage(page.page)}
-                                  className="rounded-lg text-xs h-7"
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
                             </div>
-                          ) : (
-                            <>
-                              <div className={`bg-muted/50 rounded-lg flex items-center justify-center text-muted-foreground ${
-                                orientation === "landscape" ? "aspect-[3/2]" : 
-                                orientation === "square" ? "aspect-square" : "aspect-[2/3]"
-                              }`}>
-                                {page.status === "generating" ? (
-                                  <div className="text-center">
-                                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                                    <span className="text-xs">Generating...</span>
-                                  </div>
-                                ) : (
-                                  <ImageIcon className="h-8 w-8 opacity-30" />
-                                )}
+                            <div className="flex gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 rounded-lg text-xs"
+                                onClick={() => setPreviewImage(`data:image/png;base64,${page.imageBase64}`)}
+                              >
+                                <Eye className="mr-1 h-3 w-3" /> View
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 rounded-lg text-xs"
+                                onClick={() => {
+                                  const link = document.createElement("a");
+                                  link.href = `data:image/png;base64,${page.imageBase64}`;
+                                  link.download = `coloring-page-${page.page}.png`;
+                                  link.click();
+                                }}
+                              >
+                                <Download className="mr-1 h-3 w-3" /> Save
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-lg text-xs"
+                                onClick={() => generateSinglePage(page.page)}
+                                disabled={isGenerating}
+                              >
+                                <RefreshCw className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="text-xs font-medium text-muted-foreground">
+                              {page.title}
+                            </div>
+                            {page.isEditing ? (
+                              <div className="space-y-2">
+                                <Textarea
+                                  value={page.prompt}
+                                  onChange={(e) => setPages(prev => prev.map(p => 
+                                    p.page === page.page ? { ...p, prompt: e.target.value } : p
+                                  ))}
+                                  className="text-xs min-h-[100px] rounded-lg"
+                                />
+                                <div className="flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => updatePagePrompt(page.page, page.prompt)}
+                                    className="flex-1 rounded-lg text-xs"
+                                  >
+                                    Save
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => toggleEditPage(page.page)}
+                                    className="rounded-lg text-xs"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
                               </div>
-                              <p className="text-[10px] text-muted-foreground line-clamp-2">
-                                {page.sceneDescription || page.prompt.slice(0, 100)}...
-                              </p>
-                            </>
-                          )}
-                          {page.error && (
-                            <p className="text-[10px] text-red-500 bg-red-500/10 rounded px-2 py-1">
-                              {page.error}
-                            </p>
-                          )}
-                          {(page.status === "pending" || page.status === "failed") && !page.isEditing && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="w-full rounded-lg text-xs h-7"
-                              onClick={() => generateSinglePage(page.page)}
-                              disabled={isGenerating}
-                            >
-                              <Play className="mr-1 h-3 w-3" /> Generate
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Empty State / Help */}
-          {!profile && (
-            <Card className="border-dashed bg-muted/20">
-              <CardContent className="py-12 text-center">
-                <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500/20 to-purple-600/20 flex items-center justify-center mb-4">
-                  <Wand2 className="h-8 w-8 text-primary" />
-                </div>
-                <h3 className="text-lg font-semibold mb-2">Clone Any Coloring Style</h3>
-                <p className="text-sm text-muted-foreground max-w-md mx-auto mb-6">
-                  Upload a reference coloring page and our AI will extract its style to generate 
-                  multiple consistent pages. Perfect for creating coloring books with unified aesthetics.
-                </p>
-                <div className="flex items-center justify-center gap-8 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    <span>Consistent style</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    <span>Story progression</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    <span>KDP ready</span>
-                  </div>
+                            ) : (
+                              <div className="text-xs text-muted-foreground line-clamp-4">
+                                {page.sceneDescription || page.prompt.slice(0, 150)}...
+                              </div>
+                            )}
+                            {page.error && (
+                              <div className="text-xs text-red-500">
+                                Error: {page.error}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
           )}
+
+          {/* Info Card */}
+          <Card className="bg-muted/30 border-dashed">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <Sparkles className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium text-sm">How it works</p>
+                  <ol className="text-xs text-muted-foreground mt-1 space-y-1 list-decimal list-inside">
+                    <li>Upload a reference coloring page image</li>
+                    <li>Extract the style and character profile</li>
+                    <li>Choose Storybook (same character) or Theme (varied scenes) mode</li>
+                    <li>Generate prompts and review/edit them</li>
+                    <li>Generate all images at once or one by one</li>
+                  </ol>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </main>
 
@@ -995,3 +981,4 @@ export default function StyleClonePage() {
     </>
   );
 }
+
