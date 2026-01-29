@@ -92,16 +92,17 @@ export const FILL_CANVAS_CONSTRAINTS = `
 - Character positioned lower in frame, environment extends to edges`;
 
 /**
- * NEW: Foreground / Bottom Fill constraint - prevents empty bottom space
- * CONDENSED version to avoid overly long prompts
+ * STRICT Bottom Fill constraint - prevents empty bottom space
+ * STRENGTHENED version for better bottom coverage
  */
 export const FOREGROUND_BOTTOM_FILL_CONSTRAINTS = `
 
-=== BOTTOM FILL (MANDATORY) ===
-- Scene extends to bottom edge with visible ground (floor/grass/rug/path)
-- Add 2-4 small foreground props near bottom (toys, flowers, pebbles, etc.)
-- Main subject anchored lower (feet on ground), fills 90-95% of canvas
-- NO empty bottom area`;
+=== BOTTOM FILL (MANDATORY - STRICT) ===
+- Ground plane MUST reach the bottom edge (floorboards/grass/rug/table edge/path)
+- Place at least 3 simple foreground objects touching or very near bottom margin (<=3% from bottom)
+- Keep bottom whitespace under 4-6% of canvas height
+- Position main subject in lower third, scale up so scene fills 92-97% of canvas height
+- NO empty bottom band - ground texture/props must fill the entire bottom area`;
 
 /**
  * Additional landscape-specific framing (when size is 1536x1024)
@@ -130,10 +131,10 @@ SQUARE: Balanced composition, subject lower-center, ground at bottom edge.`;
 
 /**
  * Extra reinforcement for bottom fill, used on retries
- * CONDENSED
+ * STRENGTHENED version
  */
 export const BOTTOM_FILL_RETRY_REINFORCEMENT = `
-IMPORTANT: Fill bottom with ground/floor extending to edge, add foreground props, no empty space.`;
+CRITICAL: Extend ground and foreground objects to the bottom edge. No empty bottom band. Add floor texture (tiles/grass/wood) reaching bottom margin. Place 3+ small props (pebbles/flowers/toys) touching the bottom. Keep bottom whitespace under 5%.`;
 
 // ============================================================
 // QA AUTO-RETRY REINFORCEMENT BLOCKS

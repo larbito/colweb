@@ -35,9 +35,11 @@ import {
   X,
   Copy,
   Trash2,
+  FileDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ImagePreviewModal } from "@/components/app/image-preview-modal";
+import { ExportPDFModal } from "@/components/app/export-pdf-modal";
 import type {
   BatchPromptsResponse,
   PagePromptItem,
@@ -112,6 +114,9 @@ export default function CreateColoringBookPage() {
 
   // Preview
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // Export PDF modal
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // ==================== Helpers ====================
 
@@ -1008,13 +1013,23 @@ export default function CreateColoringBookPage() {
                   </Button>
 
                   {doneCount > 0 && (
-                    <Button
-                      variant="outline"
-                      onClick={downloadAll}
-                      className="rounded-xl"
-                    >
-                      <Download className="mr-2 h-4 w-4" /> Download All ({doneCount})
-                    </Button>
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={downloadAll}
+                        className="rounded-xl"
+                      >
+                        <Download className="mr-2 h-4 w-4" /> Download All ({doneCount})
+                      </Button>
+
+                      <Button
+                        variant="default"
+                        onClick={() => setShowExportModal(true)}
+                        className="rounded-xl"
+                      >
+                        <FileDown className="mr-2 h-4 w-4" /> Export PDF
+                      </Button>
+                    </>
                   )}
 
                   <Button
@@ -1194,6 +1209,22 @@ export default function CreateColoringBookPage() {
           pageNumber={1}
         />
       )}
+
+      {/* Export PDF Modal */}
+      <ExportPDFModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        coloringPages={pages
+          .filter(p => p.status === "done" && p.imageBase64)
+          .map(p => ({ page: p.page, imageBase64: p.imageBase64! }))}
+        characterProfile={characterIdentityProfile ? {
+          species: characterIdentityProfile.species,
+          faceShape: characterIdentityProfile.faceShape,
+          eyeStyle: characterIdentityProfile.eyeStyle,
+          proportions: characterIdentityProfile.proportions,
+        } : undefined}
+        defaultTitle={storyConfig.title || generatedIdea?.title || "My Coloring Book"}
+      />
     </>
   );
 }

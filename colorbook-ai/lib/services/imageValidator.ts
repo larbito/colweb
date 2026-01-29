@@ -19,6 +19,25 @@ import {
   parseOutlineValidationResponse,
   buildValidationRetryReinforcement,
 } from "@/lib/characterIdentity";
+import { BOTTOM_FILL_RETRY_REINFORCEMENT } from "@/lib/coloringPagePromptEnforcer";
+
+/**
+ * Result of bottom-fill validation
+ */
+export interface BottomFillValidationResult {
+  valid: boolean;
+  hasEmptyBottom: boolean;
+  bottomCoveragePercent: number;
+  confidence: number;
+  notes: string;
+}
+
+/**
+ * Extended validation result including bottom fill check
+ */
+export interface ExtendedImageValidationResult extends ImageValidationResult {
+  bottomFillValidation?: BottomFillValidationResult;
+}
 
 /**
  * Validate a generated image using OpenAI's vision model.
@@ -26,13 +45,15 @@ import {
  * @param imageBase64 - Base64 encoded image data
  * @param characterProfile - Character identity profile (for storybook mode)
  * @param validateCharacter - Whether to validate character identity
+ * @param validateBottomFill - Whether to check for empty bottom space
  * @returns Validation result with issues and retry reinforcement
  */
 export async function validateGeneratedImage(
   imageBase64: string,
   characterProfile?: CharacterIdentityProfile,
-  validateCharacter: boolean = true
-): Promise<ImageValidationResult> {
+  validateCharacter: boolean = true,
+  validateBottomFill: boolean = true
+): Promise<ExtendedImageValidationResult> {
   if (!isOpenAIConfigured()) {
     console.warn("[imageValidator] OpenAI not configured, skipping validation");
     return {
@@ -51,7 +72,7 @@ export async function validateGeneratedImage(
 
   // Run validations in parallel
   const validationPromises: Promise<unknown>[] = [
-    validateOutlineOnly(imageBase64),
+    validateOutlineAndBottomFill(imageBase64, validateBottomFill),
   ];
   
   if (validateCharacter && characterProfile) {
@@ -60,34 +81,72 @@ export async function validateGeneratedImage(
 
   const results = await Promise.all(validationPromises);
   
-  const outlineResult = results[0] as OutlineValidationResult;
+  const combinedResult = results[0] as { outline: OutlineValidationResult; bottomFill?: BottomFillValidationResult };
+  const outlineResult = combinedResult.outline;
+  const bottomFillResult = combinedResult.bottomFill;
   const characterResult = validateCharacter && characterProfile 
     ? results[1] as CharacterValidationResult 
     : undefined;
 
-  // Determine overall validity
+  // Determine overall validity (bottom fill doesn't fail validation, just triggers retry)
   const valid = outlineResult.valid && (characterResult?.valid !== false);
   
   // Build retry reinforcement if needed
-  const retryReinforcement = !valid 
+  let retryReinforcement = !valid 
     ? buildValidationRetryReinforcement(characterResult, outlineResult, characterProfile)
     : undefined;
+    
+  // Add bottom fill reinforcement if bottom is too empty
+  if (bottomFillResult && bottomFillResult.hasEmptyBottom) {
+    const bottomReinforcement = BOTTOM_FILL_RETRY_REINFORCEMENT;
+    retryReinforcement = retryReinforcement 
+      ? `${retryReinforcement}\n${bottomReinforcement}`
+      : bottomReinforcement;
+  }
 
   return {
-    valid,
+    valid: valid && !(bottomFillResult?.hasEmptyBottom),
     characterValidation: characterResult,
     outlineValidation: outlineResult,
+    bottomFillValidation: bottomFillResult,
     retryReinforcement,
   };
 }
 
 /**
- * Validate that an image follows outline-only rules.
+ * Validate outline-only rules AND bottom fill in a single API call.
+ * More efficient than two separate calls.
  */
-async function validateOutlineOnly(imageBase64: string): Promise<OutlineValidationResult> {
+async function validateOutlineAndBottomFill(
+  imageBase64: string, 
+  checkBottomFill: boolean
+): Promise<{ outline: OutlineValidationResult; bottomFill?: BottomFillValidationResult }> {
   try {
-    const systemPrompt = buildOutlineValidationPrompt();
-    
+    const combinedPrompt = `You are a strict QA validator for coloring book images.
+
+Analyze this image and check:
+1. OUTLINE RULES - no solid black fills, no grayscale, no borders
+2. BOTTOM FILL - is the bottom portion of the image properly filled with content?
+
+Respond with ONLY valid JSON (no markdown, no explanation):
+{
+  "hasBlackFills": true/false,
+  "hasGrayscale": true/false,
+  "hasUnwantedBorder": true/false,
+  "fillLocations": ["list of areas with fills, e.g., 'eye patches', 'ears'"],
+  "bottomEmptyPercent": 0-100 (estimate what % of the bottom 15% of image is empty/white),
+  "hasEmptyBottom": true/false (true if bottom 15% is more than 85% white/empty),
+  "confidence": 0.0-1.0,
+  "notes": "brief explanation"
+}
+
+Be STRICT:
+- Any solid black area larger than a thin line is a "fill"
+- Panda patches, raccoon masks, dark ears should be outlines ONLY
+- Gray shading anywhere = hasGrayscale true
+- Rectangle around the image = hasUnwantedBorder true
+- Bottom should have ground/floor/props reaching near the edge`;
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
@@ -96,38 +155,72 @@ async function validateOutlineOnly(imageBase64: string): Promise<OutlineValidati
           content: [
             {
               type: "text",
-              text: systemPrompt,
+              text: combinedPrompt,
             },
             {
               type: "image_url",
               image_url: {
                 url: `data:image/png;base64,${imageBase64}`,
-                detail: "low", // Use low detail for faster/cheaper validation
+                detail: "low",
               },
             },
           ],
         },
       ],
-      max_tokens: 500,
-      temperature: 0.1, // Low temperature for consistent validation
+      max_tokens: 600,
+      temperature: 0.1,
     });
 
     const content = response.choices[0]?.message?.content || "";
-    console.log("[imageValidator] Outline validation response:", content.slice(0, 200));
+    console.log("[imageValidator] Combined validation response:", content.slice(0, 300));
     
-    return parseOutlineValidationResponse(content);
+    // Parse combined response
+    const cleaned = content
+      .replace(/```json\n?/gi, "")
+      .replace(/```\n?/gi, "")
+      .trim();
+    
+    const data = JSON.parse(cleaned);
+    
+    const outlineResult: OutlineValidationResult = {
+      valid: data.hasBlackFills !== true && data.hasGrayscale !== true,
+      hasBlackFills: data.hasBlackFills === true,
+      hasGrayscale: data.hasGrayscale === true,
+      hasUnwantedBorder: data.hasUnwantedBorder === true,
+      fillLocations: data.fillLocations || [],
+      confidence: data.confidence || 0.5,
+      notes: data.notes || "",
+    };
+    
+    const bottomFillResult: BottomFillValidationResult | undefined = checkBottomFill ? {
+      valid: data.hasEmptyBottom !== true,
+      hasEmptyBottom: data.hasEmptyBottom === true,
+      bottomCoveragePercent: 100 - (data.bottomEmptyPercent || 0),
+      confidence: data.confidence || 0.5,
+      notes: data.notes || "",
+    } : undefined;
+    
+    return { outline: outlineResult, bottomFill: bottomFillResult };
     
   } catch (error) {
-    console.error("[imageValidator] Outline validation error:", error);
-    // On error, assume valid to avoid blocking generation
+    console.error("[imageValidator] Validation error:", error);
     return {
-      valid: true,
-      hasBlackFills: false,
-      hasGrayscale: false,
-      hasUnwantedBorder: false,
-      fillLocations: [],
-      confidence: 0,
-      notes: `Validation error: ${error instanceof Error ? error.message : "unknown"}`,
+      outline: {
+        valid: true,
+        hasBlackFills: false,
+        hasGrayscale: false,
+        hasUnwantedBorder: false,
+        fillLocations: [],
+        confidence: 0,
+        notes: `Validation error: ${error instanceof Error ? error.message : "unknown"}`,
+      },
+      bottomFill: checkBottomFill ? {
+        valid: true,
+        hasEmptyBottom: false,
+        bottomCoveragePercent: 100,
+        confidence: 0,
+        notes: `Validation error: ${error instanceof Error ? error.message : "unknown"}`,
+      } : undefined,
     };
   }
 }
