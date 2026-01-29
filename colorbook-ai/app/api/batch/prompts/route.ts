@@ -154,19 +154,30 @@ async function generateStorybookPages(
   const minDistinctLocations = Math.min(4, Math.ceil(count / 2));
   const selectedLocations = locationPool.slice(0, Math.max(minDistinctLocations, count));
 
-  // Build detailed character description for consistency
+  // Build EXTREMELY detailed character description for consistency
   const characterDescription = `
-CHARACTER (MUST APPEAR IDENTICAL ON EVERY PAGE):
-- Type: ${characterProfile.species}
-- Key Features: ${characterProfile.keyFeatures.join(", ")}
-- Proportions: ${characterProfile.proportions}
-- Face: ${characterProfile.faceStyle}
+=== CHARACTER PROFILE (LOCKED - DO NOT MODIFY) ===
+
+IDENTITY:
+- Species/Type: ${characterProfile.species}
+- Key Visual Features: ${characterProfile.keyFeatures.join(", ")}
+- Body Proportions: ${characterProfile.proportions}
+- Face Design: ${characterProfile.faceStyle}
 ${characterProfile.headDetails ? `- Head Details: ${characterProfile.headDetails}` : ""}
 ${characterProfile.bodyDetails ? `- Body Details: ${characterProfile.bodyDetails}` : ""}
-${characterProfile.clothing ? `- Outfit: ${characterProfile.clothing}` : ""}
+${characterProfile.clothing ? `- Outfit/Accessories: ${characterProfile.clothing}` : ""}
 
-CRITICAL: The character design MUST NOT CHANGE between pages. Same face, same proportions, same features.
-Only change the POSE and ACTIVITY, never the character's appearance.`;
+CONSISTENCY RULES (CRITICAL):
+1. Same face shape and size on EVERY page
+2. Same eye style (shape, size, placement) on EVERY page
+3. Same ear shape and position on EVERY page
+4. Same body-to-head ratio on EVERY page
+5. Same distinctive features (horn shape, wing style, tail, spots, etc.)
+6. Same line thickness and detail level
+7. ONLY change: POSE, ACTION, EXPRESSION - NOT the character design
+
+WARNING: Do NOT redesign the character between pages. Do NOT alter proportions.
+The character must be INSTANTLY RECOGNIZABLE as the SAME individual on all pages.`;
 
   const storyPlanPrompt = `You are creating a STORYBOOK with ${count} pages.
 
@@ -175,21 +186,23 @@ ${characterDescription}
 ${story?.title ? `STORY TITLE: "${story.title}"` : ""}
 ${story?.outline ? `STORY OUTLINE: ${story.outline}` : ""}
 
-SCENE DIVERSITY RULES:
+=== SCENE DIVERSITY RULES (CRITICAL) ===
 1. NEVER repeat the same location more than 2 pages in a row
 2. Use at least ${minDistinctLocations} DIFFERENT locations across ${count} pages
-3. Each page must have a UNIQUE activity/action
-4. Each page must have at least 3 props DIFFERENT from the previous page
+3. Each page MUST have a UNIQUE activity/action (no repeated activities)
+4. Each page MUST have at least 3 props DIFFERENT from the previous page
 5. Vary camera framing: alternate between close-up, medium, and wide shots
+6. Vary time of day if applicable (morning, afternoon, evening)
+7. Vary the character's emotional state (happy, curious, excited, peaceful)
 
-AVAILABLE LOCATIONS: ${selectedLocations.join(", ")}
+AVAILABLE LOCATIONS (MUST USE ${minDistinctLocations}+ OF THESE): ${selectedLocations.join(", ")}
 ${sceneInventory?.length ? `AVAILABLE PROPS: ${sceneInventory.join(", ")}` : ""}
 
-STORY STRUCTURE:
-- Page 1: Introduction scene
-- Pages 2-${Math.max(2, Math.floor(count * 0.4))}: Early activities in DIFFERENT locations
-- Pages ${Math.floor(count * 0.4) + 1}-${Math.floor(count * 0.8)}: Main adventure scenes
-- Pages ${Math.floor(count * 0.8) + 1}-${count}: Conclusion
+=== STORY STRUCTURE ===
+- Page 1: Introduction - establish character and initial setting
+- Pages 2-${Math.max(2, Math.floor(count * 0.4))}: Rising action - DIFFERENT locations, new challenges
+- Pages ${Math.floor(count * 0.4) + 1}-${Math.floor(count * 0.8)}: Main adventure - variety of activities
+- Pages ${Math.floor(count * 0.8) + 1}-${count}: Resolution - wrap up story
 
 Generate exactly ${count} pages. Return ONLY valid JSON:
 {
@@ -197,18 +210,20 @@ Generate exactly ${count} pages. Return ONLY valid JSON:
     {
       "page": 1,
       "title": "Short Title",
-      "location": "specific location",
-      "action": "what character is doing",
-      "sceneDescription": "Detailed scene description (80-120 words). MUST include: The [exact character type] doing [specific action] in [specific location]. Include 4-6 specific props with positions. Include framing (close-up/medium/wide). Do NOT describe the character's design - only their pose and action."
+      "location": "specific location from list above",
+      "action": "unique activity",
+      "sceneDescription": "Detailed scene (80-120 words): The [character type] [specific action] in [specific location]. 4-6 named props with positions. Camera framing (close-up/medium/wide). Do NOT describe character features - only pose/action."
     }
   ]
 }
 
-IMPORTANT for sceneDescription:
-- Do NOT redesign the character in descriptions
-- Only describe WHAT the character is DOING, not what they look like
-- Reference "the ${characterProfile.species}" without re-describing features
-- Focus on: location, action, props, composition, camera angle`;
+=== SCENE DESCRIPTION RULES ===
+- Do NOT redesign or re-describe character features in any description
+- ONLY describe WHAT the character is DOING and WHERE
+- Reference "the ${characterProfile.species}" without listing physical features
+- Focus on: location details, action, props, background elements, framing
+- Include specific prop names and positions (e.g., "a red ball on the left")
+- Each description must be visually distinct from all others`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o",

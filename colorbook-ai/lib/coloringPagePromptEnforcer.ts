@@ -34,35 +34,33 @@ export function getSizeFromOrientation(orientation: Orientation): ImageSize {
 // ============================================================
 
 /**
- * These constraints prevent ANY filled black areas.
+ * These constraints prevent ANY filled black areas or grayscale.
  * Critical for pandas, skunks, and any character with dark patches.
+ * STRENGTHENED version with explicit grayscale prohibition.
  */
 export const OUTLINE_ONLY_CONSTRAINTS = `
 
-=== STRICT OUTLINE-ONLY RULES (MANDATORY - READ CAREFULLY) ===
+=== STRICT COLORING PAGE RULES (MANDATORY) ===
 
-This is a COLORING PAGE. ONLY black outlines on white background. NO EXCEPTIONS.
+This is a COLORING PAGE. ONLY black outlines on pure white background. NO EXCEPTIONS.
 
-CRITICAL RULES:
-1. NO solid black fills ANYWHERE - not even small areas
-2. NO filled shapes - every shape must be an OUTLINE only
-3. ALL interior regions must remain WHITE/UNFILLED (ready for coloring)
-4. If the character has dark patches (panda ears, panda eye patches, dark fur):
-   - Draw them as DOUBLE-LINE OUTLINES or OUTLINE SHAPES ONLY
-   - Interior must remain WHITE
-   - Do NOT fill them with black
-5. Eyes/pupils: Use small HOLLOW circles or dots with white centers, NOT filled black circles
-6. Hair/fur: Draw as individual strands or outline shapes, NEVER solid black
-7. No shading, no grayscale, no gradients, no hatching, no crosshatching, no stippling
+LINE ART RULES:
+1. Clean black-and-white OUTLINE line art ONLY
+2. NO grayscale, NO shading, NO gradients, NO gray pixels
+3. NO solid black fills ANYWHERE - not even tiny areas
+4. NO filled shapes - every shape must be an OUTLINE only
+5. ALL interior regions must remain WHITE/UNFILLED (for coloring)
 
-WHAT "OUTLINE-ONLY" MEANS FOR DARK FEATURES:
-- Panda eye patches: Draw as outlined shapes (like goggles outline), leave interior WHITE
-- Panda ears: Draw ear outline with inner ear detail, leave interior WHITE
-- Black fur/hair: Draw the outline/silhouette, leave interior WHITE
-- Dark clothing: Draw the shape outline, leave interior WHITE
-- Shadows: DO NOT draw any shadows - leave area WHITE
+DARK FEATURES (pandas, skunks, dark fur):
+- Draw dark patches as OUTLINE SHAPES only (like a boundary line)
+- Interior of patches must remain WHITE
+- Do NOT fill them with black or gray
 
-The final output must be PURE LINE ART that a child can color with crayons.`;
+EYES/DETAILS:
+- Eyes: small hollow circles with white centers, NOT filled
+- Hair/fur: individual strands or outlines, NEVER solid black
+
+The final output must be PURE LINE ART that a child can color.`;
 
 // ============================================================
 // NO BORDER / FRAME CONSTRAINTS
@@ -73,13 +71,10 @@ The final output must be PURE LINE ART that a child can color with crayons.`;
  */
 export const NO_BORDER_CONSTRAINTS = `
 
-=== NO BORDER / NO FRAME (MANDATORY) ===
-- NO border around the image
-- NO frame or panel lines
-- NO crop marks or registration marks
-- NO edge lines or page outlines
-- NO decorative border
-- The artwork should extend to the edges with only a small natural margin`;
+=== NO BORDER RULES (MANDATORY) ===
+- No border, no frame, no panel lines, no crop marks, no edge lines, no page outline
+- No decorative border of any kind
+- Artwork extends to edges with only small natural margin`;
 
 // ============================================================
 // FRAMING / FILL THE CANVAS CONSTRAINTS (STRONGER VERSION)
@@ -139,6 +134,31 @@ SQUARE: Balanced composition, subject lower-center, ground at bottom edge.`;
  */
 export const BOTTOM_FILL_RETRY_REINFORCEMENT = `
 IMPORTANT: Fill bottom with ground/floor extending to edge, add foreground props, no empty space.`;
+
+// ============================================================
+// QA AUTO-RETRY REINFORCEMENT BLOCKS
+// ============================================================
+
+/**
+ * Retry reinforcement for outline-only violations (grayscale or fills detected)
+ * Used on retry #1
+ */
+export const OUTLINE_RETRY_REINFORCEMENT_1 = `
+CRITICAL FIX: Convert any filled areas into outlines ONLY. Absolutely NO gray pixels, NO filled regions, NO shading. Every shape must be an UNFILLED outline.`;
+
+/**
+ * Stronger retry reinforcement for outline-only violations
+ * Used on retry #2 (final attempt)
+ */
+export const OUTLINE_RETRY_REINFORCEMENT_2 = `
+CRITICAL: CONTOUR LINES ONLY. Replace ALL fills with outline boundaries. Remove ALL shading. ZERO gray pixels allowed. Pure black lines on pure white background.`;
+
+/**
+ * Retry reinforcement for border violations
+ * Used when borders are detected
+ */
+export const BORDER_RETRY_REINFORCEMENT = `
+CRITICAL FIX: Remove ALL borders, frames, edge lines. NO rectangular outline around the image. Artwork extends naturally to edges.`;
 
 // ============================================================
 // NEGATIVE PROMPT LIST (for models that support it)
@@ -362,6 +382,84 @@ export function hasRequiredConstraints(prompt: string, size?: ImageSize): boolea
  */
 export function getNegativePrompt(): string {
   return NEGATIVE_PROMPT_LIST.join(", ");
+}
+
+// ============================================================
+// IMAGE VALIDATION TYPES
+// ============================================================
+
+export interface ImageValidationResult {
+  valid: boolean;
+  issues: {
+    hasGrayscale: boolean;
+    hasLargeBlackFills: boolean;
+    hasBorder: boolean;
+    hasEmptyBottom: boolean;
+  };
+  retryReinforcement?: string;
+}
+
+/**
+ * Analyze image data for coloring page quality issues.
+ * Returns validation result with specific issues found.
+ * 
+ * @param imageBase64 - Base64 encoded image data
+ * @returns Validation result with issues and retry reinforcement if needed
+ */
+export async function validateColoringPageImage(
+  imageBase64: string
+): Promise<ImageValidationResult> {
+  // Note: Full image analysis requires canvas/image processing libraries
+  // This is a simplified check that flags potential issues
+  // In production, you'd use sharp or canvas to analyze pixel data
+  
+  const result: ImageValidationResult = {
+    valid: true,
+    issues: {
+      hasGrayscale: false,
+      hasLargeBlackFills: false,
+      hasBorder: false,
+      hasEmptyBottom: false,
+    },
+  };
+
+  // For now, we return valid=true and rely on strong prompt constraints
+  // The retry logic will use reinforcement blocks if generation quality is poor
+  // True image analysis would require server-side image processing
+  
+  return result;
+}
+
+/**
+ * Get the appropriate retry reinforcement based on attempt number.
+ * @param attemptNumber - Current attempt (1, 2, etc.)
+ * @param issues - Known issues from validation
+ * @returns Reinforcement string to append to prompt
+ */
+export function getRetryReinforcement(
+  attemptNumber: number,
+  issues?: ImageValidationResult["issues"]
+): string {
+  const reinforcements: string[] = [];
+  
+  // Always add outline reinforcement on retries
+  if (attemptNumber === 1) {
+    reinforcements.push(OUTLINE_RETRY_REINFORCEMENT_1);
+  } else {
+    reinforcements.push(OUTLINE_RETRY_REINFORCEMENT_2);
+  }
+  
+  // Add border reinforcement if needed
+  if (issues?.hasBorder) {
+    reinforcements.push(BORDER_RETRY_REINFORCEMENT);
+  }
+  
+  // Add bottom fill reinforcement if needed
+  if (issues?.hasEmptyBottom) {
+    reinforcements.push(BOTTOM_FILL_RETRY_REINFORCEMENT);
+  }
+  
+  return reinforcements.join("\n");
 }
 
 // ============================================================

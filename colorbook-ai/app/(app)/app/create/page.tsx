@@ -62,7 +62,9 @@ interface GeneratedIdea {
   title?: string;
   theme?: string;
   mainCharacter?: string;
+  characterType?: string;
   exampleScenes?: string[];
+  themeBucket?: string;
 }
 
 export default function CreateColoringBookPage() {
@@ -72,6 +74,14 @@ export default function CreateColoringBookPage() {
   const [userIdea, setUserIdea] = useState("");
   const [generatedIdea, setGeneratedIdea] = useState<GeneratedIdea | null>(null);
   const [generatingIdea, setGeneratingIdea] = useState(false);
+  
+  // Diversity tracking for idea regeneration
+  const [previousIdeas, setPreviousIdeas] = useState<Array<{
+    title?: string;
+    theme?: string;
+    mainCharacter?: string;
+  }>>([]);
+  const [ideaSeed, setIdeaSeed] = useState<string>("");
 
   // Step 2: Improved prompt (MANDATORY)
   const [improvedPrompt, setImprovedPrompt] = useState("");
@@ -118,9 +128,24 @@ export default function CreateColoringBookPage() {
 
   // ==================== Step 1: Idea Generation ====================
 
-  const generateIdea = async () => {
+  const generateIdea = async (isRegenerate = false) => {
     setGeneratingIdea(true);
+    
+    // Generate a new unique seed for each call
+    const newSeed = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setIdeaSeed(newSeed);
+    
     try {
+      // Build excluded themes based on previous ideas
+      const excludeThemes = previousIdeas
+        .map(p => p.theme)
+        .filter(Boolean) as string[];
+      
+      // Build excluded character types  
+      const excludeCharacterTypes = previousIdeas
+        .map(p => p.mainCharacter?.split(" ").pop())
+        .filter(Boolean) as string[];
+
       const response = await fetch("/api/idea/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -128,6 +153,11 @@ export default function CreateColoringBookPage() {
           themeHint: userIdea.trim() || undefined,
           age: storyConfig.targetAge,
           mode,
+          // Diversity parameters
+          ideaSeed: newSeed,
+          previousIdeas: previousIdeas.slice(-5), // Last 5 ideas
+          excludeThemes: excludeThemes.slice(-5),
+          excludeCharacterTypes: excludeCharacterTypes.slice(-5),
         }),
       });
 
@@ -137,8 +167,20 @@ export default function CreateColoringBookPage() {
         throw new Error(data.error || "Failed to generate idea");
       }
 
-      setGeneratedIdea(data as GeneratedIdea);
-      toast.success("Idea generated! Review and click 'Use This Idea' to continue.");
+      const newIdea = data as GeneratedIdea;
+      setGeneratedIdea(newIdea);
+      
+      // Track this idea for future diversity
+      setPreviousIdeas(prev => [...prev.slice(-4), {
+        title: newIdea.title,
+        theme: newIdea.theme || newIdea.themeBucket,
+        mainCharacter: newIdea.mainCharacter,
+      }]);
+      
+      toast.success(isRegenerate 
+        ? "New idea generated! This one is different from before." 
+        : "Idea generated! Review and click 'Use This Idea' to continue."
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate idea");
     } finally {
@@ -157,12 +199,16 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  const clearIdea = () => {
+  const clearIdea = (resetHistory = false) => {
     setUserIdea("");
     setGeneratedIdea(null);
     setImprovedPrompt("");
     setIsPromptImproved(false);
     setPages([]);
+    if (resetHistory) {
+      setPreviousIdeas([]);
+      setIdeaSeed("");
+    }
   };
 
   // ==================== Step 2: Improve Prompt (MANDATORY) ====================
@@ -524,7 +570,7 @@ export default function CreateColoringBookPage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
-                  onClick={generateIdea}
+                  onClick={() => generateIdea(false)}
                   disabled={generatingIdea}
                   className="rounded-xl"
                 >
@@ -538,18 +584,18 @@ export default function CreateColoringBookPage() {
                 {generatedIdea && (
                   <Button
                     variant="outline"
-                    onClick={generateIdea}
+                    onClick={() => generateIdea(true)}
                     disabled={generatingIdea}
                     className="rounded-xl"
                   >
-                    <RefreshCw className="mr-2 h-4 w-4" /> Regenerate
+                    <RefreshCw className="mr-2 h-4 w-4" /> Regenerate (Different)
                   </Button>
                 )}
 
                 {userIdea.trim() && (
                   <Button
                     variant="ghost"
-                    onClick={clearIdea}
+                    onClick={() => clearIdea(false)}
                     className="rounded-xl"
                   >
                     <Trash2 className="mr-2 h-4 w-4" /> Clear

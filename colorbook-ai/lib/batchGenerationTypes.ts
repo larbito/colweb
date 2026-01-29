@@ -197,41 +197,24 @@ export function buildCharacterConsistencyBlock(profile: CharacterProfile): strin
   
   return `
 
-=== CHARACTER CONSISTENCY LOCK (CRITICAL - MUST MATCH REFERENCE EXACTLY) ===
+=== CHARACTER DESIGN LOCK (CRITICAL) ===
 
-The EXACT SAME character must appear on EVERY page with IDENTICAL visual design.
-Do NOT redesign. Do NOT alter. Only change pose and activity.
+SAME character on EVERY page. IDENTICAL visual design. Change ONLY pose/action.
 
-CHARACTER VISUAL IDENTITY:
+CHARACTER:
 - Species: ${profile.species}
-- Distinguishing Features: ${featuresText}
-- Body Proportions: ${profile.proportions}
+- Features: ${featuresText}
+- Proportions: ${profile.proportions}
 - Face: ${profile.faceStyle}
-${profile.headDetails ? `- Head Details: ${profile.headDetails}` : ""}
-${profile.bodyDetails ? `- Body Details: ${profile.bodyDetails}` : ""}
+${profile.headDetails ? `- Head: ${profile.headDetails}` : ""}
+${profile.bodyDetails ? `- Body: ${profile.bodyDetails}` : ""}
 ${profile.clothing ? `- Outfit: ${profile.clothing}` : ""}
 
-=== LOCKED TRAITS (DO NOT MODIFY UNDER ANY CIRCUMSTANCES) ===
-${lockedTraits}
+LOCKED (DO NOT CHANGE): ${lockedTraits}
 
-=== CONSISTENCY REQUIREMENTS ===
-1. SAME face shape and proportions every page
-2. SAME eye style (exact shape, size, placement, expression type)
-3. SAME ear shape, size, and placement
-4. SAME head-to-body ratio (if chibi, stay chibi; if realistic, stay realistic)
-5. SAME distinctive features (horn shape, wing shape, tail style, etc.)
-6. SAME line thickness and drawing style
-7. Character must be INSTANTLY recognizable as the same individual
-8. ONLY change: pose, position, activity, and scene location
-
-=== WHAT TO AVOID ===
-- Do NOT make the character look older or younger
-- Do NOT change facial features or expressions dramatically
-- Do NOT add new accessories unless scene requires it
-- Do NOT alter the character's proportions
-- Do NOT change the character's design style (chibi stays chibi, etc.)
-
-The character should look like they stepped from the reference into a new scene.`;
+SAME every page: face shape, eye style/size/placement, ear shape, head-to-body ratio, distinctive features, line style.
+ONLY change: pose, action, scene location.
+DO NOT: redesign, age up/down, alter proportions, change style.`;
 }
 
 /**
