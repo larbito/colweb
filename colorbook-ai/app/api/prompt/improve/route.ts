@@ -9,6 +9,11 @@ import {
 } from "@/lib/coloringPagePromptEnforcer";
 
 /**
+ * Route segment config
+ */
+export const maxDuration = 60; // 60 seconds
+
+/**
  * POST /api/prompt/improve
  * 
  * Converts a user's book idea into a detailed, structured "Base Prompt" 

@@ -87,86 +87,58 @@ export const NO_BORDER_CONSTRAINTS = `
 
 /**
  * Universal framing constraint - applies to ALL sizes
- * Updated to be explicit about filling the BOTTOM of the canvas
+ * CONDENSED version
  */
 export const FILL_CANVAS_CONSTRAINTS = `
 
-=== FRAMING / LAYOUT (MANDATORY - FILL THE ENTIRE CANVAS) ===
-- Scale subject + scene to fill 90-95% of the canvas height and width
-- Minimal top and bottom margins (only 3-5% margin around edges)
-- NO blank white bands at top or bottom
-- NO small floating artwork in the center with excessive white space
-- Place the main character slightly lower in the frame (lower third)
-- Extend environment/foreground DOWN TO the bottom edge
-- Subject must be prominently scaled and fill the frame`;
+=== FRAMING (MANDATORY) ===
+- Subject fills 90-95% of the canvas, minimal margins (3-5%)
+- NO blank bands at top or bottom, NO floating artwork
+- Character positioned lower in frame, environment extends to edges`;
 
 /**
  * NEW: Foreground / Bottom Fill constraint - prevents empty bottom space
- * This is CRITICAL for ensuring artwork fills the full page
+ * CONDENSED version to avoid overly long prompts
  */
 export const FOREGROUND_BOTTOM_FILL_CONSTRAINTS = `
 
-=== FOREGROUND / BOTTOM FILL (MANDATORY - NO EMPTY BOTTOM) ===
-- The scene MUST extend to the bottom edge of the canvas
-- Include a clear ground plane (floor/grass/rug/path/water) that reaches near the bottom margin
-- Add 2-5 simple foreground objects near the bottom:
-  Examples: small toys, pebbles, flowers, rug pattern, grass tufts, scattered leaves, small mushrooms, rocks, puddles, floor tiles, carpet edge, table legs, book stacks, cushions, shoes, pet bowl, etc.
-- The main subject must be ANCHORED LOWER (feet/base touching ground in lower third)
-- Scale the subject LARGE so artwork fills 90-95% of vertical canvas
-- NO large blank area at the bottom (keep bottom whitespace under 5% of canvas height)
-- Ground/floor must be VISIBLE and detailed, not implied or empty`;
+=== BOTTOM FILL (MANDATORY) ===
+- Scene extends to bottom edge with visible ground (floor/grass/rug/path)
+- Add 2-4 small foreground props near bottom (toys, flowers, pebbles, etc.)
+- Main subject anchored lower (feet on ground), fills 90-95% of canvas
+- NO empty bottom area`;
 
 /**
  * Additional landscape-specific framing (when size is 1536x1024)
+ * CONDENSED
  */
 export const LANDSCAPE_EXTRA_CONSTRAINTS = `
-
-=== LANDSCAPE LAYOUT (1536x1024) ===
-- Wide composition: spread scene HORIZONTALLY to fill the full width
-- Zoom in so the main subject fills significant vertical space
-- NO white bands at left/right or top/bottom
-- Ground line and foreground elements extend across the FULL WIDTH
-- Include foreground props at bottom-left AND bottom-right corners`;
+LANDSCAPE: Wide composition filling full width, ground extends across bottom.`;
 
 /**
  * Additional portrait-specific framing (when size is 1024x1536)
+ * CONDENSED
  */
 export const PORTRAIT_EXTRA_CONSTRAINTS = `
-
-=== PORTRAIT LAYOUT (1024x1536) ===
-- Tall composition: use FULL vertical space
-- Subject fills 85-95% of the frame height
-- Character positioned in lower-middle area (not floating at top)
-- Ground/floor visible at bottom with foreground detail
-- Top area can have sky/ceiling elements reaching to edge`;
+PORTRAIT: Tall composition, subject fills 90% height, ground visible at bottom.`;
 
 /**
  * Additional square-specific framing (when size is 1024x1024)
+ * CONDENSED
  */
 export const SQUARE_EXTRA_CONSTRAINTS = `
-
-=== SQUARE LAYOUT (1024x1024) ===
-- Balanced composition filling the square frame
-- Subject centered but positioned slightly lower
-- Ground/floor detail at bottom edge
-- Background elements reaching to all edges`;
+SQUARE: Balanced composition, subject lower-center, ground at bottom edge.`;
 
 // ============================================================
 // BOTTOM FILL RETRY REINFORCEMENT (used when auto-retrying)
 // ============================================================
 
 /**
- * Extra reinforcement for bottom fill, used when previous generation had empty bottom
+ * Extra reinforcement for bottom fill, used on retries
+ * CONDENSED
  */
 export const BOTTOM_FILL_RETRY_REINFORCEMENT = `
-
-=== BOTTOM FILL RETRY - CRITICAL ISSUE ===
-PREVIOUS IMAGE HAD EMPTY BOTTOM SPACE. Fix this:
-1. FILL the bottom area with foreground elements (grass, floor, rug, path, toys, rocks, flowers)
-2. NO empty bottom margin - extend ground/floor/scene to the bottom edge
-3. Place character LOWER in frame with visible ground contact
-4. Add at least 3 foreground props near the bottom corners
-5. Ground texture/detail must be visible at the very bottom of the image`;
+IMPORTANT: Fill bottom with ground/floor extending to edge, add foreground props, no empty space.`;
 
 // ============================================================
 // NEGATIVE PROMPT LIST (for models that support it)

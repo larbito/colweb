@@ -3,6 +3,11 @@ import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
 
 /**
+ * Route segment config
+ */
+export const maxDuration = 30; // 30 seconds
+
+/**
  * POST /api/idea/generate
  * 
  * Generates a complete coloring book idea with AI.

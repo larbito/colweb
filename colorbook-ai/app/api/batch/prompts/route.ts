@@ -21,6 +21,11 @@ import {
 } from "@/lib/coloringPagePromptEnforcer";
 
 /**
+ * Route segment config - extend timeout for prompt generation
+ */
+export const maxDuration = 60; // 60 seconds
+
+/**
  * POST /api/batch/prompts
  * 
  * Generates N page prompts for batch image generation.
@@ -35,7 +40,7 @@ import {
  * ALL prompts enforce:
  * - Outline-only (no filled black areas)
  * - No border/frame
- * - Fill the canvas (85-95%)
+ * - Fill the canvas (90-95%)
  */
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
