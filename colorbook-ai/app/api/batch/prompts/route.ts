@@ -19,6 +19,11 @@ import {
   NEGATIVE_PROMPT_LIST,
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
+import {
+  type CharacterIdentityProfile,
+  buildCharacterIdentityContract,
+  buildOutlineOnlyContract,
+} from "@/lib/characterIdentity";
 
 /**
  * Route segment config - extend timeout for prompt generation
@@ -84,6 +89,13 @@ export async function POST(request: NextRequest) {
       ? buildCharacterConsistencyBlock(characterProfile)
       : undefined;
 
+    // Extract CHARACTER IDENTITY PROFILE for storybook mode (for vision validation)
+    let characterIdentityProfile: CharacterIdentityProfile | undefined;
+    if (mode === "storybook" && characterProfile) {
+      characterIdentityProfile = await extractCharacterIdentityProfile(characterProfile, basePrompt);
+      console.log(`[batch/prompts] Created character identity profile for: ${characterIdentityProfile.species}`);
+    }
+
     // Convert scene descriptions to full prompts with ALL constraints
     const imageSize = (size || "1024x1536") as ImageSize;
     const pages: PagePromptItem[] = pagesData.pages.map((page) => {
@@ -108,10 +120,13 @@ export async function POST(request: NextRequest) {
       validateStorybookDiversity(pagesData.pages);
     }
 
-    const result: BatchPromptsResponse = {
+    // Extended response with character identity profile
+    const result = {
       pages,
       mode,
       characterConsistencyBlock,
+      // NEW: Character Identity Profile for vision-based validation
+      characterIdentityProfile: characterIdentityProfile || undefined,
     };
 
     console.log(`[batch/prompts] Generated ${pages.length} prompts in ${mode} mode`);
@@ -124,6 +139,112 @@ export async function POST(request: NextRequest) {
       { error: error instanceof Error ? error.message : "Failed to generate prompts" },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Extract a detailed CHARACTER IDENTITY PROFILE from the character profile and base prompt.
+ * This profile is used for vision-based validation to ensure character consistency.
+ */
+async function extractCharacterIdentityProfile(
+  characterProfile: CharacterProfile,
+  basePrompt?: string
+): Promise<CharacterIdentityProfile> {
+  // Build a prompt to extract detailed character identity
+  const extractionPrompt = `Extract a STRICT character identity profile from this character description.
+
+CHARACTER INFO:
+- Species: ${characterProfile.species}
+- Key Features: ${characterProfile.keyFeatures.join(", ")}
+- Proportions: ${characterProfile.proportions}
+- Face Style: ${characterProfile.faceStyle}
+${characterProfile.headDetails ? `- Head Details: ${characterProfile.headDetails}` : ""}
+${characterProfile.bodyDetails ? `- Body Details: ${characterProfile.bodyDetails}` : ""}
+${characterProfile.clothing ? `- Clothing: ${characterProfile.clothing}` : ""}
+
+${basePrompt ? `ADDITIONAL CONTEXT:\n${basePrompt.slice(0, 500)}` : ""}
+
+Return ONLY valid JSON with these EXACT fields:
+{
+  "species": "exact species (e.g., 'baby unicorn', 'little panda', 'young dragon')",
+  "faceShape": "face shape description",
+  "eyeStyle": "eye style description",
+  "noseStyle": "nose style description", 
+  "mouthStyle": "mouth style description",
+  "earStyle": "ear style description",
+  "hornStyle": "horn description or null if no horn",
+  "hairTuft": "hair/tuft description or null",
+  "proportions": "body proportions (e.g., 'chibi with large head')",
+  "bodyShape": "body shape description",
+  "tailStyle": "tail description or null",
+  "wingStyle": "wing description or null",
+  "markings": "markings description - MUST say 'NO filled black areas, all markings as OUTLINE shapes only'"
+}
+
+Be SPECIFIC. This profile will be used to validate generated images.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: extractionPrompt }],
+      max_tokens: 800,
+      temperature: 0.3,
+    });
+
+    let responseText = response.choices[0]?.message?.content?.trim() || "";
+    responseText = responseText
+      .replace(/^```json\n?/i, "")
+      .replace(/^```\n?/i, "")
+      .replace(/\n?```$/i, "")
+      .trim();
+
+    const extracted = JSON.parse(responseText);
+
+    // Build the identity profile with strict defaults
+    return {
+      characterId: `char_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      species: extracted.species || characterProfile.species,
+      faceShape: extracted.faceShape || "round, soft features",
+      eyeStyle: extracted.eyeStyle || "large, expressive eyes",
+      noseStyle: extracted.noseStyle || "small button nose",
+      mouthStyle: extracted.mouthStyle || "friendly smile",
+      earStyle: extracted.earStyle || "matching species typical ears",
+      hornStyle: extracted.hornStyle || undefined,
+      hairTuft: extracted.hairTuft || undefined,
+      proportions: extracted.proportions || characterProfile.proportions,
+      bodyShape: extracted.bodyShape || "soft, rounded body",
+      tailStyle: extracted.tailStyle || undefined,
+      wingStyle: extracted.wingStyle || undefined,
+      markings: "NO filled black areas - all markings must be OUTLINE shapes only, interior WHITE",
+      defaultOutfit: characterProfile.clothing,
+      doNotChange: [
+        "species",
+        "face shape",
+        "eye style",
+        "ear shape",
+        "head-to-body ratio",
+        "distinctive features",
+        "markings style (outlines only)",
+      ],
+      name: undefined,
+    };
+  } catch (error) {
+    console.error("[batch/prompts] Failed to extract character identity:", error);
+    
+    // Return a basic profile as fallback
+    return {
+      characterId: `char_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      species: characterProfile.species,
+      faceShape: characterProfile.faceStyle || "round, soft features",
+      eyeStyle: "large, expressive eyes",
+      noseStyle: "small button nose",
+      mouthStyle: "friendly smile",
+      earStyle: "matching species typical ears",
+      proportions: characterProfile.proportions,
+      bodyShape: "soft, rounded body",
+      markings: "NO filled black areas - all markings must be OUTLINE shapes only, interior WHITE",
+      doNotChange: ["species", "face shape", "eye style", "proportions"],
+    };
   }
 }
 

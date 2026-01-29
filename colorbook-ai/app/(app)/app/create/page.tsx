@@ -106,6 +106,10 @@ export default function CreateColoringBookPage() {
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // Character Identity Profile (from batch/prompts response, for validation)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [characterIdentityProfile, setCharacterIdentityProfile] = useState<any>(null);
+
   // Preview
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
@@ -316,7 +320,17 @@ export default function CreateColoringBookPage() {
         throw new Error(data.error || "Failed to generate prompts");
       }
 
-      const batchResponse = data as BatchPromptsResponse;
+      // Extended response includes characterIdentityProfile
+      const batchResponse = data as BatchPromptsResponse & { 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        characterIdentityProfile?: any 
+      };
+
+      // Store character identity profile for validation (storybook mode)
+      if (batchResponse.characterIdentityProfile) {
+        setCharacterIdentityProfile(batchResponse.characterIdentityProfile);
+        console.log("[create] Received character identity profile for:", batchResponse.characterIdentityProfile.species);
+      }
 
       // Convert to page state
       const pageStates: PageState[] = batchResponse.pages.map((p) => ({
@@ -372,6 +386,11 @@ export default function CreateColoringBookPage() {
             page: pageItem.page,
             prompt: pageItem.prompt,
             size: getImageSize(),
+            // Storybook mode parameters for validation
+            isStorybookMode: mode === "storybook",
+            characterProfile: mode === "storybook" ? characterIdentityProfile : undefined,
+            validateOutline: true,
+            validateCharacter: mode === "storybook",
           }),
         });
 
@@ -379,13 +398,18 @@ export default function CreateColoringBookPage() {
 
         if (response.ok && data.status === "done" && data.imageBase64) {
           // Success - update with image immediately
+          const hasWarning = data.warning || (data.validation && !data.validation.passed);
           setPages(prev => prev.map(p =>
             p.page === pageItem.page
-              ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: undefined }
+              ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: hasWarning ? data.warning : undefined }
               : p
           ));
           successCount++;
-          toast.success(`Page ${pageItem.page} generated!`);
+          if (hasWarning) {
+            toast.warning(`Page ${pageItem.page} generated with warnings`);
+          } else {
+            toast.success(`Page ${pageItem.page} generated!`);
+          }
         } else {
           // Failed
           setPages(prev => prev.map(p =>
@@ -437,18 +461,28 @@ export default function CreateColoringBookPage() {
           page: page.page,
           prompt: page.prompt,
           size: getImageSize(),
+          // Storybook mode parameters for validation
+          isStorybookMode: mode === "storybook",
+          characterProfile: mode === "storybook" ? characterIdentityProfile : undefined,
+          validateOutline: true,
+          validateCharacter: mode === "storybook",
         }),
       });
 
       const data = await safeJsonParse(response);
 
       if (response.ok && data.status === "done" && data.imageBase64) {
+        const hasWarning = data.warning || (data.validation && !data.validation.passed);
         setPages(prev => prev.map(p =>
           p.page === pageNumber
-            ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: undefined }
+            ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: hasWarning ? data.warning : undefined }
             : p
         ));
-        toast.success(`Page ${pageNumber} generated!`);
+        if (hasWarning) {
+          toast.warning(`Page ${pageNumber} generated with warnings: ${data.warning}`);
+        } else {
+          toast.success(`Page ${pageNumber} generated!`);
+        }
       } else {
         setPages(prev => prev.map(p =>
           p.page === pageNumber
