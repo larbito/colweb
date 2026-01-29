@@ -16,7 +16,7 @@ import {
 
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard },
-  { label: "New Book", href: "/app/new", icon: Plus },
+  { label: "Create Coloring Book", href: "/app/create", icon: Plus },
   { label: "Style Clone", href: "/app/batch", icon: Copy, badge: "New" },
   { label: "My Projects", href: "/app/projects", icon: FolderOpen },
   { label: "Templates", href: "/app/templates", icon: Layers, badge: "Soon" },
