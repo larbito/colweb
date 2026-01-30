@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import Replicate from "replicate";
 import { z } from "zod";
 
 /**
@@ -21,6 +20,7 @@ const requestSchema = z.object({
  * POST /api/image/enhance
  * 
  * Upscales an image using Replicate's image enhancement models.
+ * Uses HTTP API directly for reliability.
  * Returns the enhanced image as base64.
  */
 export async function POST(request: NextRequest) {
@@ -63,39 +63,76 @@ export async function POST(request: NextRequest) {
 
     console.log(`[enhance] Starting enhancement with scale=${scale}`);
 
-    const replicate = new Replicate({
-      auth: apiToken,
-    });
-
-    // Use real-esrgan for reliable upscaling
-    // Model: nightmareai/real-esrgan - popular and reliable
-    const output = await replicate.run(
-      "nightmareai/real-esrgan:f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa",
-      {
+    // Use Replicate HTTP API directly
+    // Model: nightmareai/real-esrgan for reliable upscaling
+    const createResponse = await fetch("https://api.replicate.com/v1/predictions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+        "Prefer": "wait", // Wait for result instead of polling
+      },
+      body: JSON.stringify({
+        version: "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa",
         input: {
           image: inputImage,
           scale: scale,
           face_enhance: false,
         },
+      }),
+    });
+
+    if (!createResponse.ok) {
+      const errorData = await createResponse.json().catch(() => ({}));
+      console.error("[enhance] Replicate API error:", errorData);
+      throw new Error(errorData.detail || `Replicate API error: ${createResponse.status}`);
+    }
+
+    let prediction = await createResponse.json();
+    console.log("[enhance] Prediction status:", prediction.status);
+
+    // If not completed yet, poll for result
+    while (prediction.status === "starting" || prediction.status === "processing") {
+      console.log("[enhance] Polling for result...");
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
+        headers: {
+          "Authorization": `Bearer ${apiToken}`,
+        },
+      });
+      
+      if (!pollResponse.ok) {
+        throw new Error(`Failed to poll prediction: ${pollResponse.status}`);
       }
-    );
+      
+      prediction = await pollResponse.json();
+      console.log("[enhance] Poll status:", prediction.status);
+    }
 
-    console.log("[enhance] Replicate output type:", typeof output);
+    if (prediction.status === "failed") {
+      console.error("[enhance] Prediction failed:", prediction.error);
+      throw new Error(prediction.error || "Enhancement failed");
+    }
 
-    // The output should be a URL
+    if (prediction.status !== "succeeded") {
+      throw new Error(`Unexpected prediction status: ${prediction.status}`);
+    }
+
+    // Get the output URL
+    const output = prediction.output;
     let enhancedUrl: string;
+    
     if (typeof output === "string") {
       enhancedUrl = output;
     } else if (Array.isArray(output) && output.length > 0) {
-      enhancedUrl = output[0] as string;
-    } else if (output && typeof output === "object" && "url" in output) {
-      enhancedUrl = (output as { url: string }).url;
+      enhancedUrl = output[0];
     } else {
       console.error("[enhance] Unexpected output format:", output);
       throw new Error("Unexpected output format from enhancement model");
     }
 
-    console.log(`[enhance] Enhancement complete, fetching result...`);
+    console.log(`[enhance] Enhancement complete, fetching result from: ${enhancedUrl.slice(0, 50)}...`);
 
     // Fetch the enhanced image and convert to base64
     const enhancedResponse = await fetch(enhancedUrl);
