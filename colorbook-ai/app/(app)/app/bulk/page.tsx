@@ -815,14 +815,13 @@ export default function BulkCreatePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: page.finalPrompt,
-          pageNumber: page.index,
+          page: page.index,
+          prompt: page.finalPrompt || `Create a coloring page for: ${page.ideaText}`,
+          size: "1024x1536",
+          maxRetries: 0, // Skip retries for speed in bulk mode
           isStorybookMode: book.bookMode === "storybook",
-          characterProfile: book.settings.sameCharacter && book.settings.characterDescription ? {
-            species: "character",
-            description: book.settings.characterDescription,
-          } : undefined,
-          validate: false, // Skip validation for speed
+          validateOutline: false, // Skip validation for speed
+          validateCharacter: false,
         }),
       });
       
