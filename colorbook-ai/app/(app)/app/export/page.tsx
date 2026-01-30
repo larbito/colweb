@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTopbar } from "@/components/app/app-topbar";
 import { Button } from "@/components/ui/button";
@@ -50,10 +50,15 @@ interface PageData {
   status?: string;
 }
 
-export default function ExportPage() {
+// Wrapper component that uses search params
+function ExportPageContent() {
   const searchParams = useSearchParams();
-  const bookId = searchParams.get("bookId");
-  const batchId = searchParams.get("batchId");
+  // These will be used to load book data when connected to backend
+  const _bookId = searchParams.get("bookId");
+  const _batchId = searchParams.get("batchId");
+  
+  // TODO: Load book data based on bookId or batchId
+  // useEffect(() => { if (_bookId) loadBookData(_bookId); }, [_bookId]);
 
   // Wizard state
   const [currentStep, setCurrentStep] = useState<ExportStep>("layout");
@@ -646,6 +651,33 @@ export default function ExportPage() {
         </div>
       </main>
     </>
+  );
+}
+
+// Loading fallback for Suspense
+function ExportPageLoading() {
+  return (
+    <>
+      <AppTopbar
+        title="Export PDF"
+        subtitle="Loading..."
+      />
+      <main className="flex-1 overflow-hidden flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
+          <p className="text-muted-foreground">Loading export settings...</p>
+        </div>
+      </main>
+    </>
+  );
+}
+
+// Default export with Suspense boundary
+export default function ExportPage() {
+  return (
+    <Suspense fallback={<ExportPageLoading />}>
+      <ExportPageContent />
+    </Suspense>
   );
 }
 
