@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import dynamic from "next/dynamic";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,16 +15,6 @@ import {
   ZoomOut,
   X,
 } from "lucide-react";
-
-// Dynamically import react-pdf to avoid SSR issues
-const Document = dynamic(
-  () => import("react-pdf").then((mod) => mod.Document),
-  { ssr: false }
-);
-const Page = dynamic(
-  () => import("react-pdf").then((mod) => mod.Page),
-  { ssr: false }
-);
 
 interface PDFPreviewModalProps {
   isOpen: boolean;
@@ -44,37 +33,50 @@ export function PDFPreviewModal({
   onDownload,
   isGenerating = false,
 }: PDFPreviewModalProps) {
-  const [numPages, setNumPages] = useState<number>(0);
-  const [scale, setScale] = useState<number>(0.8);
-  const [isLoading, setIsLoading] = useState(true);
-  const [workerReady, setWorkerReady] = useState(false);
+  const [scale, setScale] = useState<number>(100);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
-  // Set up PDF.js worker on client side only
+  // Create blob URL from pdfData
   useEffect(() => {
-    const setupWorker = async () => {
-      const pdfjs = await import("react-pdf");
-      pdfjs.pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.pdfjs.version}/build/pdf.worker.min.mjs`;
-      setWorkerReady(true);
-    };
-    setupWorker();
-  }, []);
-
-  const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
-    setNumPages(numPages);
-    setIsLoading(false);
-  }, []);
+    if (pdfData && pdfData.length > 0) {
+      // Convert Uint8Array to ArrayBuffer properly
+      const arrayBuffer = pdfData.buffer.slice(
+        pdfData.byteOffset,
+        pdfData.byteOffset + pdfData.byteLength
+      ) as ArrayBuffer;
+      const blob = new Blob([arrayBuffer], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      setPdfUrl(url);
+      
+      // Cleanup on unmount or when pdfData changes
+      return () => {
+        URL.revokeObjectURL(url);
+        setPdfUrl(null);
+      };
+    } else {
+      setPdfUrl(null);
+    }
+  }, [pdfData]);
 
   const zoomIn = () => {
-    setScale(prev => Math.min(2, prev + 0.2));
+    setScale(prev => Math.min(200, prev + 25));
   };
 
   const zoomOut = () => {
-    setScale(prev => Math.max(0.4, prev - 0.2));
+    setScale(prev => Math.max(50, prev - 25));
   };
+
+  // Estimate page count based on typical coloring book structure
+  const estimatedPages = useMemo(() => {
+    if (!pdfData) return 0;
+    // Rough estimate: PDF header + page objects
+    // A more accurate count would require parsing the PDF
+    return Math.max(1, Math.floor(pdfData.length / 50000));
+  }, [pdfData]);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl h-[90vh] flex flex-col p-0">
+      <DialogContent className="max-w-5xl h-[90vh] flex flex-col p-0">
         <DialogHeader className="px-6 py-4 border-b shrink-0">
           <div className="flex items-center justify-between">
             <DialogTitle>Preview: {title}</DialogTitle>
@@ -83,18 +85,18 @@ export function PDFPreviewModal({
                 variant="outline"
                 size="sm"
                 onClick={zoomOut}
-                disabled={scale <= 0.4}
+                disabled={scale <= 50}
               >
                 <ZoomOut className="h-4 w-4" />
               </Button>
               <span className="text-sm text-muted-foreground w-16 text-center">
-                {Math.round(scale * 100)}%
+                {scale}%
               </span>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={zoomIn}
-                disabled={scale >= 2}
+                disabled={scale >= 200}
               >
                 <ZoomIn className="h-4 w-4" />
               </Button>
@@ -102,55 +104,28 @@ export function PDFPreviewModal({
           </div>
         </DialogHeader>
 
-        <div className="flex-1 overflow-auto bg-muted/30 flex items-start justify-center p-4">
+        <div className="flex-1 overflow-hidden bg-muted/30">
           {isGenerating ? (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <Loader2 className="h-12 w-12 animate-spin text-primary" />
               <p className="text-muted-foreground">Generating PDF preview...</p>
             </div>
-          ) : pdfData && workerReady ? (
-            <Document
-              file={{ data: new Uint8Array(pdfData) }}
-              onLoadSuccess={onDocumentLoadSuccess}
-              loading={
-                <div className="flex items-center justify-center h-64">
-                  <Loader2 className="h-8 w-8 animate-spin" />
-                </div>
-              }
-              error={
-                <div className="text-destructive text-center p-8">
-                  Failed to load PDF preview
-                </div>
-              }
-              className="flex flex-col items-center gap-4"
-            >
-              {/* Show all pages in a scrollable view */}
-              {Array.from(new Array(numPages), (_, index) => (
-                <div
-                  key={`page_${index + 1}`}
-                  className="bg-white shadow-lg rounded overflow-hidden"
-                  style={{ marginBottom: "1rem" }}
-                >
-                  <Page
-                    pageNumber={index + 1}
-                    scale={scale}
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                    loading={
-                      <div className="flex items-center justify-center h-96 w-64">
-                        <Loader2 className="h-6 w-6 animate-spin" />
-                      </div>
-                    }
-                  />
-                  <div className="text-center text-xs text-muted-foreground py-2 bg-muted/50">
-                    Page {index + 1} of {numPages}
-                  </div>
-                </div>
-              ))}
-            </Document>
-          ) : !workerReady ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-8 w-8 animate-spin" />
+          ) : pdfUrl ? (
+            <iframe
+              src={`${pdfUrl}#zoom=${scale}&toolbar=0&navpanes=0`}
+              className="w-full h-full border-0"
+              title="PDF Preview"
+              style={{ 
+                transform: `scale(${scale / 100})`,
+                transformOrigin: 'top center',
+                width: `${10000 / scale}%`,
+                height: `${10000 / scale}%`,
+              }}
+            />
+          ) : pdfData && pdfData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-destructive gap-2">
+              <p>PDF generation failed - empty file</p>
+              <p className="text-sm text-muted-foreground">Please try again</p>
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -159,12 +134,12 @@ export function PDFPreviewModal({
           )}
         </div>
 
-        {/* Footer with navigation and download */}
+        {/* Footer with download */}
         <div className="px-6 py-4 border-t shrink-0 flex items-center justify-between bg-background">
           <div className="flex items-center gap-2">
-            {numPages > 0 && (
+            {pdfData && pdfData.length > 0 && (
               <span className="text-sm text-muted-foreground">
-                {numPages} page{numPages !== 1 ? "s" : ""} total
+                PDF ready ({Math.round(pdfData.length / 1024)} KB)
               </span>
             )}
           </div>
@@ -174,7 +149,7 @@ export function PDFPreviewModal({
               <X className="mr-2 h-4 w-4" />
               Close
             </Button>
-            <Button onClick={onDownload} disabled={!pdfData || isGenerating}>
+            <Button onClick={onDownload} disabled={!pdfData || pdfData.length === 0 || isGenerating}>
               <Download className="mr-2 h-4 w-4" />
               Download PDF
             </Button>
