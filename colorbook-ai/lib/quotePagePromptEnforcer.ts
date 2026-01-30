@@ -224,11 +224,11 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
 export function normalizeQuote(quote: string): string {
   let normalized = quote.trim();
   
-  // Remove surrounding quotes
+  // Remove surrounding quotes (straight and curly)
   if ((normalized.startsWith('"') && normalized.endsWith('"')) ||
       (normalized.startsWith("'") && normalized.endsWith("'")) ||
-      (normalized.startsWith('"') && normalized.endsWith('"')) ||
-      (normalized.startsWith(''') && normalized.endsWith('''))) {
+      (normalized.startsWith('\u201C') && normalized.endsWith('\u201D')) ||
+      (normalized.startsWith('\u2018') && normalized.endsWith('\u2019'))) {
     normalized = normalized.slice(1, -1).trim();
   }
   
