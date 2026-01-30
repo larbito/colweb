@@ -40,17 +40,30 @@ export interface QuotePageConfig {
 }
 
 // ============================================================
+// CRITICAL CONSTRAINTS (MUST BE AT START OF EVERY PROMPT)
+// ============================================================
+
+export const CRITICAL_COLORING_PAGE_RULES = `
+*** CRITICAL: PRINTABLE COLORING BOOK PAGE ***
+- PURE WHITE BACKGROUND ONLY - no black background, no colored background, no gray background.
+- LINE ART ONLY - every shape and letter is just an outline with empty white interior.
+- NO FILLS - nothing should be filled with black or any color. All shapes are hollow outlines.
+- The page will be PRINTED on white paper and colored in with crayons/markers by children.
+`;
+
+// ============================================================
 // STYLE SPEC (MANDATORY FOR ALL QUOTE PAGES)
 // ============================================================
 
 export const QUOTE_STYLE_SPEC = `
-=== STYLE SPEC (MANDATORY) ===
-- Create a black-and-white OUTLINE-ONLY coloring page (no grayscale).
-- No filled black areas (no solid blacks); outlines only.
-- No shading, no crosshatching, no gradients, no textures.
-- Crisp clean vector-like line work, consistent stroke thickness.
-- No watermark, no signature.
-- US Letter portrait composition.`;
+=== COLORING PAGE REQUIREMENTS (MANDATORY) ===
+- WHITE background - the entire background must be white/empty.
+- Black OUTLINES only - all shapes, letters, and decorations are outlined, not filled.
+- NO solid black areas - if you see any solid black, that's wrong.
+- NO grayscale, NO shading, NO gradients, NO textures, NO crosshatching.
+- Clean vector-like line work, consistent stroke thickness.
+- NO watermark, NO signature.
+- Think "coloring book for kids" - simple outlines ready to be colored in.`;
 
 // ============================================================
 // TEXT LEGIBILITY RULES (CRITICAL FOR QUOTE PAGES)
@@ -175,41 +188,51 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
 
   const parts: string[] = [];
 
+  // *** CRITICAL: Put the most important constraints FIRST ***
+  parts.push(CRITICAL_COLORING_PAGE_RULES);
+
   // Main instruction
-  parts.push(`Create a TYPOGRAPHY COLORING PAGE featuring the quote:`);
-  parts.push(`"${formattedQuote}"`);
+  parts.push(`Create a COLORING BOOK PAGE with the quote: "${formattedQuote}"`);
+  parts.push("");
+
+  // Emphasize white background again
+  parts.push(`=== PAGE SETUP ===`);
+  parts.push(`- Start with a BLANK WHITE page.`);
+  parts.push(`- Draw only BLACK OUTLINES on the white page.`);
+  parts.push(`- Every letter and decoration is an EMPTY OUTLINE ready to be colored.`);
   parts.push("");
 
   // Layout description
-  parts.push(`=== LAYOUT ===`);
-  parts.push(`- Quote text is CENTERED and DOMINANT on the page.`);
-  parts.push(`- Typography style: ${TYPOGRAPHY_STYLES[typographyStyle]}`);
-  parts.push(`- All letters are OUTLINES ONLY with EMPTY interiors for coloring.`);
-  parts.push(`- Text occupies the central 40-50% of the composition.`);
-  parts.push(`- Clear space/halo around text separates it from decorations.`);
+  parts.push(`=== TEXT LAYOUT ===`);
+  parts.push(`- Quote text is CENTERED and large.`);
+  parts.push(`- Typography: ${TYPOGRAPHY_STYLES[typographyStyle]}`);
+  parts.push(`- Letters are HOLLOW OUTLINES (white inside, black outline).`);
+  parts.push(`- Text takes up about 40-50% of the page.`);
+  parts.push(`- Leave clear space around the text.`);
   parts.push("");
 
   // Decoration description
-  parts.push(`=== DECORATIONS ===`);
-  parts.push(`- Background theme: ${DECORATION_THEMES[decorationTheme]}`);
-  parts.push(`- Decoration density: ${DENSITY_LEVELS[density]}`);
-  parts.push(`- Frame style: ${FRAME_STYLES[frameStyle]}`);
-  parts.push(`- Decorations fill the areas AROUND the text, not over it.`);
-  parts.push(`- All decorative elements are OUTLINE-ONLY (no fills).`);
+  parts.push(`=== DECORATIONS (all outlines, no fills) ===`);
+  parts.push(`- Theme: ${DECORATION_THEMES[decorationTheme]}`);
+  parts.push(`- Density: ${DENSITY_LEVELS[density]}`);
+  parts.push(`- Frame: ${FRAME_STYLES[frameStyle]}`);
+  parts.push(`- All decorations are OUTLINE-ONLY on WHITE background.`);
   parts.push("");
 
   // Add mandatory style spec
   parts.push(QUOTE_STYLE_SPEC);
 
-  // Add text legibility rules
-  parts.push(TEXT_LEGIBILITY_RULES);
-
-  // Add framing constraints
-  parts.push(QUOTE_FRAMING_CONSTRAINTS);
-
-  // Add negative prompt
+  // Add text legibility rules (shortened)
   parts.push("");
-  parts.push(`AVOID: ${QUOTE_NEGATIVE_PROMPTS.join(", ")}.`);
+  parts.push(`TEXT RULES: Large readable letters, outline-only, empty white interiors, clear spacing.`);
+
+  // Add framing constraints (shortened)
+  parts.push(`FRAMING: Full page composition (92-97% height), minimal margins, decorations reach edges.`);
+
+  // Strong negative prompt at the end
+  parts.push("");
+  parts.push(`*** DO NOT INCLUDE: ${QUOTE_NEGATIVE_PROMPTS.slice(0, 10).join(", ")} ***`);
+  parts.push(`*** REMEMBER: WHITE background, BLACK outlines only, NO fills ***`);
 
   return parts.join("\n");
 }
@@ -315,19 +338,30 @@ export function buildQuoteBelongsToPrompt(
 ): string {
   const parts: string[] = [];
 
-  parts.push(`Create a "BELONGS TO" coloring page for a quote/affirmation coloring book.`);
+  // *** CRITICAL: Put the most important constraints FIRST ***
+  parts.push(CRITICAL_COLORING_PAGE_RULES);
+
+  parts.push(`Create a "BELONGS TO" COLORING PAGE for a coloring book.`);
   parts.push("");
-  parts.push(`=== LAYOUT ===`);
-  parts.push(`- At the TOP: Large outline text "THIS BOOK BELONGS TO:" in ${TYPOGRAPHY_STYLES[typographyStyle]}`);
-  parts.push(`- Below the text: A long horizontal outlined rectangle or decorative line for writing a name.`);
-  parts.push(`- Surrounding area: ${DECORATION_THEMES[decorationTheme]}`);
-  parts.push(`- All text and decorations are OUTLINES ONLY.`);
+
+  parts.push(`=== PAGE SETUP ===`);
+  parts.push(`- BLANK WHITE background.`);
+  parts.push(`- BLACK OUTLINES only - no fills, no shading.`);
   parts.push("");
+
+  parts.push(`=== CONTENT ===`);
+  parts.push(`- Large outlined text: "THIS BOOK BELONGS TO:" at top (${TYPOGRAPHY_STYLES[typographyStyle]})`);
+  parts.push(`- Below: A horizontal outlined rectangle or decorative line for writing a name.`);
+  parts.push(`- Decorations: ${DECORATION_THEMES[decorationTheme]}`);
+  parts.push(`- ALL elements are HOLLOW OUTLINES on WHITE background.`);
+  parts.push("");
+
   parts.push(QUOTE_STYLE_SPEC);
-  parts.push(TEXT_LEGIBILITY_RULES);
-  parts.push(QUOTE_FRAMING_CONSTRAINTS);
   parts.push("");
-  parts.push(`AVOID: ${QUOTE_NEGATIVE_PROMPTS.join(", ")}.`);
+  parts.push(`FRAMING: Full page (92-97% height), decorations reach edges.`);
+  parts.push("");
+  parts.push(`*** DO NOT: black background, filled shapes, grayscale, shading ***`);
+  parts.push(`*** MUST HAVE: white background, outline-only artwork ***`);
 
   return parts.join("\n");
 }
