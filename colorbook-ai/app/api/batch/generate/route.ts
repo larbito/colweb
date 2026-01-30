@@ -161,7 +161,9 @@ RETRY: OUTLINE-ONLY line art, NO fills, fill 90% of canvas, ground at bottom.`;
           status: "done" as const,
           imageBase64: result.images[0],
           enhanceStatus: "none" as const,
+          finalLetterStatus: "none" as const,
           activeVersion: "original" as const,
+          pageType: "coloring" as const,
         };
       }
 
@@ -188,6 +190,8 @@ RETRY: OUTLINE-ONLY line art, NO fills, fill 90% of canvas, ground at bottom.`;
     status: "failed" as const,
     error: lastError,
     enhanceStatus: "none" as const,
+    finalLetterStatus: "none" as const,
     activeVersion: "original" as const,
+    pageType: "coloring" as const,
   };
 }
