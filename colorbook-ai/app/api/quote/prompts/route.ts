@@ -110,6 +110,12 @@ export async function POST(request: NextRequest) {
 
     console.log(`[quote/prompts] Generating prompts: ${quotes.length} quotes, level: ${decorationLevel}, typography: ${typographyStyle}`);
 
+    // SERVER-SIDE ENFORCEMENT: text_only mode disables all decoration options
+    const isTextOnly = decorationLevel === "text_only";
+    if (isTextOnly) {
+      console.log(`[quote/prompts] TEXT-ONLY MODE: Forcing iconSet=null, density=none, frameStyle=none`);
+    }
+
     interface PagePrompt {
       page: number;
       quote: string;
@@ -141,6 +147,47 @@ export async function POST(request: NextRequest) {
         const normalized = normalizeQuote(quote);
         const validation = validateQuote(normalized);
         
+        // For TEXT-ONLY mode: skip all decoration logic
+        if (isTextOnly) {
+          const prompt = buildQuotePagePrompt({
+            quote: normalized,
+            decorationTheme: "stars", // Ignored for text_only
+            typographyStyle,
+            density: "low",
+            frameStyle: "none",
+            decorationLevel: "text_only",
+          });
+
+          // Log first prompt for debugging
+          if (index === 0) {
+            console.log(`[quote/prompts] TEXT-ONLY prompt preview (first 200 chars): ${prompt.slice(0, 200)}...`);
+          }
+
+          pages.push({
+            page: index + 1,
+            quote: normalized,
+            title: normalized.slice(0, 30) + (normalized.length > 30 ? "..." : ""),
+            prompt,
+            decorationTheme: "stars",
+            decorationLevel: "text_only",
+            iconSet: undefined,
+            topic: "general",
+            keywords: [],
+            motifPack: [], // Empty - no decorations
+            validation,
+            appliedSettings: {
+              decorationLevel: "text_only",
+              typographyStyle,
+              iconSet: undefined,
+              decorationTheme: undefined,
+              density: "low",
+              frameStyle: "none",
+            },
+          });
+          return; // Continue to next quote
+        }
+
+        // For DECORATED modes: full logic
         // Classify quote to get topic and motifs
         const classification = classifyQuoteTopic(normalized);
         const motifPack = getMotifPackForTopic(classification.topic);
@@ -200,73 +247,110 @@ export async function POST(request: NextRequest) {
       const mainQuote = normalizeQuote(quotes[0]);
       const validation = validateQuote(mainQuote);
       
-      // Classify quote once
-      const classification = classifyQuoteTopic(mainQuote);
-      const motifPack = getMotifPackForTopic(classification.topic);
-      
-      // Get variation sets based on decoration level
-      const iconVariations = decorationLevel === "minimal_icons" 
-        ? getVariationIconSets(variationCount) 
-        : [];
-      const themeVariations = decorationLevel === "full_background"
-        ? getVariationThemes(decorationTheme, variationCount)
-        : [];
-      
       // Typography variations
       const typographyVariations: TypographyStyle[] = ["bubble", "script", "block", "mixed"];
       
-      for (let i = 0; i < variationCount; i++) {
-        const typo = typographyVariations[i % typographyVariations.length];
-        const pageIconSet = iconVariations[i] || iconSet;
-        const pageTheme = themeVariations[i] || decorationTheme;
-        
-        const prompt = buildQuotePagePrompt({
-          quote: mainQuote,
-          decorationTheme: pageTheme,
-          typographyStyle: typo,
-          density,
-          frameStyle,
-          decorationLevel,
-          iconSet: pageIconSet,
-          topic: classification.topic,
-          keywords: classification.keywords,
-          motifPack,
-        });
-
-        // Build title based on decoration level
-        let title: string;
-        if (decorationLevel === "text_only") {
-          title = `${typo} typography`;
-        } else if (decorationLevel === "minimal_icons") {
-          title = `${pageIconSet} + ${typo}`;
-        } else if (decorationLevel === "border_only") {
-          title = `${typo} with border`;
-        } else {
-          title = `${DECORATION_THEMES[pageTheme].split(",")[0]}`;
-        }
-
-        pages.push({
-          page: i + 1,
-          quote: mainQuote,
-          title,
-          prompt,
-          decorationTheme: pageTheme,
-          decorationLevel,
-          iconSet: pageIconSet,
-          topic: classification.topic,
-          keywords: classification.keywords,
-          motifPack,
-          validation,
-          appliedSettings: {
-            decorationLevel,
+      // For TEXT-ONLY mode: only vary typography
+      if (isTextOnly) {
+        for (let i = 0; i < variationCount; i++) {
+          const typo = typographyVariations[i % typographyVariations.length];
+          
+          const prompt = buildQuotePagePrompt({
+            quote: mainQuote,
+            decorationTheme: "stars",
             typographyStyle: typo,
-            iconSet: pageIconSet,
+            density: "low",
+            frameStyle: "none",
+            decorationLevel: "text_only",
+          });
+
+          pages.push({
+            page: i + 1,
+            quote: mainQuote,
+            title: `${typo} typography`,
+            prompt,
+            decorationTheme: "stars",
+            decorationLevel: "text_only",
+            iconSet: undefined,
+            topic: "general",
+            keywords: [],
+            motifPack: [],
+            validation,
+            appliedSettings: {
+              decorationLevel: "text_only",
+              typographyStyle: typo,
+              iconSet: undefined,
+              decorationTheme: undefined,
+              density: "low",
+              frameStyle: "none",
+            },
+          });
+        }
+      } else {
+        // For DECORATED modes: full variation logic
+        // Classify quote once
+        const classification = classifyQuoteTopic(mainQuote);
+        const motifPack = getMotifPackForTopic(classification.topic);
+        
+        // Get variation sets based on decoration level
+        const iconVariations = decorationLevel === "minimal_icons" 
+          ? getVariationIconSets(variationCount) 
+          : [];
+        const themeVariations = decorationLevel === "full_background"
+          ? getVariationThemes(decorationTheme, variationCount)
+          : [];
+        
+        for (let i = 0; i < variationCount; i++) {
+          const typo = typographyVariations[i % typographyVariations.length];
+          const pageIconSet = iconVariations[i] || iconSet;
+          const pageTheme = themeVariations[i] || decorationTheme;
+          
+          const prompt = buildQuotePagePrompt({
+            quote: mainQuote,
             decorationTheme: pageTheme,
+            typographyStyle: typo,
             density,
             frameStyle,
-          },
-        });
-      }
+            decorationLevel,
+            iconSet: pageIconSet,
+            topic: classification.topic,
+            keywords: classification.keywords,
+            motifPack,
+          });
+
+          // Build title based on decoration level
+          let title: string;
+          if (decorationLevel === "minimal_icons") {
+            title = `${pageIconSet} + ${typo}`;
+          } else if (decorationLevel === "border_only") {
+            title = `${typo} with border`;
+          } else {
+            title = `${DECORATION_THEMES[pageTheme].split(",")[0]}`;
+          }
+
+          pages.push({
+            page: i + 1,
+            quote: mainQuote,
+            title,
+            prompt,
+            decorationTheme: pageTheme,
+            decorationLevel,
+            iconSet: pageIconSet,
+            topic: classification.topic,
+            keywords: classification.keywords,
+            motifPack,
+            validation,
+            appliedSettings: {
+              decorationLevel,
+              typographyStyle: typo,
+              iconSet: pageIconSet,
+              decorationTheme: pageTheme,
+              density,
+              frameStyle,
+            },
+          });
+        }
+      } // end else (decorated modes)
     }
 
     // Check for any invalid quotes

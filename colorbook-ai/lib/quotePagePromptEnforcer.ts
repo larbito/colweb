@@ -363,12 +363,73 @@ export const QUOTE_NEGATIVE_PROMPTS = [
 ];
 
 // ============================================================
+// TEXT-ONLY PROMPT (HARD OVERRIDE - SEPARATE TEMPLATE)
+// ============================================================
+
+/**
+ * Build a strict text-only prompt. NO decorations, NO exceptions.
+ * This is a completely separate template to avoid any decoration leakage.
+ */
+function buildTextOnlyPrompt(quote: string, typographyStyle: TypographyStyle): string {
+  const cleanQuote = normalizeQuote(quote);
+  const formattedQuote = formatQuoteForPrompt(cleanQuote);
+  const typoDesc = TYPOGRAPHY_STYLES[typographyStyle];
+
+  return `Create a typography-only coloring page. US Letter size (8.5x11 inches).
+
+QUOTE TEXT (display exactly as written):
+"${formattedQuote}"
+
+=== STRICT TEXT-ONLY MODE ===
+This page contains ONLY the quote text. Nothing else.
+
+WHAT TO DRAW:
+- The quote text as large, beautiful ${typoDesc}
+- Letters are HOLLOW OUTLINES with white/empty interiors
+- Center the text on the page
+- Scale text large to fill 80-90% of the page height
+- Multiple lines if needed, well-spaced
+
+WHAT NOT TO DRAW (CRITICAL - ZERO TOLERANCE):
+- NO clouds
+- NO stars
+- NO hearts
+- NO flowers
+- NO icons of any kind
+- NO decorative elements
+- NO border or frame
+- NO corner decorations
+- NO ground line
+- NO scenery
+- NO animals or characters
+- NO objects
+- NO patterns
+- NO swirls outside the letters
+- NOTHING except the letter outlines
+
+The ONLY lines on this page are the outlines that form the letters.
+The background is 100% empty white space.
+
+ART STYLE:
+- Black outlines on pure white background
+- No filled areas, no solid black, no grayscale
+- No shading, no gradients, no textures
+- Clean vector-like line work
+- No watermark, no signature
+
+If you add ANY element other than the letter outlines, the image is INVALID.`;
+}
+
+// ============================================================
 // MAIN PROMPT BUILDER
 // ============================================================
 
 /**
  * Build a complete prompt for a quote coloring page.
  * Uses topic-based motif selection for meaningful decorations.
+ * 
+ * IMPORTANT: text_only mode uses a completely separate template
+ * to prevent any decoration leakage.
  */
 export function buildQuotePagePrompt(config: QuotePageConfig): string {
   const {
@@ -382,6 +443,18 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
     motifPack,
   } = config;
 
+  // ============================================================
+  // HARD EARLY RETURN FOR TEXT-ONLY MODE
+  // This bypasses ALL decoration logic completely
+  // ============================================================
+  if (decorationLevel === "text_only") {
+    return buildTextOnlyPrompt(quote, typographyStyle);
+  }
+
+  // ============================================================
+  // DECORATED MODES (minimal_icons, border_only, full_background)
+  // ============================================================
+  
   // Normalize and format the quote
   const cleanQuote = normalizeQuote(quote);
   const formattedQuote = formatQuoteForPrompt(cleanQuote);
@@ -416,21 +489,7 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
   // ============================================================
   parts.push(`=== DECORATION RULES (STRICT - MUST FOLLOW EXACTLY) ===`);
   
-  if (decorationLevel === "text_only") {
-    // TEXT ONLY - Absolutely nothing else
-    parts.push(`DECORATION LEVEL: TEXT ONLY`);
-    parts.push(`- ONLY the quote typography on a clean white background.`);
-    parts.push(`- ABSOLUTELY NO decorations of any kind.`);
-    parts.push(`- NO icons, NO flowers, NO stars, NO patterns, NO shapes.`);
-    parts.push(`- NO border, NO frame, NO corner ornaments.`);
-    parts.push(`- NO animals, NO characters, NO objects.`);
-    parts.push(`- Just beautiful typography floating in white space.`);
-    parts.push(`- Make the LETTERS themselves ornate and detailed for coloring.`);
-    parts.push("");
-    parts.push(`*** CRITICAL: If you add ANY decoration, you have FAILED. ***`);
-    parts.push(`*** The ONLY thing on this page is the quote text. ***`);
-    
-  } else if (decorationLevel === "minimal_icons") {
+  if (decorationLevel === "minimal_icons") {
     // MINIMAL ICONS - Small, sparse, from motif pack or icon set
     const iconsToUse = actualMotifs.slice(0, 6).join(", ");
     parts.push(`DECORATION LEVEL: MINIMAL ICONS`);
@@ -496,11 +555,8 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
   // ============================================================
   // FINAL REINFORCEMENT
   // ============================================================
-  if (decorationLevel === "text_only") {
-    parts.push(`*** FINAL CHECK: This page has ONLY text. Zero decorations. ***`);
-  } else {
-    parts.push(`*** FINAL CHECK: Use ONLY the allowed motifs. NO random animals/toys/characters. ***`);
-  }
+  // Note: text_only has early return above, so this only applies to decorated modes
+  parts.push(`*** FINAL CHECK: Use ONLY the allowed motifs. NO random animals/toys/characters. ***`);
   parts.push(`*** WHITE background, BLACK outlines only, NO fills ***`);
 
   return parts.join("\n");
