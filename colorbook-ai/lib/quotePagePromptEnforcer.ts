@@ -29,12 +29,30 @@ export type DecorationDensity = "low" | "medium" | "high";
 
 export type FrameStyle = "none" | "thin" | "corners";
 
+// NEW: Decoration Level - controls how much decoration appears
+export type DecorationLevel = 
+  | "text_only"      // Pure text, no decorations
+  | "minimal_icons"  // Text + small icons (stars/hearts/sparkles)
+  | "border_only"    // Text + border/corner decorations
+  | "full_background"; // Text + full decorative background
+
+// NEW: Icon set for minimal_icons mode
+export type IconSet = 
+  | "stars"      // Stars & sparkles
+  | "hearts"     // Hearts
+  | "doodles"    // Simple doodles
+  | "sports"     // Sports icons
+  | "kids";      // Kid-friendly icons
+
 export interface QuotePageConfig {
   quote: string;
   decorationTheme: DecorationTheme;
   typographyStyle: TypographyStyle;
   density: DecorationDensity;
   frameStyle: FrameStyle;
+  // NEW fields
+  decorationLevel: DecorationLevel;
+  iconSet?: IconSet; // Only used when decorationLevel is "minimal_icons"
   pageNumber?: number;
   totalPages?: number;
 }
@@ -139,6 +157,52 @@ export const FRAME_STYLES: Record<FrameStyle, string> = {
 };
 
 // ============================================================
+// DECORATION LEVEL DESCRIPTIONS (NEW)
+// ============================================================
+
+export const DECORATION_LEVELS: Record<DecorationLevel, string> = {
+  text_only: `TEXT ONLY - NO decorations whatsoever:
+- ONLY the quote text on a clean white background
+- NO flowers, NO trees, NO patterns, NO icons, NO shapes
+- NO border, NO frame, NO corner decorations
+- Leave generous whitespace around the centered text
+- The typography IS the art - make the letters beautiful and detailed`,
+  
+  minimal_icons: `TEXT + MINIMAL ICONS only:
+- Quote text is the MAIN element
+- Add only a FEW small, simple outline icons around the text (max 5-8 icons)
+- Icons should be SPARSE and SMALL (not dominating)
+- Keep 80% of the background empty white space
+- DO NOT add flowers, trees, landscapes, or complex scenery
+- Icons should float around the text, not crowd it`,
+  
+  border_only: `TEXT + BORDER ELEMENTS only:
+- Quote text centered with a decorative border or corner ornaments
+- Border should be simple outline work (not filled)
+- Keep the CENTER area clean - no decorations near the text
+- The border frames the page edges, text floats in clear center space
+- NO interior decorations, NO background patterns`,
+  
+  full_background: `TEXT + FULL DECORATIVE BACKGROUND:
+- Quote text is DOMINANT and READABLE (kept clear with negative space halo)
+- Decorative elements fill the background around the text
+- IMPORTANT: Keep a clear "halo" / buffer zone around the text
+- Background decorations should be intricate but not compete with text readability`,
+};
+
+// ============================================================
+// ICON SET DESCRIPTIONS (NEW)
+// ============================================================
+
+export const ICON_SETS: Record<IconSet, string> = {
+  stars: "small outline stars, sparkles, twinkles, crescent moons (simple celestial icons)",
+  hearts: "small outline hearts of various sizes, love symbols",
+  doodles: "simple doodles: swirls, dots, small circles, squiggles, asterisks",
+  sports: "small sports icons: balls, trophies, medals, sneakers (outline only)",
+  kids: "kid-friendly icons: smileys, balloons, rainbows, clouds, butterflies (simple outlines)",
+};
+
+// ============================================================
 // NEGATIVE PROMPT LIST
 // ============================================================
 
@@ -172,6 +236,7 @@ export const QUOTE_NEGATIVE_PROMPTS = [
 
 /**
  * Build a complete prompt for a quote coloring page.
+ * Now supports decoration levels for fine-grained control.
  */
 export function buildQuotePagePrompt(config: QuotePageConfig): string {
   const {
@@ -180,6 +245,8 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
     typographyStyle,
     density,
     frameStyle,
+    decorationLevel = "minimal_icons", // Default to minimal for speed
+    iconSet = "stars",
   } = config;
 
   // Normalize and format the quote
@@ -195,43 +262,67 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
   parts.push(`Create a COLORING BOOK PAGE with the quote: "${formattedQuote}"`);
   parts.push("");
 
-  // Emphasize white background again
+  // Emphasize white background
   parts.push(`=== PAGE SETUP ===`);
-  parts.push(`- Start with a BLANK WHITE page.`);
-  parts.push(`- Draw only BLACK OUTLINES on the white page.`);
-  parts.push(`- Every letter and decoration is an EMPTY OUTLINE ready to be colored.`);
+  parts.push(`- BLANK WHITE page background.`);
+  parts.push(`- BLACK OUTLINES only - no fills, no shading.`);
+  parts.push(`- Every element is a HOLLOW OUTLINE ready to be colored.`);
   parts.push("");
 
-  // Layout description
-  parts.push(`=== TEXT LAYOUT ===`);
-  parts.push(`- Quote text is CENTERED and large.`);
-  parts.push(`- Typography: ${TYPOGRAPHY_STYLES[typographyStyle]}`);
+  // Typography description
+  parts.push(`=== TYPOGRAPHY ===`);
+  parts.push(`- Quote text is CENTERED and LARGE.`);
+  parts.push(`- Style: ${TYPOGRAPHY_STYLES[typographyStyle]}`);
   parts.push(`- Letters are HOLLOW OUTLINES (white inside, black outline).`);
-  parts.push(`- Text takes up about 40-50% of the page.`);
-  parts.push(`- Leave clear space around the text.`);
+  parts.push(`- Text should be the DOMINANT visual element.`);
   parts.push("");
 
-  // Decoration description
-  parts.push(`=== DECORATIONS (all outlines, no fills) ===`);
-  parts.push(`- Theme: ${DECORATION_THEMES[decorationTheme]}`);
-  parts.push(`- Density: ${DENSITY_LEVELS[density]}`);
-  parts.push(`- Frame: ${FRAME_STYLES[frameStyle]}`);
-  parts.push(`- All decorations are OUTLINE-ONLY on WHITE background.`);
+  // DECORATION LEVEL - This is the key section that varies based on user choice
+  parts.push(`=== DECORATION INSTRUCTIONS (FOLLOW EXACTLY) ===`);
+  parts.push(DECORATION_LEVELS[decorationLevel]);
+  
+  // Add icon-specific instructions for minimal_icons mode
+  if (decorationLevel === "minimal_icons" && iconSet) {
+    parts.push("");
+    parts.push(`Icons to use: ${ICON_SETS[iconSet]}`);
+    parts.push(`IMPORTANT: Only use these specific icons, keep them small and sparse.`);
+  }
+  
+  // Add theme-specific instructions for full_background mode
+  if (decorationLevel === "full_background") {
+    parts.push("");
+    parts.push(`Background theme: ${DECORATION_THEMES[decorationTheme]}`);
+    parts.push(`Density: ${DENSITY_LEVELS[density]}`);
+  }
+  
+  // Add frame instructions for border_only mode
+  if (decorationLevel === "border_only") {
+    parts.push("");
+    parts.push(`Border style: ${FRAME_STYLES[frameStyle] || FRAME_STYLES.thin}`);
+  }
   parts.push("");
 
   // Add mandatory style spec
   parts.push(QUOTE_STYLE_SPEC);
 
-  // Add text legibility rules (shortened)
+  // Text legibility rules
   parts.push("");
-  parts.push(`TEXT RULES: Large readable letters, outline-only, empty white interiors, clear spacing.`);
-
-  // Add framing constraints (shortened)
-  parts.push(`FRAMING: Full page composition (92-97% height), minimal margins, decorations reach edges.`);
+  parts.push(`TEXT RULES: Large readable letters, outline-only, empty interiors, clear spacing.`);
 
   // Strong negative prompt at the end
   parts.push("");
-  parts.push(`*** DO NOT INCLUDE: ${QUOTE_NEGATIVE_PROMPTS.slice(0, 10).join(", ")} ***`);
+  
+  // Different negative prompts based on decoration level
+  if (decorationLevel === "text_only") {
+    parts.push(`*** ABSOLUTELY NO: flowers, trees, patterns, icons, shapes, borders, frames, decorations ***`);
+    parts.push(`*** ONLY: The quote text on white background. Nothing else. ***`);
+  } else if (decorationLevel === "minimal_icons") {
+    parts.push(`*** DO NOT: add flowers, trees, landscapes, complex patterns, dense backgrounds ***`);
+    parts.push(`*** ONLY: text + a few small simple icons. Keep it sparse. ***`);
+  } else {
+    parts.push(`*** DO NOT: ${QUOTE_NEGATIVE_PROMPTS.slice(0, 8).join(", ")} ***`);
+  }
+  
   parts.push(`*** REMEMBER: WHITE background, BLACK outlines only, NO fills ***`);
 
   return parts.join("\n");

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 
 /**
  * Route segment config
@@ -8,11 +9,29 @@ import { z } from "zod";
 export const maxDuration = 60;
 
 const requestSchema = z.object({
-  theme: z.string().min(1, "Theme is required"),
-  tone: z.enum(["cute", "elegant", "bold", "minimalist", "inspirational"]).default("inspirational"),
+  // Topic mode: "any" for broad topics, "selected" for specific topics
+  topicMode: z.enum(["any", "selected"]).default("any"),
+  topics: z.array(z.string()).optional(), // When topicMode is "selected"
+  
+  // Tone and audience
+  tone: z.enum([
+    "cute", "bold", "calm", "funny", "motivational", 
+    "romantic", "faith", "sports", "kids", "inspirational",
+    "elegant", "minimalist"
+  ]).default("motivational"),
   audience: z.enum(["kids", "teens", "adults", "all"]).default("all"),
+  
+  // Count
   count: z.number().int().min(1).max(50).default(10),
-  // Anti-repetition
+  
+  // Topics to avoid
+  avoidTopics: z.array(z.string()).optional(),
+  
+  // Previous quotes to exclude (anti-repetition)
+  excludeQuotes: z.array(z.string()).optional(),
+  
+  // Legacy support
+  theme: z.string().optional(),
   previousQuotes: z.array(z.string()).optional(),
   seed: z.string().optional(),
 });
@@ -21,11 +40,50 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Broad topic pool for diverse quote generation
+const TOPIC_POOL = [
+  "self-love", "self-confidence", "inner strength",
+  "friendship", "kindness", "compassion",
+  "family", "parenting", "motherhood", "fatherhood",
+  "love", "romance", "relationships",
+  "gratitude", "thankfulness", "appreciation",
+  "dreams", "goals", "ambition", "success",
+  "courage", "bravery", "overcoming fear",
+  "happiness", "joy", "positivity",
+  "peace", "calm", "mindfulness",
+  "growth", "learning", "wisdom",
+  "nature", "beauty", "wonder",
+  "faith", "hope", "spirituality",
+  "sports", "fitness", "health", "wellness",
+  "creativity", "art", "imagination",
+  "adventure", "travel", "exploration",
+  "work", "career", "productivity",
+  "humor", "laughter", "fun",
+  "resilience", "perseverance", "never giving up",
+  "uniqueness", "being yourself", "authenticity",
+  "teamwork", "community", "belonging",
+  "animals", "pets", "wildlife",
+  "music", "dance", "celebration",
+];
+
+/**
+ * Get random topics from the pool, excluding specified topics
+ */
+function getRandomTopics(count: number, exclude: string[] = []): string[] {
+  const available = TOPIC_POOL.filter(t => 
+    !exclude.some(e => t.toLowerCase().includes(e.toLowerCase()))
+  );
+  
+  // Shuffle and pick
+  const shuffled = [...available].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(count, shuffled.length));
+}
+
 /**
  * POST /api/quote/generate
  * 
- * Generates quotes/affirmations based on theme and tone.
- * Returns short, impactful quotes suitable for coloring pages.
+ * Generates fresh, diverse quotes dynamically.
+ * NEVER uses hardcoded quotes - always generates new ones via AI.
  */
 export async function POST(request: NextRequest) {
   if (!process.env.OPENAI_API_KEY) {
@@ -46,58 +104,120 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { theme, tone, audience, count, previousQuotes, seed } = parseResult.data;
+    const { 
+      topicMode, 
+      topics, 
+      tone, 
+      audience, 
+      count, 
+      avoidTopics,
+      excludeQuotes,
+      // Legacy support
+      theme,
+      previousQuotes,
+    } = parseResult.data;
 
-    // Build exclusion list for diversity
-    const exclusions = previousQuotes?.slice(-20) || [];
-    const exclusionText = exclusions.length > 0
-      ? `\n\nDO NOT repeat or closely paraphrase these previous quotes:\n${exclusions.map(q => `- "${q}"`).join("\n")}`
+    // Generate unique seed for this request
+    const requestId = randomUUID();
+    const timestamp = Date.now();
+    
+    // Combine exclusion lists
+    const allExcludedQuotes = [
+      ...(excludeQuotes || []),
+      ...(previousQuotes || []),
+    ].slice(-50); // Keep last 50 for context window
+
+    // Determine topics to use
+    let selectedTopics: string[];
+    if (topicMode === "selected" && topics && topics.length > 0) {
+      selectedTopics = topics;
+    } else if (theme) {
+      // Legacy: use theme as a hint
+      selectedTopics = getRandomTopics(Math.min(count, 8), avoidTopics || []);
+      selectedTopics[0] = theme; // Include user's theme
+    } else {
+      // Random diverse topics
+      selectedTopics = getRandomTopics(Math.min(count, 10), avoidTopics || []);
+    }
+
+    // Build exclusion text
+    const exclusionText = allExcludedQuotes.length > 0
+      ? `\n\n=== QUOTES TO AVOID (DO NOT REPEAT OR PARAPHRASE) ===\n${allExcludedQuotes.slice(-20).map(q => `- "${q}"`).join("\n")}`
       : "";
 
     // Audience-specific guidance
     const audienceGuidance: Record<string, string> = {
-      kids: "Use simple words, playful language, and positive messages suitable for children ages 4-10.",
-      teens: "Use relatable, empowering language that resonates with teenagers and young adults.",
-      adults: "Use sophisticated, meaningful language with depth and wisdom.",
-      all: "Use universal language that appeals to all ages.",
+      kids: "Use simple words (2nd-3rd grade level), playful language, and positive messages suitable for children ages 4-10. Avoid complex concepts.",
+      teens: "Use relatable, empowering language that resonates with teenagers and young adults. Can include mild slang but keep it clean.",
+      adults: "Use sophisticated, meaningful language with depth and wisdom. Can include nuanced emotional concepts.",
+      all: "Use universal language that appeals to all ages - simple but meaningful.",
     };
 
     // Tone-specific guidance
     const toneGuidance: Record<string, string> = {
-      cute: "Playful, adorable, whimsical tone with gentle positivity.",
+      cute: "Playful, adorable, whimsical tone with gentle positivity and warmth.",
+      bold: "Strong, powerful, assertive tone with confidence and determination.",
+      calm: "Peaceful, serene, soothing tone that promotes relaxation and mindfulness.",
+      funny: "Light-hearted, humorous, witty tone that makes people smile.",
+      motivational: "Energizing, inspiring, push-forward tone that drives action.",
+      romantic: "Loving, tender, heartfelt tone about love and relationships.",
+      faith: "Spiritual, hopeful, uplifting tone with references to faith and belief.",
+      sports: "Competitive, team-spirit, athletic tone about winning, effort, and sportsmanship.",
+      kids: "Super simple, fun, encouraging tone perfect for young children.",
+      inspirational: "Uplifting, thought-provoking, encouraging tone.",
       elegant: "Graceful, refined, poetic tone with timeless wisdom.",
-      bold: "Strong, powerful, assertive tone with confidence.",
       minimalist: "Simple, clean, direct tone with impactful brevity.",
-      inspirational: "Uplifting, motivating, encouraging tone.",
     };
 
-    const systemPrompt = `You are an expert quote writer specializing in short, impactful quotes for coloring books.
+    const systemPrompt = `You are an expert quote creator specializing in short, impactful, ORIGINAL quotes for coloring books.
 
-Your quotes must be:
-- SHORT: 3-12 words maximum (ideal: 4-8 words)
-- IMPACTFUL: Meaningful and memorable
-- VISUAL-FRIENDLY: Easy to display in large typography
-- ORIGINAL: Fresh and unique (not common clichés)
-- POSITIVE: Uplifting and appropriate for all
+=== CRITICAL RULES ===
+1. CREATE BRAND NEW QUOTES - Do not use famous quotes, song lyrics, or well-known sayings.
+2. VARY EVERYTHING - Use different sentence structures, word choices, and phrasings.
+3. KEEP IT SHORT - 3-12 words maximum (ideal: 4-8 words). Max 60 characters.
+4. MAKE IT VISUAL - The quote will be displayed in large typography on a coloring page.
 
+=== RANDOMIZATION SEED ===
+Request ID: ${requestId}
+Timestamp: ${timestamp}
+Use these to ensure unique generation.
+
+=== AUDIENCE ===
 ${audienceGuidance[audience]}
+
+=== TONE ===
 ${toneGuidance[tone]}
 
-Rules:
-- Avoid complex punctuation (minimal commas, no semicolons)
-- Avoid very long words when possible
-- Each quote should stand alone as a complete thought
-- Vary sentence structures across quotes
-- Make each quote distinctly different from others${exclusionText}`;
+=== DIVERSITY RULES ===
+- Cover DIFFERENT topics from this list: ${selectedTopics.join(", ")}
+- Each quote MUST be distinctly different from others
+- Vary: sentence length, starting word, structure (question vs statement vs exclamation)
+- NO two quotes should start with the same word
+- NO two quotes should have the same structure
+${exclusionText}
 
-    const userPrompt = `Generate exactly ${count} unique quotes about "${theme}".
+=== OUTPUT FORMAT ===
+Return ONLY a JSON object with this exact structure:
+{
+  "quotes": [
+    { "quote": "Your unique quote here", "topic": "topic-name", "keywords": ["key1", "key2"] }
+  ]
+}`;
 
-Return ONLY a JSON array of strings, like this:
-["Quote one here", "Quote two here", "Quote three here"]
+    const userPrompt = `Generate exactly ${count} UNIQUE, ORIGINAL quotes.
 
-Each quote should be 3-12 words. Make them diverse - vary the style, structure, and specific angle on the theme.${seed ? `\n\nUse this seed for randomization: ${seed}` : ""}`;
+Topics to cover (distribute evenly): ${selectedTopics.join(", ")}
 
-    console.log(`[quote/generate] Generating ${count} quotes for theme: "${theme}"`);
+Requirements:
+- Each quote: 3-12 words, max 60 characters
+- All quotes must be DIFFERENT from each other
+- All quotes must be ORIGINAL (not famous quotes)
+- Mix up sentence structures (some statements, some questions, some exclamations)
+- Vary the starting words
+
+Generate ${count} quotes NOW with maximum diversity.`;
+
+    console.log(`[quote/generate] Generating ${count} quotes, topics: ${selectedTopics.slice(0, 5).join(", ")}...`);
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -105,55 +225,100 @@ Each quote should be 3-12 words. Make them diverse - vary the style, structure, 
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.9, // High temperature for diversity
-      max_tokens: 2000,
+      temperature: 1.0, // Maximum temperature for diversity
+      max_tokens: 3000,
+      presence_penalty: 0.6, // Discourage repetition
+      frequency_penalty: 0.8, // Further discourage repetition
     });
 
     const content = response.choices[0]?.message?.content?.trim() || "";
     
-    // Parse the JSON array
-    let quotes: string[] = [];
+    // Parse the JSON response
+    interface QuoteItem {
+      quote: string;
+      topic?: string;
+      keywords?: string[];
+    }
+    
+    let parsedQuotes: QuoteItem[] = [];
     try {
-      // Try to extract JSON array from response
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        quotes = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("No JSON array found");
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed.quotes)) {
+          parsedQuotes = parsed.quotes;
+        }
+      }
+      
+      // Fallback: try to parse as array
+      if (parsedQuotes.length === 0) {
+        const arrayMatch = content.match(/\[[\s\S]*\]/);
+        if (arrayMatch) {
+          const arr = JSON.parse(arrayMatch[0]);
+          parsedQuotes = arr.map((q: string | QuoteItem) => 
+            typeof q === "string" ? { quote: q } : q
+          );
+        }
       }
     } catch (parseError) {
       console.error("[quote/generate] Failed to parse quotes:", parseError);
-      // Fallback: try to extract quotes line by line
-      quotes = content
+      // Fallback: extract quotes line by line
+      const lines = content
         .split("\n")
         .map(line => line.replace(/^[\d\.\-\*\s"']+/, "").replace(/["']$/, "").trim())
-        .filter(line => line.length > 5 && line.length < 100);
+        .filter(line => line.length > 5 && line.length < 80);
+      parsedQuotes = lines.map(q => ({ quote: q }));
     }
 
-    // Validate and clean quotes
-    quotes = quotes
-      .map(q => q.trim())
-      .filter(q => {
+    // Validate, clean, and deduplicate quotes
+    const seenQuotes = new Set<string>();
+    const validQuotes = parsedQuotes
+      .map(item => ({
+        quote: item.quote?.trim() || "",
+        topic: item.topic || selectedTopics[Math.floor(Math.random() * selectedTopics.length)],
+        keywords: item.keywords || [],
+      }))
+      .filter(item => {
+        const q = item.quote;
         const wordCount = q.split(/\s+/).length;
-        return wordCount >= 2 && wordCount <= 15 && q.length > 3;
+        const isValid = wordCount >= 2 && wordCount <= 15 && q.length > 3 && q.length <= 80;
+        
+        // Check for duplicates (case-insensitive)
+        const normalized = q.toLowerCase().replace(/[^\w\s]/g, "");
+        if (seenQuotes.has(normalized)) {
+          return false;
+        }
+        seenQuotes.add(normalized);
+        
+        // Check against excluded quotes (fuzzy match)
+        const isTooSimilar = allExcludedQuotes.some(excluded => {
+          const excNorm = excluded.toLowerCase().replace(/[^\w\s]/g, "");
+          return normalized === excNorm || 
+                 normalized.includes(excNorm) || 
+                 excNorm.includes(normalized);
+        });
+        
+        return isValid && !isTooSimilar;
       })
       .slice(0, count);
 
-    if (quotes.length === 0) {
+    if (validQuotes.length === 0) {
       return NextResponse.json(
         { error: "Failed to generate valid quotes. Please try again." },
         { status: 500 }
       );
     }
 
-    console.log(`[quote/generate] Generated ${quotes.length} quotes`);
+    console.log(`[quote/generate] Generated ${validQuotes.length} unique quotes`);
 
     return NextResponse.json({
-      quotes,
-      theme,
+      quotes: validQuotes.map(q => q.quote),
+      quotesWithMeta: validQuotes,
+      topics: selectedTopics,
       tone,
       audience,
-      count: quotes.length,
+      count: validQuotes.length,
+      requestId,
     });
 
   } catch (error) {
@@ -164,4 +329,3 @@ Each quote should be 3-12 words. Make them diverse - vary the style, structure, 
     );
   }
 }
-

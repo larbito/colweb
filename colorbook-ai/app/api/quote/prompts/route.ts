@@ -8,6 +8,8 @@ import {
   type TypographyStyle,
   type DecorationDensity,
   type FrameStyle,
+  type DecorationLevel,
+  type IconSet,
   DECORATION_THEMES,
 } from "@/lib/quotePagePromptEnforcer";
 
@@ -23,27 +25,45 @@ const requestSchema = z.object({
   // Book type
   bookType: z.enum(["different_quotes", "same_quote_variations"]).default("different_quotes"),
   
-  // Style settings
-  decorationTheme: z.enum(["floral", "stars", "mandala", "hearts", "nature", "geometric", "doodles", "mixed"]).default("floral"),
+  // NEW: Decoration level - controls how much decoration appears
+  decorationLevel: z.enum(["text_only", "minimal_icons", "border_only", "full_background"]).default("minimal_icons"),
+  
+  // NEW: Icon set (only used with minimal_icons)
+  iconSet: z.enum(["stars", "hearts", "doodles", "sports", "kids"]).default("stars"),
+  
+  // Style settings (used for full_background mode)
+  decorationTheme: z.enum(["floral", "stars", "mandala", "hearts", "nature", "geometric", "doodles", "mixed"]).default("stars"),
   typographyStyle: z.enum(["bubble", "script", "block", "mixed"]).default("bubble"),
   density: z.enum(["low", "medium", "high"]).default("medium"),
-  frameStyle: z.enum(["none", "thin", "corners"]).default("none"),
+  frameStyle: z.enum(["none", "thin", "corners"]).default("thin"),
   
   // For same_quote_variations mode
   variationCount: z.number().int().min(1).max(20).default(5),
 });
 
 /**
- * Generate variation themes for same-quote-variations mode
+ * Generate variation icon sets for same-quote-variations mode
+ */
+function getVariationIconSets(count: number): IconSet[] {
+  const allSets: IconSet[] = ["stars", "hearts", "doodles", "sports", "kids"];
+  const result: IconSet[] = [];
+  
+  for (let i = 0; i < count; i++) {
+    result.push(allSets[i % allSets.length]);
+  }
+  
+  return result;
+}
+
+/**
+ * Generate variation themes for same-quote-variations mode (full_background only)
  */
 function getVariationThemes(baseTheme: DecorationTheme, count: number): DecorationTheme[] {
   const allThemes: DecorationTheme[] = ["floral", "stars", "mandala", "hearts", "nature", "geometric", "doodles"];
   
-  // Start with base theme, then add others
   const themes: DecorationTheme[] = [baseTheme];
   const remaining = allThemes.filter(t => t !== baseTheme);
   
-  // Cycle through remaining themes
   for (let i = 1; i < count; i++) {
     themes.push(remaining[(i - 1) % remaining.length]);
   }
@@ -55,6 +75,7 @@ function getVariationThemes(baseTheme: DecorationTheme, count: number): Decorati
  * POST /api/quote/prompts
  * 
  * Converts quotes into structured prompts for image generation.
+ * Now supports decoration levels for fine-grained control.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -71,6 +92,8 @@ export async function POST(request: NextRequest) {
     const {
       quotes,
       bookType,
+      decorationLevel,
+      iconSet,
       decorationTheme,
       typographyStyle,
       density,
@@ -78,7 +101,7 @@ export async function POST(request: NextRequest) {
       variationCount,
     } = parseResult.data;
 
-    console.log(`[quote/prompts] Generating prompts for ${quotes.length} quotes, mode: ${bookType}`);
+    console.log(`[quote/prompts] Generating prompts: ${quotes.length} quotes, level: ${decorationLevel}, mode: ${bookType}`);
 
     interface PagePrompt {
       page: number;
@@ -86,6 +109,8 @@ export async function POST(request: NextRequest) {
       title: string;
       prompt: string;
       decorationTheme: DecorationTheme;
+      decorationLevel: DecorationLevel;
+      iconSet?: IconSet;
       validation: ReturnType<typeof validateQuote>;
     }
 
@@ -97,17 +122,29 @@ export async function POST(request: NextRequest) {
         const normalized = normalizeQuote(quote);
         const validation = validateQuote(normalized);
         
-        // Vary decoration slightly for visual interest
-        const themeVariation = index % 3 === 0 
-          ? decorationTheme 
-          : (index % 3 === 1 ? "mixed" : decorationTheme);
+        // For minimal_icons mode, vary the icon set slightly
+        let pageIconSet = iconSet;
+        if (decorationLevel === "minimal_icons") {
+          const iconSets: IconSet[] = ["stars", "hearts", "doodles", "sports", "kids"];
+          // Mostly use the selected set, occasionally vary
+          pageIconSet = index % 4 === 0 ? iconSets[(iconSets.indexOf(iconSet) + 1) % iconSets.length] : iconSet;
+        }
+        
+        // For full_background mode, vary the theme slightly
+        let pageTheme = decorationTheme;
+        if (decorationLevel === "full_background") {
+          const themes: DecorationTheme[] = ["floral", "stars", "mandala", "hearts", "nature", "geometric", "doodles"];
+          pageTheme = index % 3 === 0 ? themes[(themes.indexOf(decorationTheme) + index) % themes.length] : decorationTheme;
+        }
         
         const prompt = buildQuotePagePrompt({
           quote: normalized,
-          decorationTheme: themeVariation as DecorationTheme,
+          decorationTheme: pageTheme,
           typographyStyle,
           density,
           frameStyle,
+          decorationLevel,
+          iconSet: pageIconSet,
           pageNumber: index + 1,
           totalPages: quotes.length,
         });
@@ -117,7 +154,9 @@ export async function POST(request: NextRequest) {
           quote: normalized,
           title: normalized.slice(0, 30) + (normalized.length > 30 ? "..." : ""),
           prompt,
-          decorationTheme: themeVariation as DecorationTheme,
+          decorationTheme: pageTheme,
+          decorationLevel,
+          iconSet: pageIconSet,
           validation,
         });
       });
@@ -125,31 +164,55 @@ export async function POST(request: NextRequest) {
       // Same quote with variations
       const mainQuote = normalizeQuote(quotes[0]);
       const validation = validateQuote(mainQuote);
-      const variationThemes = getVariationThemes(decorationTheme, variationCount);
       
-      // Different typography styles for variation
+      // Get variation sets based on decoration level
+      const iconVariations = decorationLevel === "minimal_icons" 
+        ? getVariationIconSets(variationCount) 
+        : [];
+      const themeVariations = decorationLevel === "full_background"
+        ? getVariationThemes(decorationTheme, variationCount)
+        : [];
+      
+      // Typography variations
       const typographyVariations: TypographyStyle[] = ["bubble", "script", "block", "mixed"];
       
       for (let i = 0; i < variationCount; i++) {
-        const theme = variationThemes[i];
         const typo = typographyVariations[i % typographyVariations.length];
+        const pageIconSet = iconVariations[i] || iconSet;
+        const pageTheme = themeVariations[i] || decorationTheme;
         
         const prompt = buildQuotePagePrompt({
           quote: mainQuote,
-          decorationTheme: theme,
+          decorationTheme: pageTheme,
           typographyStyle: typo,
           density,
           frameStyle,
+          decorationLevel,
+          iconSet: pageIconSet,
           pageNumber: i + 1,
           totalPages: variationCount,
         });
 
+        // Build title based on decoration level
+        let title: string;
+        if (decorationLevel === "text_only") {
+          title = `${typo} typography`;
+        } else if (decorationLevel === "minimal_icons") {
+          title = `${pageIconSet} + ${typo}`;
+        } else if (decorationLevel === "border_only") {
+          title = `${typo} with border`;
+        } else {
+          title = `${DECORATION_THEMES[pageTheme].split(",")[0]}`;
+        }
+
         pages.push({
           page: i + 1,
           quote: mainQuote,
-          title: `${DECORATION_THEMES[theme].split(",")[0]} style`,
+          title,
           prompt,
-          decorationTheme: theme,
+          decorationTheme: pageTheme,
+          decorationLevel,
+          iconSet: pageIconSet,
           validation,
         });
       }
@@ -172,9 +235,13 @@ export async function POST(request: NextRequest) {
         title: p.title,
         prompt: p.prompt,
         decorationTheme: p.decorationTheme,
+        decorationLevel: p.decorationLevel,
+        iconSet: p.iconSet,
       })),
       bookType,
       settings: {
+        decorationLevel,
+        iconSet,
         decorationTheme,
         typographyStyle,
         density,
@@ -191,4 +258,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
