@@ -12,41 +12,55 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Download, FileText, BookOpen, Eye, AlertTriangle, Sparkles } from "lucide-react";
+import { Loader2, Download, FileText, BookOpen, Eye, AlertTriangle, Sparkles, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { PDFPreviewModal } from "./pdf-preview-modal";
 
-// Page sizes in points (72 points = 1 inch)
+// US Letter at 72 DPI (standard PDF points)
 const PAGE_SIZES = {
+  letter: { width: 612, height: 792 }, // 8.5 x 11 inches
   a4: { width: 595.28, height: 841.89 },
-  letter: { width: 612, height: 792 },
+};
+
+// US Letter at 300 DPI (for image processing)
+const LETTER_PIXELS = {
+  width: 2550,
+  height: 3300,
 };
 
 interface PageData {
   page: number;
   imageBase64: string;
   enhancedImageBase64?: string;
-  activeVersion?: "original" | "enhanced";
+  finalLetterBase64?: string;
+  activeVersion?: "original" | "enhanced" | "finalLetter";
+  finalLetterStatus?: "none" | "processing" | "done" | "failed";
+}
+
+interface BelongsToData {
+  imageBase64: string;
+  enhancedImageBase64?: string;
+  finalLetterBase64?: string;
+  characterUsed?: string;
+  wasEnhanced?: boolean;
+  wasReframed?: boolean;
 }
 
 interface ExportPDFModalProps {
   isOpen: boolean;
   onClose: () => void;
-  // Pages to export (with base64 images)
   coloringPages: PageData[];
-  // Character profile for belongs-to page
   characterProfile?: {
     species?: string;
     faceShape?: string;
     eyeStyle?: string;
     proportions?: string;
+    keyFeatures?: string[];
   };
-  // Default values
   defaultTitle?: string;
   defaultAuthor?: string;
-  // Callback to enhance pages
-  onEnhancePages?: () => Promise<void>;
+  onProcessPages?: () => Promise<void>;
 }
 
 export function ExportPDFModal({
@@ -56,37 +70,37 @@ export function ExportPDFModal({
   characterProfile,
   defaultTitle = "My Coloring Book",
   defaultAuthor = "",
-  onEnhancePages,
+  onProcessPages,
 }: ExportPDFModalProps) {
   // Form state
   const [title, setTitle] = useState(defaultTitle);
   const [author, setAuthor] = useState(defaultAuthor);
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [website, setWebsite] = useState("");
-  const [pageSize, setPageSize] = useState<"a4" | "letter">("a4");
+  const [pageSize, setPageSize] = useState<"letter" | "a4">("letter"); // Default to Letter
   const [insertBlankPages, setInsertBlankPages] = useState(true);
   const [includeBelongsTo, setIncludeBelongsTo] = useState(true);
   const [includeCopyright, setIncludeCopyright] = useState(true);
   const [includePageNumbers, setIncludePageNumbers] = useState(false);
   const [includeCreatedWith, setIncludeCreatedWith] = useState(false);
-  const [useEnhancedImages, setUseEnhancedImages] = useState(true);
 
   // Export state
   const [isExporting, setIsExporting] = useState(false);
-  const [belongsToImage, setBelongsToImage] = useState<string | null>(null);
+  const [belongsToData, setBelongsToData] = useState<BelongsToData | null>(null);
   const [exportStep, setExportStep] = useState<string>("");
   
   // Preview state
   const [showPreview, setShowPreview] = useState(false);
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
 
-  // Check if any pages need enhancement
-  const enhancedCount = coloringPages.filter(p => p.enhancedImageBase64).length;
-  const needsEnhancement = useEnhancedImages && enhancedCount < coloringPages.length;
+  // Check processing status
+  const processedCount = coloringPages.filter(p => p.finalLetterBase64 || p.finalLetterStatus === "done").length;
+  const allPagesProcessed = processedCount === coloringPages.length;
+  const belongsToReady = !includeBelongsTo || (belongsToData?.finalLetterBase64);
 
-  // Generate the belongs-to page
-  const generateBelongsToPage = async (): Promise<string | null> => {
-    if (belongsToImage) return belongsToImage;
+  // Generate and process the belongs-to page
+  const generateBelongsToPage = async (): Promise<BelongsToData | null> => {
+    if (belongsToData?.finalLetterBase64) return belongsToData;
     
     setExportStep("Generating 'Belongs To' page...");
     
@@ -100,8 +114,9 @@ export function ExportPDFModal({
             ? `a cute ${characterProfile.species}` 
             : "a friendly cartoon animal",
           size: "1024x1536",
-          labelText: "This book belongs to:",
+          labelText: "THIS BOOK BELONGS TO:",
           style: "cute",
+          autoProcess: true, // Auto-enhance and reframe to Letter
         }),
       });
 
@@ -111,18 +126,26 @@ export function ExportPDFModal({
       }
 
       const data = await response.json();
-      setBelongsToImage(data.imageBase64);
-      return data.imageBase64;
+      const newBelongsTo: BelongsToData = {
+        imageBase64: data.imageBase64,
+        enhancedImageBase64: data.enhancedImageBase64,
+        finalLetterBase64: data.finalLetterBase64,
+        characterUsed: data.characterUsed,
+        wasEnhanced: data.wasEnhanced,
+        wasReframed: data.wasReframed,
+      };
+      
+      setBelongsToData(newBelongsTo);
+      return newBelongsTo;
     } catch (error) {
       console.error("Failed to generate belongs-to page:", error);
-      toast.error("Failed to generate 'Belongs To' page. Continuing without it.");
+      toast.error("Failed to generate 'Belongs To' page");
       return null;
     }
   };
 
   // Convert base64 to Uint8Array (strips data URL prefix if present)
   const base64ToUint8Array = (base64: string): Uint8Array => {
-    // Strip data URL prefix if present
     let cleanBase64 = base64;
     if (base64.includes(",")) {
       cleanBase64 = base64.split(",")[1];
@@ -135,36 +158,38 @@ export function ExportPDFModal({
     return bytes;
   };
 
-  // Embed image into PDF (handles both PNG and JPEG)
-  const embedImage = async (pdfDoc: PDFDocument, base64: string) => {
-    const imageBytes = base64ToUint8Array(base64);
-    
-    // Try PNG first, then JPEG
-    try {
-      return await pdfDoc.embedPng(imageBytes);
-    } catch {
-      // If PNG fails, try JPEG
-      try {
-        return await pdfDoc.embedJpg(imageBytes);
-      } catch (jpgError) {
-        console.error("Failed to embed image as PNG or JPEG:", jpgError);
-        throw new Error("Unsupported image format");
-      }
-    }
-  };
-
-  // Get the appropriate image for a page (enhanced or original)
+  // Get the best available image for a page (prefers finalLetter)
   const getPageImage = (page: PageData): string => {
-    if (useEnhancedImages && page.enhancedImageBase64 && page.activeVersion === "enhanced") {
+    // Priority: finalLetter > enhanced > original
+    if (page.finalLetterBase64) {
+      return page.finalLetterBase64;
+    }
+    if (page.enhancedImageBase64) {
       return page.enhancedImageBase64;
     }
     return page.imageBase64;
   };
 
-  // Generate PDF client-side using pdf-lib
+  // Embed image into PDF (handles both PNG and JPEG)
+  const embedImage = async (pdfDoc: PDFDocument, base64: string) => {
+    const imageBytes = base64ToUint8Array(base64);
+    
+    try {
+      return await pdfDoc.embedPng(imageBytes);
+    } catch {
+      try {
+        return await pdfDoc.embedJpg(imageBytes);
+      } catch (jpgError) {
+        console.error("Failed to embed image:", jpgError);
+        throw new Error("Unsupported image format");
+      }
+    }
+  };
+
+  // Generate PDF using ONLY finalLetter images
   const generatePDF = async (): Promise<{ pdfDoc: PDFDocument; pageCount: number }> => {
     const dimensions = PAGE_SIZES[pageSize];
-    const margins = 36; // 0.5 inch
+    const margins = 36; // 0.5 inch margins
 
     const pdfDoc = await PDFDocument.create();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -187,17 +212,19 @@ export function ExportPDFModal({
 
     // 1. BELONGS TO PAGE (if enabled)
     if (includeBelongsTo) {
-      let finalBelongsToImage = belongsToImage;
-      if (!finalBelongsToImage) {
-        finalBelongsToImage = await generateBelongsToPage();
+      let finalBelongsTo = belongsToData;
+      if (!finalBelongsTo?.finalLetterBase64) {
+        finalBelongsTo = await generateBelongsToPage();
       }
 
-      if (finalBelongsToImage) {
+      if (finalBelongsTo?.finalLetterBase64) {
         try {
+          setExportStep("Adding 'Belongs To' page...");
           const belongsToPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
           currentPageNum++;
           
-          const pngImage = await embedImage(pdfDoc, finalBelongsToImage);
+          // Use finalLetter image (already 2550x3300)
+          const pngImage = await embedImage(pdfDoc, finalBelongsTo.finalLetterBase64);
           
           const availableWidth = dimensions.width - (margins * 2);
           const availableHeight = dimensions.height - (margins * 2);
@@ -221,6 +248,7 @@ export function ExportPDFModal({
           addPageNumber(belongsToPage, currentPageNum);
         } catch (imgError) {
           console.error("Failed to embed belongs-to image:", imgError);
+          toast.error("Failed to add 'Belongs To' page");
         }
       }
     }
@@ -309,7 +337,7 @@ export function ExportPDFModal({
       addPageNumber(copyrightPage, currentPageNum);
     }
 
-    // 3. COLORING PAGES
+    // 3. COLORING PAGES (using finalLetter when available)
     for (let i = 0; i < coloringPages.length; i++) {
       setExportStep(`Adding page ${i + 1} of ${coloringPages.length}...`);
       const pageData = coloringPages[i];
@@ -318,7 +346,7 @@ export function ExportPDFModal({
         const coloringPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
         currentPageNum++;
         
-        // Get the appropriate image (enhanced or original)
+        // Get best available image (prioritizes finalLetter)
         const imageToUse = getPageImage(pageData);
         const pngImage = await embedImage(pdfDoc, imageToUse);
         
@@ -391,7 +419,6 @@ export function ExportPDFModal({
   const handleDownload = useCallback(() => {
     if (!pdfData) return;
     
-    // Create blob from Uint8Array - convert to ArrayBuffer for compatibility
     const arrayBuffer = pdfData.buffer.slice(
       pdfData.byteOffset,
       pdfData.byteOffset + pdfData.byteLength
@@ -432,7 +459,6 @@ export function ExportPDFModal({
       setExportStep("Downloading...");
       const pdfBytes = await pdfDoc.save();
       
-      // Create blob from Uint8Array - convert to ArrayBuffer for compatibility
       const arrayBuffer = pdfBytes.buffer.slice(
         pdfBytes.byteOffset,
         pdfBytes.byteOffset + pdfBytes.byteLength
@@ -464,14 +490,14 @@ export function ExportPDFModal({
   return (
     <>
       <Dialog open={isOpen && !showPreview} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BookOpen className="h-5 w-5" />
               Export Coloring Book PDF
             </DialogTitle>
             <DialogDescription>
-              Create a print-ready PDF with {availablePages.length} coloring pages
+              Create a print-ready US Letter PDF with {availablePages.length} coloring pages
             </DialogDescription>
           </DialogHeader>
 
@@ -539,11 +565,11 @@ export function ExportPDFModal({
                   <label className="text-sm font-medium">Page Size</label>
                   <select
                     value={pageSize}
-                    onChange={(e) => setPageSize(e.target.value as "a4" | "letter")}
+                    onChange={(e) => setPageSize(e.target.value as "letter" | "a4")}
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                   >
-                    <option value="a4">A4 (210 × 297 mm)</option>
                     <option value="letter">US Letter (8.5 × 11 in)</option>
+                    <option value="a4">A4 (210 × 297 mm)</option>
                   </select>
                 </div>
               </div>
@@ -554,37 +580,35 @@ export function ExportPDFModal({
               <h4 className="text-sm font-medium">Content Options</h4>
               
               <div className="space-y-3">
-                {/* Enhanced images option */}
+                {/* Processing status */}
                 <div className="flex items-center justify-between">
-                  <label htmlFor="useEnhanced" className="flex items-center gap-2 cursor-pointer text-sm">
+                  <label className="flex items-center gap-2 text-sm">
                     <Sparkles className="h-4 w-4 text-amber-500" />
-                    Use enhanced images (recommended)
-                    {enhancedCount > 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        ({enhancedCount}/{coloringPages.length} enhanced)
-                      </span>
-                    )}
+                    Page processing status
+                    <span className="text-xs text-muted-foreground">
+                      ({processedCount}/{coloringPages.length} ready)
+                    </span>
                   </label>
-                  <Switch
-                    id="useEnhanced"
-                    checked={useEnhancedImages}
-                    onCheckedChange={setUseEnhancedImages}
-                  />
+                  {allPagesProcessed ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                  ) : (
+                    <span className="text-xs text-amber-600">Processing needed</span>
+                  )}
                 </div>
 
-                {/* Warning if some pages not enhanced */}
-                {needsEnhancement && onEnhancePages && (
+                {/* Warning if pages not processed */}
+                {!allPagesProcessed && onProcessPages && (
                   <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
                     <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                     <div className="flex-1">
-                      <p>Some pages are not enhanced yet.</p>
+                      <p>Some pages need processing for best print quality.</p>
                       <Button
                         variant="link"
                         size="sm"
                         className="h-auto p-0 text-amber-800 underline"
-                        onClick={onEnhancePages}
+                        onClick={onProcessPages}
                       >
-                        Enhance all pages now
+                        Process all pages now
                       </Button>
                     </div>
                   </div>
@@ -609,6 +633,9 @@ export function ExportPDFModal({
                       <span className="text-xs text-muted-foreground">
                         (featuring {characterProfile.species})
                       </span>
+                    )}
+                    {belongsToData?.finalLetterBase64 && (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
                     )}
                   </label>
                   <Switch
@@ -657,11 +684,11 @@ export function ExportPDFModal({
             <div className="rounded-lg bg-muted/50 p-3 text-sm">
               <p className="font-medium">PDF Preview:</p>
               <ul className="mt-1 space-y-1 text-muted-foreground">
-                {includeBelongsTo && <li>• &quot;Belongs To&quot; page</li>}
+                {includeBelongsTo && <li>• &quot;Belongs To&quot; page (auto-generated)</li>}
                 {includeCopyright && <li>• Copyright page</li>}
-                <li>• {availablePages.length} coloring pages {useEnhancedImages && enhancedCount > 0 && `(${enhancedCount} enhanced)`}</li>
-                {insertBlankPages && <li>• {Math.max(0, availablePages.length - 1)} blank pages (between drawings)</li>}
-                <li className="pt-1 text-xs">
+                <li>• {availablePages.length} coloring pages (US Letter format)</li>
+                {insertBlankPages && <li>• {Math.max(0, availablePages.length - 1)} blank pages</li>}
+                <li className="pt-1 text-xs font-medium">
                   Total: ~{(includeBelongsTo ? 1 : 0) + (includeCopyright ? 1 : 0) + availablePages.length + (insertBlankPages ? Math.max(0, availablePages.length - 1) : 0)} pages
                 </li>
               </ul>

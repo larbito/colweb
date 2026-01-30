@@ -134,27 +134,74 @@ export const batchGenerateRequestSchema = z.object({
 
 export type BatchGenerateRequest = z.infer<typeof batchGenerateRequestSchema>;
 
+/**
+ * Page processing status for multi-step pipeline
+ */
+export type ProcessingStatus = "none" | "processing" | "done" | "failed";
+
+/**
+ * Active version determines which image to use for PDF export
+ */
+export type ActiveVersion = "original" | "enhanced" | "finalLetter";
+
+/**
+ * Page type distinguishes coloring pages from special pages
+ */
+export type PageType = "coloring" | "belongsTo" | "copyright";
+
 export const pageResultSchema = z.object({
   page: z.number().int().min(1),
   status: z.enum(["pending", "generating", "done", "failed"]),
   imageBase64: z.string().optional(),
   error: z.string().optional(),
+  
   // Enhanced image fields
   enhancedImageBase64: z.string().optional(),
   enhanceStatus: z.enum(["none", "enhancing", "enhanced", "failed"]).default("none"),
-  activeVersion: z.enum(["original", "enhanced"]).default("original"),
+  
+  // Final Letter format (2550x3300) - REQUIRED FOR PDF
+  finalLetterBase64: z.string().optional(),
+  finalLetterStatus: z.enum(["none", "processing", "done", "failed"]).default("none"),
+  
+  // Active version for display/export (PDF uses finalLetter only)
+  activeVersion: z.enum(["original", "enhanced", "finalLetter"]).default("original"),
+  
+  // Page type
+  pageType: z.enum(["coloring", "belongsTo", "copyright"]).default("coloring"),
+  
+  // Validation info
+  bottomEmptyPercent: z.number().optional(),
+  artworkCoverage: z.number().optional(),
 });
 
 export type PageResult = z.infer<typeof pageResultSchema>;
 
 /**
- * Get the active image for a page result (prefers enhanced if available)
+ * Get the active image for a page result based on activeVersion.
+ * For PDF export, always use finalLetter.
  */
 export function getActiveImage(page: PageResult): string | undefined {
+  if (page.activeVersion === "finalLetter" && page.finalLetterBase64) {
+    return page.finalLetterBase64;
+  }
   if (page.activeVersion === "enhanced" && page.enhancedImageBase64) {
     return page.enhancedImageBase64;
   }
   return page.imageBase64;
+}
+
+/**
+ * Get the image for PDF export (always finalLetter if available)
+ */
+export function getPDFImage(page: PageResult): string | undefined {
+  return page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64;
+}
+
+/**
+ * Check if a page is ready for PDF export (has finalLetter)
+ */
+export function isReadyForPDF(page: PageResult): boolean {
+  return page.finalLetterStatus === "done" && !!page.finalLetterBase64;
 }
 
 export const batchGenerateResponseSchema = z.object({

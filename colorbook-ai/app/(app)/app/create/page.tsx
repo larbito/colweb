@@ -54,6 +54,8 @@ type PageStatus = "pending" | "generating" | "done" | "failed";
 
 type EnhanceStatus = "none" | "enhancing" | "enhanced" | "failed";
 
+type ProcessingStatus = "none" | "processing" | "done" | "failed";
+
 interface PageState extends PagePromptItem {
   status: PageStatus;
   imageBase64?: string;
@@ -62,7 +64,11 @@ interface PageState extends PagePromptItem {
   // Enhanced image fields
   enhancedImageBase64?: string;
   enhanceStatus: EnhanceStatus;
-  activeVersion: "original" | "enhanced";
+  // Final Letter format (2550x3300) - REQUIRED FOR PDF
+  finalLetterBase64?: string;
+  finalLetterStatus: ProcessingStatus;
+  // Active version for display
+  activeVersion: "original" | "enhanced" | "finalLetter";
 }
 
 interface GeneratedIdea {
@@ -348,6 +354,7 @@ export default function CreateColoringBookPage() {
         ...p,
         status: "pending" as PageStatus,
         enhanceStatus: "none" as EnhanceStatus,
+        finalLetterStatus: "none" as ProcessingStatus,
         activeVersion: "original" as const,
       }));
 
@@ -655,14 +662,164 @@ export default function CreateColoringBookPage() {
   };
 
   /**
-   * Toggle between original and enhanced version for a page
+   * Toggle between original, enhanced, and finalLetter versions for a page
    */
   const togglePageVersion = (pageNumber: number) => {
+    setPages(prev => prev.map(p => {
+      if (p.page !== pageNumber) return p;
+      
+      // Cycle through available versions
+      if (p.activeVersion === "original" && p.enhancedImageBase64) {
+        return { ...p, activeVersion: "enhanced" as const };
+      } else if (p.activeVersion === "enhanced" && p.finalLetterBase64) {
+        return { ...p, activeVersion: "finalLetter" as const };
+      } else if (p.activeVersion === "finalLetter") {
+        return { ...p, activeVersion: "original" as const };
+      } else if (p.activeVersion === "original" && p.finalLetterBase64) {
+        return { ...p, activeVersion: "finalLetter" as const };
+      }
+      return { ...p, activeVersion: "original" as const };
+    }));
+  };
+
+  // ==================== Process to Letter Format ====================
+
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingPageId, setProcessingPageId] = useState<number | null>(null);
+
+  /**
+   * Process a single page to Letter format (enhance + reframe)
+   */
+  const processSinglePage = async (pageNumber: number) => {
+    const page = pages.find(p => p.page === pageNumber);
+    if (!page || !page.imageBase64 || page.finalLetterStatus === "processing") return;
+
+    setProcessingPageId(pageNumber);
     setPages(prev => prev.map(p =>
-      p.page === pageNumber && p.enhancedImageBase64
-        ? { ...p, activeVersion: p.activeVersion === "enhanced" ? "original" : "enhanced" }
-        : p
+      p.page === pageNumber ? { ...p, finalLetterStatus: "processing" as ProcessingStatus } : p
     ));
+
+    try {
+      const response = await fetch("/api/image/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: page.imageBase64,
+          enhance: true,
+          enhanceScale: 2,
+          marginPercent: 3,
+          pageId: String(pageNumber),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.finalLetterBase64) {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? {
+                ...p,
+                enhancedImageBase64: data.enhancedBase64 || p.enhancedImageBase64,
+                enhanceStatus: data.wasEnhanced ? "enhanced" as EnhanceStatus : p.enhanceStatus,
+                finalLetterBase64: data.finalLetterBase64,
+                finalLetterStatus: "done" as ProcessingStatus,
+                activeVersion: "finalLetter" as const,
+              }
+            : p
+        ));
+        toast.success(`Page ${pageNumber} processed to Letter format!`);
+      } else {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber ? { ...p, finalLetterStatus: "failed" as ProcessingStatus } : p
+        ));
+        toast.error(`Failed to process page ${pageNumber}: ${data.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      setPages(prev => prev.map(p =>
+        p.page === pageNumber ? { ...p, finalLetterStatus: "failed" as ProcessingStatus } : p
+      ));
+      toast.error(error instanceof Error ? error.message : "Processing failed");
+    } finally {
+      setProcessingPageId(null);
+    }
+  };
+
+  /**
+   * Process all pages to Letter format
+   */
+  const processAllPages = async () => {
+    const pagesToProcess = pages.filter(
+      p => p.status === "done" && p.imageBase64 && p.finalLetterStatus !== "done"
+    );
+
+    if (pagesToProcess.length === 0) {
+      toast.info("All pages are already processed!");
+      return;
+    }
+
+    setIsProcessing(true);
+    let successCount = 0;
+
+    toast.info(`Processing ${pagesToProcess.length} pages to Letter format...`);
+
+    for (const page of pagesToProcess) {
+      setProcessingPageId(page.page);
+      setPages(prev => prev.map(p =>
+        p.page === page.page ? { ...p, finalLetterStatus: "processing" as ProcessingStatus } : p
+      ));
+
+      try {
+        const response = await fetch("/api/image/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageBase64: page.imageBase64,
+            enhance: true,
+            enhanceScale: 2,
+            marginPercent: 3,
+            pageId: String(page.page),
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.finalLetterBase64) {
+          setPages(prev => prev.map(p =>
+            p.page === page.page
+              ? {
+                  ...p,
+                  enhancedImageBase64: data.enhancedBase64 || p.enhancedImageBase64,
+                  enhanceStatus: data.wasEnhanced ? "enhanced" as EnhanceStatus : p.enhanceStatus,
+                  finalLetterBase64: data.finalLetterBase64,
+                  finalLetterStatus: "done" as ProcessingStatus,
+                  activeVersion: "finalLetter" as const,
+                }
+              : p
+          ));
+          successCount++;
+        } else {
+          setPages(prev => prev.map(p =>
+            p.page === page.page ? { ...p, finalLetterStatus: "failed" as ProcessingStatus } : p
+          ));
+        }
+      } catch {
+        setPages(prev => prev.map(p =>
+          p.page === page.page ? { ...p, finalLetterStatus: "failed" as ProcessingStatus } : p
+        ));
+      }
+
+      // Delay between processing to avoid rate limits
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    setIsProcessing(false);
+    setProcessingPageId(null);
+
+    if (successCount === pagesToProcess.length) {
+      toast.success(`All ${successCount} pages processed to Letter format!`);
+    } else {
+      toast.warning(`Processed ${successCount}/${pagesToProcess.length} pages`);
+    }
   };
 
   // ==================== Download ====================
@@ -714,6 +871,7 @@ export default function CreateColoringBookPage() {
   const doneCount = pages.filter(p => p.status === "done").length;
   const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed").length;
   const enhancedCount = pages.filter(p => p.enhanceStatus === "enhanced").length;
+  const processedCount = pages.filter(p => p.finalLetterStatus === "done").length;
 
   // ==================== Render ====================
 
@@ -1460,16 +1618,19 @@ export default function CreateColoringBookPage() {
             page: p.page,
             imageBase64: p.imageBase64!,
             enhancedImageBase64: p.enhancedImageBase64,
+            finalLetterBase64: p.finalLetterBase64,
             activeVersion: p.activeVersion,
+            finalLetterStatus: p.finalLetterStatus,
           }))}
         characterProfile={characterIdentityProfile ? {
           species: characterIdentityProfile.species,
           faceShape: characterIdentityProfile.faceShape,
           eyeStyle: characterIdentityProfile.eyeStyle,
           proportions: characterIdentityProfile.proportions,
+          keyFeatures: characterIdentityProfile.keyFeatures,
         } : undefined}
         defaultTitle={storyConfig.title || generatedIdea?.title || "My Coloring Book"}
-        onEnhancePages={enhanceAllPages}
+        onProcessPages={processAllPages}
       />
     </>
   );

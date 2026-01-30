@@ -77,53 +77,62 @@ export const NO_BORDER_CONSTRAINTS = `
 - Artwork extends to edges with only small natural margin`;
 
 // ============================================================
-// FRAMING / FILL THE CANVAS CONSTRAINTS (STRONGER VERSION)
+// FRAMING / FILL THE CANVAS CONSTRAINTS (US LETTER FULL-PAGE)
 // ============================================================
 
 /**
- * Universal framing constraint - applies to ALL sizes
- * CONDENSED version
+ * US LETTER FULL-PAGE constraint - ensures artwork fills the page
+ * Target: 8.5x11 inches, 300 DPI = 2550x3300 pixels
  */
 export const FILL_CANVAS_CONSTRAINTS = `
 
-=== FRAMING (MANDATORY) ===
-- Subject fills 90-95% of the canvas, minimal margins (3-5%)
-- NO blank bands at top or bottom, NO floating artwork
-- Character positioned lower in frame, environment extends to edges`;
+=== FRAMING (MANDATORY - US LETTER FULL-PAGE) ===
+- US Letter portrait full-page composition (8.5x11 aspect ratio)
+- Subject + environment fills 92-97% of canvas HEIGHT
+- Minimal top/bottom margins (each <= 3-5%)
+- Character positioned in lower-middle area of the frame
+- Environment/scene extends toward all edges
+- NO floating artwork - everything must be grounded`;
 
 /**
  * STRICT Bottom Fill constraint - prevents empty bottom space
- * STRENGTHENED version for better bottom coverage
+ * With top element requirement to prevent empty top
  */
 export const FOREGROUND_BOTTOM_FILL_CONSTRAINTS = `
 
-=== BOTTOM FILL (MANDATORY - STRICT) ===
-- Ground plane MUST reach the bottom edge (floorboards/grass/rug/table edge/path)
-- Place at least 3 simple foreground objects touching or very near bottom margin (<=3% from bottom)
+=== BOTTOM + TOP FILL (MANDATORY - STRICT) ===
+
+BOTTOM (CRITICAL):
+- Ground plane MUST reach the bottom edge (floorboards/grass/rug/table edge/path/dirt)
+- Place 2-5 simple foreground objects near bottom margin (toys/flowers/pebbles/leaves)
 - Keep bottom whitespace under 4-6% of canvas height
-- Position main subject in lower third, scale up so scene fills 92-97% of canvas height
-- NO empty bottom band - ground texture/props must fill the entire bottom area`;
+- NO empty bottom band
+
+TOP (IMPORTANT):
+- Add simple top element to prevent empty top (window/clouds/curtain edge/wall art/tree branch)
+- Keep top whitespace under 4-6% of canvas height
+
+OVERALL:
+- Main subject fills lower 2/3 of the frame
+- Scene fills 92-97% of total canvas height`;
 
 /**
  * Additional landscape-specific framing (when size is 1536x1024)
- * CONDENSED
  */
 export const LANDSCAPE_EXTRA_CONSTRAINTS = `
-LANDSCAPE: Wide composition filling full width, ground extends across bottom.`;
+LANDSCAPE: Wide horizontal composition, ground extends full width, elements fill left and right sides.`;
 
 /**
  * Additional portrait-specific framing (when size is 1024x1536)
- * CONDENSED
  */
 export const PORTRAIT_EXTRA_CONSTRAINTS = `
-PORTRAIT: Tall composition, subject fills 90% height, ground visible at bottom.`;
+PORTRAIT: Tall vertical composition for US Letter (8.5x11). Subject fills 90% height, ground at bottom, top element at top.`;
 
 /**
  * Additional square-specific framing (when size is 1024x1024)
- * CONDENSED
  */
 export const SQUARE_EXTRA_CONSTRAINTS = `
-SQUARE: Balanced composition, subject lower-center, ground at bottom edge.`;
+SQUARE: Balanced composition, subject centered in lower portion, ground at bottom edge, top element near top.`;
 
 // ============================================================
 // BOTTOM FILL RETRY REINFORCEMENT (used when auto-retrying)
