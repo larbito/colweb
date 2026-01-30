@@ -425,8 +425,10 @@ export default function BulkCreatePage() {
   const canNavigateTo = useCallback((step: BulkStep): boolean => {
     if (step === 1) return true;
     if (step === 2) return bookIdeas.some(i => i.isApproved);
-    if (step === 3) return batch !== null && batch.books.every(b => b.pages.every(p => p.isIdeaApproved));
-    if (step === 4) return batch !== null && batch.books.every(b => b.pages.every(p => p.isPromptApproved));
+    // Step 3: Can go if batch exists (has books with pages)
+    if (step === 3) return batch !== null && batch.books.length > 0;
+    // Step 4: Can go if at least some prompts are ready (not necessarily all approved)
+    if (step === 4) return batch !== null && batch.books.some(b => b.pages.some(p => p.finalPrompt && p.finalPrompt.trim() !== ""));
     if (step === 5) return batch !== null && batch.generatedPages > 0;
     return false;
   }, [bookIdeas, batch]);
@@ -610,6 +612,172 @@ export default function BulkCreatePage() {
     setIsGeneratingPageIdeas(false);
     toast.success("Generated all page ideas!");
   };
+  
+  // ==================== STEP 3: IMPROVE PROMPTS ====================
+  
+  const [improvingPageIds, setImprovingPageIds] = useState<Set<string>>(new Set());
+  const [improvingBookIds, setImprovingBookIds] = useState<Set<string>>(new Set());
+  
+  const improvePromptForPage = async (book: Book, page: BookPage) => {
+    if (!batch) return;
+    
+    setImprovingPageIds(prev => new Set([...prev, page.id]));
+    
+    try {
+      const response = await fetch("/api/bulk/improve-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: book.id,
+          pageId: page.id,
+          pageIndex: page.index,
+          ideaText: page.ideaText,
+          bookType: book.bookType,
+          bookConcept: book.concept || book.title,
+          settings: book.settings,
+          targetAge: book.targetAge,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to improve prompt");
+      }
+      
+      // Update the page with the generated prompt
+      setBatch(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          books: prev.books.map(b => 
+            b.id === book.id 
+              ? {
+                  ...b,
+                  pages: b.pages.map(p =>
+                    p.id === page.id 
+                      ? { 
+                          ...p, 
+                          finalPrompt: data.finalPrompt, 
+                          promptGeneratedAt: data.generatedAt,
+                          status: "prompt_ready" as const
+                        } 
+                      : p
+                  )
+                }
+              : b
+          )
+        };
+      });
+      
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to improve prompt");
+    } finally {
+      setImprovingPageIds(prev => {
+        const next = new Set(prev);
+        next.delete(page.id);
+        return next;
+      });
+    }
+  };
+  
+  const improveAllPromptsForBook = async (book: Book) => {
+    if (!batch) return;
+    
+    setImprovingBookIds(prev => new Set([...prev, book.id]));
+    
+    // Improve all pages in the book sequentially
+    for (const page of book.pages) {
+      if (!page.finalPrompt || page.finalPrompt.trim() === "") {
+        await improvePromptForPage(book, page);
+      }
+    }
+    
+    setImprovingBookIds(prev => {
+      const next = new Set(prev);
+      next.delete(book.id);
+      return next;
+    });
+    
+    toast.success(`Improved all prompts for "${book.title || 'Book'}"`);
+  };
+  
+  const improveAllPromptsForBatch = async () => {
+    if (!batch) return;
+    
+    setIsImprovingPrompts(true);
+    
+    // Process books with concurrency of 2
+    const books = batch.books;
+    const concurrency = 2;
+    
+    for (let i = 0; i < books.length; i += concurrency) {
+      const chunk = books.slice(i, i + concurrency);
+      await Promise.all(chunk.map(book => improveAllPromptsForBook(book)));
+    }
+    
+    setIsImprovingPrompts(false);
+    toast.success("All prompts improved!");
+  };
+  
+  const approvePrompt = (bookId: string, pageId: string) => {
+    setBatch(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        books: prev.books.map(b => 
+          b.id === bookId 
+            ? {
+                ...b,
+                pages: b.pages.map(p =>
+                  p.id === pageId ? { ...p, isPromptApproved: !p.isPromptApproved } : p
+                )
+              }
+            : b
+        )
+      };
+    });
+  };
+  
+  const approveAllPromptsInBook = (bookId: string) => {
+    setBatch(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        books: prev.books.map(b => 
+          b.id === bookId 
+            ? {
+                ...b,
+                pages: b.pages.map(p => ({ ...p, isPromptApproved: true }))
+              }
+            : b
+        )
+      };
+    });
+  };
+  
+  const approveAllPromptsInBatch = () => {
+    setBatch(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        books: prev.books.map(b => ({
+          ...b,
+          pages: b.pages.map(p => ({ ...p, isPromptApproved: true }))
+        }))
+      };
+    });
+  };
+  
+  // Count pages with prompts ready
+  const promptsReadyCount = batch?.books.reduce(
+    (sum, b) => sum + b.pages.filter(p => p.finalPrompt && p.finalPrompt.trim() !== "").length, 
+    0
+  ) || 0;
+  const promptsApprovedCount = batch?.books.reduce(
+    (sum, b) => sum + b.pages.filter(p => p.isPromptApproved).length, 
+    0
+  ) || 0;
   
   // ==================== STATS ====================
   
@@ -889,17 +1057,204 @@ export default function BulkCreatePage() {
                     Generate and approve detailed prompts for each page
                   </p>
                 </div>
-                <Button>
-                  <Wand2 className="mr-2 h-4 w-4" />
-                  Improve All Prompts
-                </Button>
+                <div className="flex items-center gap-3">
+                  <Badge variant="outline" className="text-sm py-1 px-3">
+                    {promptsReadyCount} / {batch.totalPages} ready · {promptsApprovedCount} approved
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    onClick={approveAllPromptsInBatch}
+                    disabled={promptsReadyCount === 0 || promptsApprovedCount === batch.totalPages}
+                  >
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Approve All
+                  </Button>
+                  <Button
+                    onClick={improveAllPromptsForBatch}
+                    disabled={isImprovingPrompts || improvingBookIds.size > 0}
+                  >
+                    {isImprovingPrompts ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Improving...
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 className="mr-2 h-4 w-4" />
+                        Improve All Prompts
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
               
-              <Card className="p-8 text-center text-muted-foreground">
-                <Wand2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>Prompt improvement UI coming soon...</p>
-                <p className="text-sm mt-2">Use "Improve All Prompts" to generate detailed prompts</p>
-              </Card>
+              {/* Books with page prompts */}
+              <div className="space-y-6">
+                {batch.books.map((book, bookIdx) => {
+                  const bookPromptsReady = book.pages.filter(p => p.finalPrompt && p.finalPrompt.trim() !== "").length;
+                  const bookPromptsApproved = book.pages.filter(p => p.isPromptApproved).length;
+                  const isBookImproving = improvingBookIds.has(book.id);
+                  
+                  return (
+                    <Card key={book.id}>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <CardTitle className="flex items-center gap-2">
+                              {book.bookType === "coloring_scenes" ? (
+                                <Palette className="h-5 w-5 text-primary" />
+                              ) : (
+                                <Quote className="h-5 w-5 text-purple-500" />
+                              )}
+                              {book.title || `Book ${bookIdx + 1}`}
+                            </CardTitle>
+                            <CardDescription className="flex items-center gap-2 mt-1">
+                              <span>{book.pages.length} pages</span>
+                              <span>·</span>
+                              <span className={bookPromptsReady === book.pages.length ? "text-green-600" : ""}>
+                                {bookPromptsReady}/{book.pages.length} prompts ready
+                              </span>
+                              <span>·</span>
+                              <span className={bookPromptsApproved === book.pages.length ? "text-green-600" : ""}>
+                                {bookPromptsApproved} approved
+                              </span>
+                            </CardDescription>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => approveAllPromptsInBook(book.id)}
+                              disabled={bookPromptsReady === 0 || bookPromptsApproved === book.pages.length}
+                            >
+                              <Check className="mr-1 h-3 w-3" />
+                              Approve All
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => improveAllPromptsForBook(book)}
+                              disabled={isBookImproving || isImprovingPrompts}
+                            >
+                              {isBookImproving ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Improving...
+                                </>
+                              ) : (
+                                <>
+                                  <Wand2 className="mr-2 h-4 w-4" />
+                                  Improve All
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {book.pages.map((page, pageIdx) => {
+                            const isPageImproving = improvingPageIds.has(page.id);
+                            const hasPrompt = page.finalPrompt && page.finalPrompt.trim() !== "";
+                            
+                            return (
+                              <div
+                                key={page.id}
+                                className={`p-4 rounded-lg border ${
+                                  page.isPromptApproved 
+                                    ? "bg-green-50/50 border-green-200" 
+                                    : hasPrompt 
+                                      ? "bg-blue-50/30 border-blue-200" 
+                                      : "bg-muted/30"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div className={`
+                                    w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0
+                                    ${page.isPromptApproved 
+                                      ? "bg-green-500 text-white" 
+                                      : hasPrompt 
+                                        ? "bg-blue-500 text-white" 
+                                        : "bg-muted text-muted-foreground"
+                                    }
+                                  `}>
+                                    {page.isPromptApproved ? <Check className="h-4 w-4" /> : pageIdx + 1}
+                                  </div>
+                                  
+                                  <div className="flex-1 min-w-0">
+                                    {/* Idea Text */}
+                                    <div className="mb-2">
+                                      <div className="text-xs font-medium text-muted-foreground mb-1">
+                                        {book.bookType === "coloring_scenes" ? "Scene:" : "Quote:"}
+                                      </div>
+                                      <p className="text-sm">{page.ideaText || <span className="text-muted-foreground italic">No content</span>}</p>
+                                    </div>
+                                    
+                                    {/* Generated Prompt */}
+                                    {hasPrompt && (
+                                      <div className="mt-3 pt-3 border-t">
+                                        <div className="flex items-center justify-between mb-1">
+                                          <div className="text-xs font-medium text-muted-foreground">
+                                            Generated Prompt:
+                                          </div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 text-xs"
+                                            onClick={() => {
+                                              navigator.clipboard.writeText(page.finalPrompt);
+                                              toast.success("Prompt copied!");
+                                            }}
+                                          >
+                                            <Copy className="h-3 w-3 mr-1" />
+                                            Copy
+                                          </Button>
+                                        </div>
+                                        <div className="bg-muted/50 rounded p-2 max-h-24 overflow-y-auto">
+                                          <p className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">
+                                            {page.finalPrompt.slice(0, 300)}{page.finalPrompt.length > 300 ? "..." : ""}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Actions */}
+                                  <div className="flex flex-col gap-1 flex-shrink-0">
+                                    {hasPrompt && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 w-8 p-0"
+                                        onClick={() => approvePrompt(book.id, page.id)}
+                                      >
+                                        <Check className={`h-4 w-4 ${page.isPromptApproved ? "text-green-500" : ""}`} />
+                                      </Button>
+                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0"
+                                      onClick={() => improvePromptForPage(book, page)}
+                                      disabled={isPageImproving || !page.ideaText}
+                                    >
+                                      {isPageImproving ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
               
               <div className="flex justify-between pt-4 border-t">
                 <Button variant="outline" onClick={goToPrevStep}>
