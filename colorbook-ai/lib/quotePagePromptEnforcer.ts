@@ -369,55 +369,60 @@ export const QUOTE_NEGATIVE_PROMPTS = [
 /**
  * Build a strict text-only prompt. NO decorations, NO exceptions.
  * This is a completely separate template to avoid any decoration leakage.
+ * 
+ * CRITICAL: This prompt must be EXTREMELY explicit about what NOT to draw
+ * because AI tends to add "helpful" decorations even when told not to.
  */
 function buildTextOnlyPrompt(quote: string, typographyStyle: TypographyStyle): string {
   const cleanQuote = normalizeQuote(quote);
   const formattedQuote = formatQuoteForPrompt(cleanQuote);
   const typoDesc = TYPOGRAPHY_STYLES[typographyStyle];
 
-  return `Create a typography-only coloring page. US Letter size (8.5x11 inches).
+  // Use a very direct, explicit prompt structure
+  return `Create a print-ready 8.5x11 inch (Letter) typography coloring page in clean black-and-white OUTLINE line art.
 
-QUOTE TEXT (display exactly as written):
+TEXT ONLY MODE (STRICT):
+- Render ONLY the quote text as the entire design.
+- White background.
+- No icons, no shapes, no objects, no patterns, no scenery, no ground line, no clouds, no stars, no hearts, no flowers, no borders, no frames, no doodles, no extra marks of any kind.
+- The ONLY lines allowed are the outlines that form the letters (and internal holes of letters like 'o', 'a', 'e').
+
+Typography:
+- Style: ${typoDesc}
+- All letters are HOLLOW OUTLINES (white inside, black outline stroke)
+- Make letters thick and chunky for easy coloring
+
+Layout:
+- Center the quote on the page
+- Scale large to fill ~80-90% of page height
+- Use 2-4 lines if needed, well-spaced
+- Balanced margins all around
+
+Rules (MUST FOLLOW):
+- No grayscale, no filled regions, no shading, no hatching, no gradients
+- No watermark, no signature, no border
+- Pure white background with NOTHING on it except the text
+- Clean vector-like outlines only
+
+Quote text EXACTLY (do not paraphrase):
 "${formattedQuote}"
 
-=== STRICT TEXT-ONLY MODE ===
-This page contains ONLY the quote text. Nothing else.
+=== ABSOLUTE PROHIBITIONS ===
+DO NOT DRAW ANY OF THESE:
+- Clouds, sky, sun, moon, stars, sparkles
+- Hearts, flowers, leaves, plants, trees
+- Animals, people, characters, faces
+- Cars, houses, toys, objects
+- Ground line, grass, floor, road
+- Border, frame, corners, edges
+- Swirls, dots, patterns outside letters
+- Any decorative element whatsoever
 
-WHAT TO DRAW:
-- The quote text as large, beautiful ${typoDesc}
-- Letters are HOLLOW OUTLINES with white/empty interiors
-- Center the text on the page
-- Scale text large to fill 80-90% of the page height
-- Multiple lines if needed, well-spaced
+THE PAGE MUST CONTAIN ONLY:
+1. White background
+2. Black outlined letters forming the quote
 
-WHAT NOT TO DRAW (CRITICAL - ZERO TOLERANCE):
-- NO clouds
-- NO stars
-- NO hearts
-- NO flowers
-- NO icons of any kind
-- NO decorative elements
-- NO border or frame
-- NO corner decorations
-- NO ground line
-- NO scenery
-- NO animals or characters
-- NO objects
-- NO patterns
-- NO swirls outside the letters
-- NOTHING except the letter outlines
-
-The ONLY lines on this page are the outlines that form the letters.
-The background is 100% empty white space.
-
-ART STYLE:
-- Black outlines on pure white background
-- No filled areas, no solid black, no grayscale
-- No shading, no gradients, no textures
-- Clean vector-like line work
-- No watermark, no signature
-
-If you add ANY element other than the letter outlines, the image is INVALID.`;
+If ANYTHING else appears on the page, the image is INVALID and must be regenerated.`;
 }
 
 // ============================================================
@@ -619,6 +624,60 @@ export function parseMultipleQuotes(text: string): string[] {
  * Build a prompt for a quote-book "Belongs To" page.
  * NO CHARACTERS - uses decorations matching the book's style.
  */
+/**
+ * Build a strict text-only "Belongs To" prompt for Quote Books.
+ * NO characters, NO animals, NO mascots - ever.
+ */
+function buildTextOnlyBelongsToPrompt(typographyStyle: TypographyStyle): string {
+  const typoDesc = TYPOGRAPHY_STYLES[typographyStyle];
+
+  return `Create a print-ready 8.5x11 inch (Letter) "BELONGS TO" coloring page in clean black-and-white OUTLINE line art.
+
+TEXT ONLY MODE (STRICT):
+This is a TEXT-ONLY belongs-to page. No decorations allowed.
+
+WHAT TO DRAW:
+1. At the TOP: Large outlined text "THIS BOOK BELONGS TO:" 
+   - Typography style: ${typoDesc}
+   - Letters are HOLLOW OUTLINES (white inside, black outline)
+   
+2. In the MIDDLE: A horizontal rectangle outline OR a simple underline
+   - This is where the owner writes their name
+   - Make it about 60-70% of page width, centered
+   - Just a simple outlined box or line - nothing fancy
+
+3. OPTIONAL: Small text "Name:" above the line (also outlined)
+
+WHAT NOT TO DRAW (CRITICAL - ZERO TOLERANCE):
+- NO clouds, stars, hearts, flowers, or any icons
+- NO animals, characters, mascots, people, faces
+- NO border or frame around the page
+- NO decorative corners or edges
+- NO patterns, swirls, dots outside the letters
+- NO scenery, ground line, or background elements
+- NOTHING except the text and name line
+
+Layout:
+- Center everything on the page
+- Title text fills ~30% of page height at top
+- Name line/box in middle area
+- Rest is pure white space
+
+Art style:
+- Black outlines on pure white background
+- No fills, no grayscale, no shading
+- Clean vector-like line work
+- No watermark, no signature
+
+=== ABSOLUTE PROHIBITIONS ===
+- NO dogs, cats, bears, bunnies, or ANY animals
+- NO cartoon characters or mascots
+- NO decorative elements of any kind
+- The page contains ONLY: title text + name line
+
+If ANY decoration, animal, or character appears, the image is INVALID.`;
+}
+
 export function buildQuoteBelongsToPrompt(config: {
   decorationLevel: DecorationLevel;
   decorationTheme?: DecorationTheme;
@@ -634,6 +693,17 @@ export function buildQuoteBelongsToPrompt(config: {
     frameStyle = "none",
   } = config;
 
+  // ============================================================
+  // HARD EARLY RETURN FOR TEXT-ONLY MODE
+  // This bypasses ALL decoration logic completely
+  // ============================================================
+  if (decorationLevel === "text_only") {
+    return buildTextOnlyBelongsToPrompt(typographyStyle);
+  }
+
+  // ============================================================
+  // DECORATED MODES (minimal_icons, border_only, full_background)
+  // ============================================================
   const parts: string[] = [];
 
   // Critical rules first
@@ -653,11 +723,7 @@ export function buildQuoteBelongsToPrompt(config: {
   // Decoration rules based on level
   parts.push(`=== DECORATIONS (MATCH BOOK STYLE) ===`);
   
-  if (decorationLevel === "text_only") {
-    parts.push(`- TEXT ONLY: Just the heading and name line.`);
-    parts.push(`- NO decorations, NO icons, NO patterns.`);
-    parts.push(`- Clean white background with beautiful typography.`);
-  } else if (decorationLevel === "minimal_icons") {
+  if (decorationLevel === "minimal_icons") {
     parts.push(`- Add small outline icons: ${ICON_SETS[iconSet]}`);
     parts.push(`- Keep icons sparse (5-8 small icons around the text).`);
     parts.push(`- 80% of page should be white space.`);
@@ -672,17 +738,24 @@ export function buildQuoteBelongsToPrompt(config: {
   }
   parts.push("");
 
-  // Critical restrictions
-  parts.push(`=== RESTRICTIONS (CRITICAL) ===`);
-  parts.push(`- NO animals, NO characters, NO mascots, NO people.`);
-  parts.push(`- NO dogs, cats, bears, or any creatures.`);
-  parts.push(`- Only typography and abstract decorations.`);
-  parts.push(`- White background, black outlines only.`);
-  parts.push(`- NO filled areas, NO shading, NO gradients.`);
+  // Critical restrictions - VERY EXPLICIT
+  parts.push(`=== RESTRICTIONS (CRITICAL - MUST FOLLOW) ===`);
+  parts.push(`- NO animals of any kind (no dogs, cats, bears, bunnies, birds, etc.)`);
+  parts.push(`- NO characters, mascots, or people`);
+  parts.push(`- NO faces or creatures`);
+  parts.push(`- Only typography and ABSTRACT decorations (${decorationTheme})`);
+  parts.push(`- White background, black outlines only`);
+  parts.push(`- NO filled areas, NO shading, NO gradients`);
   parts.push("");
 
-  parts.push(`*** CRITICAL: This is NOT a character book. NO animals/characters allowed. ***`);
-  parts.push(`*** ONLY: Text + decorative patterns (${decorationTheme}). ***`);
+  parts.push(`=== ABSOLUTE PROHIBITIONS ===`);
+  parts.push(`This is a QUOTE book, NOT a character book.`);
+  parts.push(`DO NOT DRAW: dogs, cats, bears, bunnies, foxes, lions, any animal`);
+  parts.push(`DO NOT DRAW: cartoon characters, mascots, people, faces`);
+  parts.push(`ONLY DRAW: Text + abstract decorative patterns (${DECORATION_THEMES[decorationTheme]})`);
+  parts.push("");
+
+  parts.push(`If ANY animal or character appears in the image, it is INVALID.`);
 
   return parts.join("\n");
 }

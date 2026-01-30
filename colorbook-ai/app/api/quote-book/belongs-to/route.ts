@@ -150,13 +150,20 @@ export async function POST(request: NextRequest) {
       autoProcess,
     } = parseResult.data;
 
+    // SERVER-SIDE ENFORCEMENT: text_only mode must be absolutely strict
+    const isTextOnly = decorationLevel === "text_only";
+    
+    // Log for debugging
+    console.log(`[quote-belongs-to] decorationLevel=${decorationLevel}, isTextOnly=${isTextOnly}`);
+    
     // Build the belongs-to prompt using the decoration-based builder (NO CHARACTERS)
+    // The builder now has a hard early-return for text_only mode
     const basePrompt = buildQuoteBelongsToPrompt({
-      decorationLevel,
-      decorationTheme,
-      iconSet,
+      decorationLevel: isTextOnly ? "text_only" : decorationLevel, // Force text_only if selected
+      decorationTheme: isTextOnly ? "stars" : decorationTheme, // Ignored for text_only
+      iconSet: isTextOnly ? "stars" : iconSet, // Ignored for text_only  
       typographyStyle,
-      frameStyle,
+      frameStyle: isTextOnly ? "none" : frameStyle, // Force no frame for text_only
     });
 
     // Add custom label text if different from default
@@ -165,8 +172,19 @@ export async function POST(request: NextRequest) {
       finalPrompt = basePrompt.replace("THIS BOOK BELONGS TO:", labelText);
     }
 
-    // Add page fill requirements
-    finalPrompt += `
+    // Add page fill requirements - but keep them minimal for text_only
+    if (isTextOnly) {
+      finalPrompt += `
+
+=== PAGE COMPOSITION ===
+- Title text large and centered at top.
+- Name line/box centered below title.
+- NOTHING else on the page.
+- Pure white background.
+
+*** THIS IS TEXT-ONLY MODE: If ANY decoration, animal, or pattern appears, the image is INVALID. ***`;
+    } else {
+      finalPrompt += `
 
 === PAGE FILL REQUIREMENTS ===
 - Full-page composition, artwork fills 92-97% of page height.
@@ -176,6 +194,10 @@ export async function POST(request: NextRequest) {
 - Minimal top/bottom margins.
 
 *** FINAL REMINDER: NO animals, NO characters, NO mascots. Typography + decorations only. ***`;
+    }
+    
+    // Log first 300 chars of prompt for debugging
+    console.log(`[quote-belongs-to] Prompt preview: ${finalPrompt.slice(0, 300)}...`);
 
     console.log(`[quote-belongs-to] Generating belongs-to page (level: ${decorationLevel}, theme: ${decorationTheme})`);
 

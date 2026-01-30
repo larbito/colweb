@@ -53,6 +53,15 @@ import {
 import { toast } from "sonner";
 import { ImagePreviewModal } from "@/components/app/image-preview-modal";
 import { ExportPDFModal } from "@/components/app/export-pdf-modal";
+import { 
+  GenerationProgressBar, 
+  PageStatusBadge,
+  type JobProgress,
+  type PageStage,
+  createInitialJobProgress,
+  updatePageStage,
+  calculateRollingAvg,
+} from "@/components/app/generation-progress";
 
 // Types
 type PageStatus = "pending" | "generating" | "done" | "failed";
@@ -204,6 +213,19 @@ export default function QuoteBookPage() {
   
   // Processing
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Progress tracking with ETA
+  const [jobProgress, setJobProgress] = useState<JobProgress>({
+    totalPages: 0,
+    pages: [],
+    phase: "idle",
+    avgGenerateSec: 30,
+    avgEnhanceSec: 15,
+    avgProcessSec: 5,
+    generateDurations: [],
+    enhanceDurations: [],
+    processDurations: [],
+  });
 
   // Preview
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -370,11 +392,36 @@ export default function QuoteBookPage() {
     await generatePages(pendingPages);
   };
 
-  // Core generation function with concurrency
+  // Helper to convert PageStatus to PageStage
+  const toPageStage = (status: PageStatus, enhanceStatus: EnhanceStatus, processStatus: ProcessingStatus): PageStage => {
+    if (processStatus === "done") return "done";
+    if (processStatus === "processing") return "processing";
+    if (enhanceStatus === "enhanced") return "enhanced";
+    if (enhanceStatus === "enhancing") return "enhancing";
+    if (status === "done") return "generated";
+    if (status === "generating") return "generating";
+    if (status === "failed") return "failed";
+    return "queued";
+  };
+
+  // Core generation function with concurrency and progress tracking
   const generatePages = async (pagesToGenerate: PageState[]) => {
     setIsGenerating(true);
     let successCount = 0;
     let failCount = 0;
+
+    // Initialize progress tracking
+    const totalPages = pages.length;
+    setJobProgress(prev => ({
+      ...prev,
+      totalPages,
+      pages: pages.map(p => ({
+        page: p.page,
+        stage: toPageStage(p.status, p.enhanceStatus, p.finalLetterStatus),
+      })),
+      phase: "generating",
+      startedAt: Date.now(),
+    }));
 
     toast.info(`Starting generation of ${pagesToGenerate.length} images...`);
 
@@ -390,10 +437,21 @@ export default function QuoteBookPage() {
       setPages(prev => prev.map(p =>
         chunk.some(c => c.page === p.page) ? { ...p, status: "generating" as PageStatus } : p
       ));
+      
+      // Update progress - mark pages as generating
+      setJobProgress(prev => {
+        let updated = prev;
+        for (const pageItem of chunk) {
+          updated = updatePageStage(updated, pageItem.page, "generating");
+        }
+        return updated;
+      });
 
-      // Generate chunk in parallel
+      // Generate chunk in parallel with timing
+      const chunkStartTime = Date.now();
       const results = await Promise.allSettled(
         chunk.map(async (pageItem) => {
+          const pageStartTime = Date.now();
           setCurrentGeneratingPage(pageItem.page);
           
           const response = await fetch("/api/batch/generate-one", {
@@ -408,14 +466,15 @@ export default function QuoteBookPage() {
           });
 
           const data = await safeJsonParse(response);
-          return { pageItem, response, data };
+          const duration = (Date.now() - pageStartTime) / 1000;
+          return { pageItem, response, data, duration };
         })
       );
 
       // Process results
       for (const result of results) {
         if (result.status === "fulfilled") {
-          const { pageItem, response, data } = result.value;
+          const { pageItem, response, data, duration } = result.value;
           
           if (response.ok && data.status === "done" && data.imageBase64) {
             setPages(prev => prev.map(p =>
@@ -423,6 +482,9 @@ export default function QuoteBookPage() {
                 ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64 }
                 : p
             ));
+            
+            // Update progress with duration
+            setJobProgress(prev => updatePageStage(prev, pageItem.page, "generated", duration));
             successCount++;
           } else {
             setPages(prev => prev.map(p =>
@@ -430,6 +492,8 @@ export default function QuoteBookPage() {
                 ? { ...p, status: "failed" as PageStatus, error: data.error || "Generation failed" }
                 : p
             ));
+            
+            setJobProgress(prev => updatePageStage(prev, pageItem.page, "failed"));
             failCount++;
           }
         } else {
@@ -445,6 +509,13 @@ export default function QuoteBookPage() {
 
     setIsGenerating(false);
     setCurrentGeneratingPage(null);
+    
+    // Update final phase
+    setJobProgress(prev => ({
+      ...prev,
+      phase: failCount === pagesToGenerate.length ? "idle" : 
+             pages.every(p => p.status === "done" || p.status === "failed") ? "complete" : "idle"
+    }));
 
     if (failCount === 0) {
       toast.success(`All ${successCount} images generated!`);
@@ -516,12 +587,19 @@ export default function QuoteBookPage() {
     setIsEnhancing(true);
     let successCount = 0;
 
+    // Update progress phase
+    setJobProgress(prev => ({ ...prev, phase: "enhancing" }));
+
     toast.info(`Enhancing ${pagesToEnhance.length} pages for print quality...`);
 
     for (const page of pagesToEnhance) {
+      const startTime = Date.now();
+      
       setPages(prev => prev.map(p =>
         p.page === page.page ? { ...p, enhanceStatus: "enhancing" as EnhanceStatus } : p
       ));
+      
+      setJobProgress(prev => updatePageStage(prev, page.page, "enhancing"));
 
       try {
         const response = await fetch("/api/image/enhance", {
@@ -534,6 +612,7 @@ export default function QuoteBookPage() {
         });
 
         const data = await response.json();
+        const duration = (Date.now() - startTime) / 1000;
 
         if (response.ok && data.enhancedImageBase64) {
           setPages(prev => prev.map(p =>
@@ -546,22 +625,29 @@ export default function QuoteBookPage() {
                 }
               : p
           ));
+          
+          setJobProgress(prev => updatePageStage(prev, page.page, "enhanced", duration));
           successCount++;
         } else {
           setPages(prev => prev.map(p =>
             p.page === page.page ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
           ));
+          
+          setJobProgress(prev => updatePageStage(prev, page.page, "failed"));
         }
       } catch {
         setPages(prev => prev.map(p =>
           p.page === page.page ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
         ));
+        
+        setJobProgress(prev => updatePageStage(prev, page.page, "failed"));
       }
 
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     setIsEnhancing(false);
+    setJobProgress(prev => ({ ...prev, phase: "idle" }));
 
     if (successCount === pagesToEnhance.length) {
       toast.success(`All ${successCount} pages enhanced!`);
@@ -585,12 +671,19 @@ export default function QuoteBookPage() {
     setIsProcessing(true);
     let successCount = 0;
 
+    // Update progress phase
+    setJobProgress(prev => ({ ...prev, phase: "processing" }));
+
     toast.info(`Processing ${pagesToProcess.length} pages to print-ready format...`);
 
     for (const page of pagesToProcess) {
+      const startTime = Date.now();
+      
       setPages(prev => prev.map(p =>
         p.page === page.page ? { ...p, finalLetterStatus: "processing" as ProcessingStatus } : p
       ));
+      
+      setJobProgress(prev => updatePageStage(prev, page.page, "processing"));
 
       try {
         const response = await fetch("/api/image/process", {
@@ -606,6 +699,7 @@ export default function QuoteBookPage() {
         });
 
         const data = await response.json();
+        const duration = (Date.now() - startTime) / 1000;
 
         if (response.ok && data.finalLetterBase64) {
           setPages(prev => prev.map(p =>
@@ -620,22 +714,29 @@ export default function QuoteBookPage() {
                 }
               : p
           ));
+          
+          setJobProgress(prev => updatePageStage(prev, page.page, "done", duration));
           successCount++;
         } else {
           setPages(prev => prev.map(p =>
             p.page === page.page ? { ...p, finalLetterStatus: "failed" as ProcessingStatus } : p
           ));
+          
+          setJobProgress(prev => updatePageStage(prev, page.page, "failed"));
         }
       } catch {
         setPages(prev => prev.map(p =>
           p.page === page.page ? { ...p, finalLetterStatus: "failed" as ProcessingStatus } : p
         ));
+        
+        setJobProgress(prev => updatePageStage(prev, page.page, "failed"));
       }
 
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     setIsProcessing(false);
+    setJobProgress(prev => ({ ...prev, phase: pages.every(p => p.finalLetterStatus === "done") ? "complete" : "idle" }));
 
     if (successCount === pagesToProcess.length) {
       toast.success(`All ${successCount} pages ready for print!`);
@@ -1051,10 +1152,18 @@ export default function QuoteBookPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
+                {/* Progress Bar - Show when any operation is in progress */}
+                {(isGenerating || isEnhancing || isProcessing) && (
+                  <GenerationProgressBar 
+                    progress={jobProgress} 
+                    className="p-3 bg-muted/30 rounded-lg"
+                  />
+                )}
+
                 {/* Action buttons - Show after some pages are done */}
                 {doneCount > 0 && (
-                  <div className="mb-4 flex flex-wrap gap-2 p-3 bg-muted/30 rounded-lg">
+                  <div className="flex flex-wrap gap-2 p-3 bg-muted/30 rounded-lg">
                     <Button
                       variant="outline"
                       size="sm"
@@ -1137,10 +1246,24 @@ export default function QuoteBookPage() {
                           <div className="flex flex-col items-center justify-center h-full gap-2">
                             <Loader2 className="h-8 w-8 animate-spin text-primary" />
                             <span className="text-xs text-muted-foreground">Generating...</span>
+                            <PageStatusBadge stage="generating" />
+                          </div>
+                        ) : page.enhanceStatus === "enhancing" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2">
+                            <Sparkles className="h-8 w-8 animate-pulse text-purple-500" />
+                            <span className="text-xs text-muted-foreground">Enhancing...</span>
+                            <PageStatusBadge stage="enhancing" />
+                          </div>
+                        ) : page.finalLetterStatus === "processing" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2">
+                            <PanelTop className="h-8 w-8 animate-pulse text-orange-500" />
+                            <span className="text-xs text-muted-foreground">Processing...</span>
+                            <PageStatusBadge stage="processing" />
                           </div>
                         ) : (
                           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                             <Quote className="h-10 w-10 opacity-20" />
+                            <PageStatusBadge stage="queued" />
                           </div>
                         )}
                       </div>
