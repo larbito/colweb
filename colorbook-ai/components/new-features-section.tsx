@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Boxes, Quote, Zap, FileStack, RefreshCw, Download, Type, Palette, Sparkles, Clock } from "lucide-react";
+import { Boxes, Quote, Zap, Type } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -128,6 +128,21 @@ export function NewFeaturesSection() {
               <div>
                 <h3 className="text-2xl font-semibold">Quote & Text Pages</h3>
                 <p className="text-sm text-muted-foreground">Typography coloring books</p>
+              </div>
+            </div>
+
+            {/* Quote Page Example Image */}
+            <div className="mb-6 relative group">
+              <div className="aspect-[4/5] rounded-xl overflow-hidden border border-purple-500/20 bg-white shadow-lg">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img 
+                  src="/examples/quote-page-example.svg" 
+                  alt="Quote coloring page example - Be brave, be kind, be you with floral decorations"
+                  className="w-full h-full object-contain p-4"
+                />
+              </div>
+              <div className="absolute -bottom-2 -right-2 bg-purple-100 text-purple-700 text-[10px] font-medium px-2 py-1 rounded-full border border-purple-200 shadow-sm">
+                Sample Output
               </div>
             </div>
 

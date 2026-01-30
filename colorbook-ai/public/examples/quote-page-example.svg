@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750" fill="none">
+  <!-- Background -->
+  <rect width="600" height="750" fill="white"/>
+  
+  <!-- Top decorative elements - flowers and stars -->
+  <g stroke="#1a1a1a" stroke-width="1.5" fill="none" opacity="0.8">
+    <!-- Top left flower cluster -->
+    <circle cx="80" cy="60" r="15"/>
+    <circle cx="80" cy="60" r="8"/>
+    <circle cx="95" cy="45" r="10"/>
+    <circle cx="65" cy="45" r="10"/>
+    <circle cx="95" cy="75" r="10"/>
+    <circle cx="65" cy="75" r="10"/>
+    
+    <!-- Top right flower cluster -->
+    <circle cx="520" cy="60" r="15"/>
+    <circle cx="520" cy="60" r="8"/>
+    <circle cx="535" cy="45" r="10"/>
+    <circle cx="505" cy="45" r="10"/>
+    <circle cx="535" cy="75" r="10"/>
+    <circle cx="505" cy="75" r="10"/>
+    
+    <!-- Stars scattered -->
+    <path d="M150 40 l3 10 10 3 -10 3 -3 10 -3 -10 -10 -3 10 -3z"/>
+    <path d="M450 35 l3 10 10 3 -10 3 -3 10 -3 -10 -10 -3 10 -3z"/>
+    <path d="M300 25 l4 12 12 4 -12 4 -4 12 -4 -12 -12 -4 12 -4z"/>
+    
+    <!-- Small hearts -->
+    <path d="M200 50 c0-8 8-12 15-6 7-6 15 2 15 6 0 10-15 18-15 18s-15-8-15-18z"/>
+    <path d="M385 45 c0-6 6-9 11-5 5-4 11 1 11 5 0 8-11 14-11 14s-11-6-11-14z"/>
+  </g>
+  
+  <!-- Main quote text - bubble/hand-lettered style outlines -->
+  <g fill="none" stroke="#1a1a1a" stroke-width="2.5">
+    <!-- "BE" -->
+    <path d="M120 200 v80 M120 200 h35 c15 0 25 10 25 20 s-10 20-25 20 h-35 M120 240 h35 c15 0 25 10 25 20 s-10 20-25 20 h-35"/>
+    <path d="M200 200 v80 M200 200 h50 M200 240 h40 M200 280 h50"/>
+    
+    <!-- "BRAVE" - larger, centered -->
+    <text x="300" y="330" font-family="Georgia, serif" font-size="72" font-weight="bold" text-anchor="middle" stroke-width="3" fill="none">BRAVE</text>
+    
+    <!-- "BE" -->
+    <path d="M120 400 v80 M120 400 h35 c15 0 25 10 25 20 s-10 20-25 20 h-35 M120 440 h35 c15 0 25 10 25 20 s-10 20-25 20 h-35"/>
+    <path d="M200 400 v80 M200 400 h50 M200 440 h40 M200 480 h50"/>
+    
+    <!-- "KIND" - larger, centered -->
+    <text x="300" y="530" font-family="Georgia, serif" font-size="72" font-weight="bold" text-anchor="middle" stroke-width="3" fill="none">KIND</text>
+    
+    <!-- "BE" -->
+    <path d="M120 590 v80 M120 590 h35 c15 0 25 10 25 20 s-10 20-25 20 h-35 M120 630 h35 c15 0 25 10 25 20 s-10 20-25 20 h-35"/>
+    <path d="M200 590 v80 M200 590 h50 M200 630 h40 M200 670 h50"/>
+    
+    <!-- "YOU" - larger, centered -->
+    <text x="380" y="670" font-family="Georgia, serif" font-size="72" font-weight="bold" text-anchor="middle" stroke-width="3" fill="none">YOU</text>
+  </g>
+  
+  <!-- Bottom decorative elements -->
+  <g stroke="#1a1a1a" stroke-width="1.5" fill="none" opacity="0.8">
+    <!-- Bottom left flower -->
+    <circle cx="100" cy="700" r="20"/>
+    <circle cx="100" cy="700" r="10"/>
+    <ellipse cx="75" cy="700" rx="8" ry="12"/>
+    <ellipse cx="125" cy="700" rx="8" ry="12"/>
+    <ellipse cx="100" cy="675" rx="8" ry="12"/>
+    <ellipse cx="100" cy="725" rx="8" ry="12"/>
+    
+    <!-- Leaves/vines -->
+    <path d="M130 690 q20 -10 40 0"/>
+    <path d="M130 710 q20 10 40 0"/>
+    
+    <!-- Bottom right flower -->
+    <circle cx="500" cy="700" r="20"/>
+    <circle cx="500" cy="700" r="10"/>
+    <ellipse cx="475" cy="700" rx="8" ry="12"/>
+    <ellipse cx="525" cy="700" rx="8" ry="12"/>
+    <ellipse cx="500" cy="675" rx="8" ry="12"/>
+    <ellipse cx="500" cy="725" rx="8" ry="12"/>
+    
+    <!-- Leaves/vines -->
+    <path d="M470 690 q-20 -10 -40 0"/>
+    <path d="M470 710 q-20 10 -40 0"/>
+    
+    <!-- Bottom center hearts and stars -->
+    <path d="M280 720 c0-10 10-15 18-8 8-7 18 2 18 8 0 12-18 22-18 22s-18-10-18-22z"/>
+    <path d="M330 710 l4 12 12 4 -12 4 -4 12 -4 -12 -12 -4 12 -4z"/>
+    
+    <!-- Additional scattered decorations -->
+    <circle cx="250" cy="120" r="4"/>
+    <circle cx="350" cy="100" r="3"/>
+    <circle cx="180" cy="150" r="3"/>
+    <circle cx="420" cy="130" r="4"/>
+  </g>
+  
+  <!-- Side decorative vines -->
+  <g stroke="#1a1a1a" stroke-width="1.5" fill="none" opacity="0.7">
+    <!-- Left side vine -->
+    <path d="M30 150 q10 50 0 100 q-10 50 0 100 q10 50 0 100 q-10 50 0 100"/>
+    <ellipse cx="35" cy="180" rx="10" ry="5" transform="rotate(30 35 180)"/>
+    <ellipse cx="25" cy="280" rx="10" ry="5" transform="rotate(-30 25 280)"/>
+    <ellipse cx="35" cy="380" rx="10" ry="5" transform="rotate(30 35 380)"/>
+    <ellipse cx="25" cy="480" rx="10" ry="5" transform="rotate(-30 25 480)"/>
+    
+    <!-- Right side vine -->
+    <path d="M570 150 q-10 50 0 100 q10 50 0 100 q-10 50 0 100 q10 50 0 100"/>
+    <ellipse cx="565" cy="180" rx="10" ry="5" transform="rotate(-30 565 180)"/>
+    <ellipse cx="575" cy="280" rx="10" ry="5" transform="rotate(30 575 280)"/>
+    <ellipse cx="565" cy="380" rx="10" ry="5" transform="rotate(-30 565 380)"/>
+    <ellipse cx="575" cy="480" rx="10" ry="5" transform="rotate(30 575 480)"/>
+  </g>
+</svg>
+

@@ -532,6 +532,85 @@ export default function BulkCreatePage() {
     setCurrentStep(2);
   };
   
+  // ==================== STEP 2: GENERATE PAGE IDEAS ====================
+  
+  const [generatingBookIds, setGeneratingBookIds] = useState<Set<string>>(new Set());
+  
+  const generatePageIdeasForBook = async (book: Book) => {
+    if (!batch) return;
+    
+    // Mark book as generating
+    setGeneratingBookIds(prev => new Set([...prev, book.id]));
+    
+    try {
+      const response = await fetch("/api/bulk/generate-page-ideas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: book.id,
+          bookType: book.bookType,
+          concept: book.concept || book.title,
+          pageCount: book.pages.length,
+          settings: book.settings,
+          targetAge: book.targetAge,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate page ideas");
+      }
+      
+      // Update batch with generated page ideas
+      setBatch(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          books: prev.books.map(b => 
+            b.id === book.id 
+              ? {
+                  ...b,
+                  pages: b.pages.map((page, idx) => ({
+                    ...page,
+                    ideaText: data.pages[idx]?.ideaText || page.ideaText,
+                  }))
+                }
+              : b
+          )
+        };
+      });
+      
+      toast.success(`Generated page ideas for "${book.title || 'Book'}"`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate page ideas");
+    } finally {
+      setGeneratingBookIds(prev => {
+        const next = new Set(prev);
+        next.delete(book.id);
+        return next;
+      });
+    }
+  };
+  
+  const generateAllPageIdeasForBatch = async () => {
+    if (!batch) return;
+    
+    setIsGeneratingPageIdeas(true);
+    
+    // Generate for all books in parallel (with some concurrency limit)
+    const books = batch.books;
+    const concurrency = 3;
+    
+    for (let i = 0; i < books.length; i += concurrency) {
+      const chunk = books.slice(i, i + concurrency);
+      await Promise.all(chunk.map(book => generatePageIdeasForBook(book)));
+    }
+    
+    setIsGeneratingPageIdeas(false);
+    toast.success("Generated all page ideas!");
+  };
+  
   // ==================== STATS ====================
   
   const approvedCount = bookIdeas.filter(i => i.isApproved).length;
@@ -640,6 +719,23 @@ export default function BulkCreatePage() {
                     Plan the content for each page in your {batch.books.length} books
                   </p>
                 </div>
+                <Button
+                  variant="default"
+                  onClick={generateAllPageIdeasForBatch}
+                  disabled={isGeneratingPageIdeas || generatingBookIds.size > 0}
+                >
+                  {isGeneratingPageIdeas ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Generating All...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="mr-2 h-4 w-4" />
+                      Generate All Page Ideas
+                    </>
+                  )}
+                </Button>
               </div>
               
               {/* Books with page lists */}
@@ -661,9 +757,23 @@ export default function BulkCreatePage() {
                             {book.pages.length} pages · {book.bookType === "coloring_scenes" ? "Coloring Scenes" : "Quote/Text"}
                           </CardDescription>
                         </div>
-                        <Button variant="outline" size="sm">
-                          <Wand2 className="mr-2 h-4 w-4" />
-                          Generate All Page Ideas
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => generatePageIdeasForBook(book)}
+                          disabled={generatingBookIds.has(book.id)}
+                        >
+                          {generatingBookIds.has(book.id) ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Generating...
+                            </>
+                          ) : (
+                            <>
+                              <Wand2 className="mr-2 h-4 w-4" />
+                              Generate All Page Ideas
+                            </>
+                          )}
                         </Button>
                       </div>
                     </CardHeader>
