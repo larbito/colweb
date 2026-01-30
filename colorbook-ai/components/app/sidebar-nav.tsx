@@ -12,12 +12,14 @@ import {
   Download,
   Settings,
   Copy,
+  Quote,
 } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard },
   { label: "Create Coloring Book", href: "/app/create", icon: Plus },
-  { label: "Style Clone", href: "/app/batch", icon: Copy, badge: "New" },
+  { label: "Quote Book", href: "/app/quote-book", icon: Quote, badge: "New" },
+  { label: "Style Clone", href: "/app/batch", icon: Copy },
   { label: "My Projects", href: "/app/projects", icon: FolderOpen },
   { label: "Templates", href: "/app/templates", icon: Layers, badge: "Soon" },
   { label: "Exports", href: "/app/exports", icon: Download, badge: "Soon" },
