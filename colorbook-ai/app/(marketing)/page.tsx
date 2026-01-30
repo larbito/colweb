@@ -3,6 +3,7 @@ import { HeroBento } from "@/components/hero-bento";
 import { BuiltForStrip } from "@/components/built-for-strip";
 import { PlatformLogos } from "@/components/platform-logos";
 import { FeatureBento } from "@/components/feature-bento";
+import { NewFeaturesSection } from "@/components/new-features-section";
 import { StyleCloneSection } from "@/components/style-clone-section";
 import { HowItWorks } from "@/components/how-it-works";
 import { Testimonials } from "@/components/testimonials";
@@ -17,6 +18,7 @@ export default function HomePage() {
       <HeroBento />
       <BuiltForStrip />
       <PlatformLogos />
+      <NewFeaturesSection />
       <FeatureBento />
       <StyleCloneSection />
       <HowItWorks />
