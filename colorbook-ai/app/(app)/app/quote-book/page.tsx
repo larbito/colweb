@@ -39,7 +39,17 @@ import {
   Trophy,
   Palette,
   Settings2,
+  Code,
+  X,
+  Info,
+  Tag,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { ImagePreviewModal } from "@/components/app/image-preview-modal";
 import { ExportPDFModal } from "@/components/app/export-pdf-modal";
@@ -58,6 +68,8 @@ type BookType = "different_quotes" | "same_quote_variations";
 type ToneType = "cute" | "bold" | "calm" | "funny" | "motivational" | "romantic" | "faith" | "sports" | "kids" | "inspirational";
 type AudienceType = "kids" | "teens" | "adults" | "all";
 
+type QuoteTopic = "ambition" | "self_love" | "confidence" | "family" | "friendship" | "love" | "gratitude" | "calm" | "sports" | "study" | "health" | "humor" | "faith" | "travel" | "creativity" | "nature_wonder" | "general";
+
 interface PageState {
   page: number;
   quote: string;
@@ -66,6 +78,18 @@ interface PageState {
   decorationTheme: DecorationTheme;
   decorationLevel: DecorationLevel;
   iconSet?: IconSet;
+  // NEW: Topic-based decoration
+  topic?: QuoteTopic;
+  keywords?: string[];
+  motifPack?: string[];
+  appliedSettings?: {
+    decorationLevel: DecorationLevel;
+    typographyStyle: TypographyStyle;
+    iconSet?: IconSet;
+    decorationTheme?: DecorationTheme;
+    density: DecorationDensity;
+    frameStyle: string;
+  };
   status: PageStatus;
   imageBase64?: string;
   error?: string;
@@ -187,6 +211,9 @@ export default function QuoteBookPage() {
   // Export PDF modal
   const [showExportModal, setShowExportModal] = useState(false);
 
+  // View Prompt modal
+  const [viewPromptPage, setViewPromptPage] = useState<PageState | null>(null);
+
   // ==================== Helpers ====================
 
   const safeJsonParse = async (response: Response) => {
@@ -277,7 +304,7 @@ export default function QuoteBookPage() {
         throw new Error(data.error || "Failed to generate prompts");
       }
 
-      // Convert to page state
+      // Convert to page state with all fields from API
       const pageStates: PageState[] = data.pages.map((p: {
         page: number;
         quote: string;
@@ -286,6 +313,17 @@ export default function QuoteBookPage() {
         decorationTheme: DecorationTheme;
         decorationLevel: DecorationLevel;
         iconSet?: IconSet;
+        topic?: QuoteTopic;
+        keywords?: string[];
+        motifPack?: string[];
+        appliedSettings?: {
+          decorationLevel: DecorationLevel;
+          typographyStyle: TypographyStyle;
+          iconSet?: IconSet;
+          decorationTheme?: DecorationTheme;
+          density: DecorationDensity;
+          frameStyle: string;
+        };
       }) => ({
         ...p,
         status: "pending" as PageStatus,
@@ -1114,6 +1152,12 @@ export default function QuoteBookPage() {
                             {getStatusIcon(page.status)}
                             <span className="text-xs font-medium">Page {page.page}</span>
                           </div>
+                          {/* Topic badge */}
+                          {page.topic && page.topic !== "general" && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0">
+                              {page.topic.replace("_", " ")}
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-[11px] text-muted-foreground line-clamp-1" title={page.quote}>
                           {page.quote}
@@ -1128,6 +1172,7 @@ export default function QuoteBookPage() {
                                 size="sm"
                                 className="flex-1 h-7 text-xs"
                                 onClick={() => setPreviewImage(`data:image/png;base64,${page.imageBase64}`)}
+                                title="View image"
                               >
                                 <Eye className="h-3 w-3" />
                               </Button>
@@ -1136,22 +1181,43 @@ export default function QuoteBookPage() {
                                 size="sm"
                                 className="flex-1 h-7 text-xs"
                                 onClick={() => generateSinglePage(page.page)}
+                                title="Regenerate"
                               >
                                 <RefreshCw className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="flex-1 h-7 text-xs"
+                                onClick={() => setViewPromptPage(page)}
+                                title="View prompt"
+                              >
+                                <Code className="h-3 w-3" />
                               </Button>
                             </>
                           )}
                           {(page.status === "pending" || page.status === "failed") && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1 h-7 text-xs"
-                              onClick={() => generateSinglePage(page.page)}
-                              disabled={isGenerating}
-                            >
-                              <Play className="mr-1 h-3 w-3" />
-                              Generate
-                            </Button>
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 h-7 text-xs"
+                                onClick={() => generateSinglePage(page.page)}
+                                disabled={isGenerating}
+                              >
+                                <Play className="mr-1 h-3 w-3" />
+                                Generate
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs px-2"
+                                onClick={() => setViewPromptPage(page)}
+                                title="View prompt"
+                              >
+                                <Code className="h-3 w-3" />
+                              </Button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -1192,6 +1258,102 @@ export default function QuoteBookPage() {
         defaultTitle="My Quote Coloring Book"
         onProcessPages={processAllPages}
       />
+
+      {/* View Prompt Modal */}
+      <Dialog open={!!viewPromptPage} onOpenChange={(open) => !open && setViewPromptPage(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Code className="h-5 w-5" />
+              Prompt for Page {viewPromptPage?.page}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {viewPromptPage && (
+            <div className="flex-1 overflow-auto space-y-4">
+              {/* Quote */}
+              <div className="rounded-lg border p-3 bg-muted/30">
+                <div className="flex items-center gap-2 text-sm font-medium mb-1">
+                  <Quote className="h-4 w-4" />
+                  Quote
+                </div>
+                <p className="text-sm">&ldquo;{viewPromptPage.quote}&rdquo;</p>
+              </div>
+
+              {/* Applied Settings */}
+              {viewPromptPage.appliedSettings && (
+                <div className="rounded-lg border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                    <Settings2 className="h-4 w-4" />
+                    Applied Settings
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">Decoration Level:</span>{" "}
+                      <span className="font-medium">{viewPromptPage.appliedSettings.decorationLevel.replace("_", " ")}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Typography:</span>{" "}
+                      <span className="font-medium">{viewPromptPage.appliedSettings.typographyStyle}</span>
+                    </div>
+                    {viewPromptPage.appliedSettings.iconSet && (
+                      <div>
+                        <span className="text-muted-foreground">Icons:</span>{" "}
+                        <span className="font-medium">{viewPromptPage.appliedSettings.iconSet}</span>
+                      </div>
+                    )}
+                    {viewPromptPage.appliedSettings.decorationTheme && (
+                      <div>
+                        <span className="text-muted-foreground">Theme:</span>{" "}
+                        <span className="font-medium">{viewPromptPage.appliedSettings.decorationTheme}</span>
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-muted-foreground">Density:</span>{" "}
+                      <span className="font-medium">{viewPromptPage.appliedSettings.density}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Topic & Motifs */}
+              {(viewPromptPage.topic || viewPromptPage.motifPack) && (
+                <div className="rounded-lg border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                    <Tag className="h-4 w-4" />
+                    Topic & Motifs (Auto-detected)
+                  </div>
+                  {viewPromptPage.topic && (
+                    <div className="text-xs mb-2">
+                      <span className="text-muted-foreground">Topic:</span>{" "}
+                      <Badge variant="secondary" className="text-xs">
+                        {viewPromptPage.topic.replace("_", " ")}
+                      </Badge>
+                    </div>
+                  )}
+                  {viewPromptPage.motifPack && viewPromptPage.motifPack.length > 0 && (
+                    <div className="text-xs">
+                      <span className="text-muted-foreground">Allowed Motifs:</span>{" "}
+                      <span className="font-medium">{viewPromptPage.motifPack.slice(0, 8).join(", ")}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Full Prompt */}
+              <div className="rounded-lg border p-3">
+                <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <Info className="h-4 w-4" />
+                  Full Prompt Sent to AI
+                </div>
+                <pre className="text-xs whitespace-pre-wrap font-mono bg-muted/50 p-3 rounded-md max-h-[300px] overflow-auto">
+                  {viewPromptPage.prompt}
+                </pre>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
