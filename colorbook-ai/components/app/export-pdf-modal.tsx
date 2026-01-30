@@ -12,21 +12,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Download, FileText, BookOpen, Eye, AlertTriangle, Sparkles, CheckCircle2 } from "lucide-react";
+import { 
+  Loader2, 
+  Download, 
+  FileText, 
+  BookOpen, 
+  Eye, 
+  AlertTriangle, 
+  CheckCircle2,
+  BookMarked,
+  FileCheck,
+  Layers,
+  X
+} from "lucide-react";
 import { toast } from "sonner";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { PDFPreviewModal } from "./pdf-preview-modal";
 
 // US Letter at 72 DPI (standard PDF points)
 const PAGE_SIZES = {
-  letter: { width: 612, height: 792 }, // 8.5 x 11 inches
+  letter: { width: 612, height: 792 },
   a4: { width: 595.28, height: 841.89 },
-};
-
-// US Letter at 300 DPI (for image processing)
-const LETTER_PIXELS = {
-  width: 2550,
-  height: 3300,
 };
 
 interface PageData {
@@ -77,7 +83,7 @@ export function ExportPDFModal({
   const [author, setAuthor] = useState(defaultAuthor);
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [website, setWebsite] = useState("");
-  const [pageSize, setPageSize] = useState<"letter" | "a4">("letter"); // Default to Letter
+  const [pageSize, setPageSize] = useState<"letter" | "a4">("letter");
   const [insertBlankPages, setInsertBlankPages] = useState(true);
   const [includeBelongsTo, setIncludeBelongsTo] = useState(true);
   const [includeCopyright, setIncludeCopyright] = useState(true);
@@ -86,6 +92,7 @@ export function ExportPDFModal({
 
   // Export state
   const [isExporting, setIsExporting] = useState(false);
+  const [exportMode, setExportMode] = useState<"preview" | "download" | null>(null);
   const [belongsToData, setBelongsToData] = useState<BelongsToData | null>(null);
   const [exportStep, setExportStep] = useState<string>("");
   
@@ -96,13 +103,12 @@ export function ExportPDFModal({
   // Check processing status
   const processedCount = coloringPages.filter(p => p.finalLetterBase64 || p.finalLetterStatus === "done").length;
   const allPagesProcessed = processedCount === coloringPages.length;
-  const belongsToReady = !includeBelongsTo || (belongsToData?.finalLetterBase64);
 
-  // Generate and process the belongs-to page
+  // Generate the belongs-to page
   const generateBelongsToPage = async (): Promise<BelongsToData | null> => {
     if (belongsToData?.finalLetterBase64) return belongsToData;
     
-    setExportStep("Generating 'Belongs To' page...");
+    setExportStep("Creating ownership page...");
     
     try {
       const response = await fetch("/api/book/belongs-to", {
@@ -116,7 +122,7 @@ export function ExportPDFModal({
           size: "1024x1536",
           labelText: "THIS BOOK BELONGS TO:",
           style: "cute",
-          autoProcess: true, // Auto-enhance and reframe to Letter
+          autoProcess: true,
         }),
       });
 
@@ -139,12 +145,12 @@ export function ExportPDFModal({
       return newBelongsTo;
     } catch (error) {
       console.error("Failed to generate belongs-to page:", error);
-      toast.error("Failed to generate 'Belongs To' page");
+      toast.error("Failed to generate ownership page");
       return null;
     }
   };
 
-  // Convert base64 to Uint8Array (strips data URL prefix if present)
+  // Convert base64 to Uint8Array
   const base64ToUint8Array = (base64: string): Uint8Array => {
     let cleanBase64 = base64;
     if (base64.includes(",")) {
@@ -158,22 +164,16 @@ export function ExportPDFModal({
     return bytes;
   };
 
-  // Get the best available image for a page (prefers finalLetter)
+  // Get the best available image for a page
   const getPageImage = (page: PageData): string => {
-    // Priority: finalLetter > enhanced > original
-    if (page.finalLetterBase64) {
-      return page.finalLetterBase64;
-    }
-    if (page.enhancedImageBase64) {
-      return page.enhancedImageBase64;
-    }
+    if (page.finalLetterBase64) return page.finalLetterBase64;
+    if (page.enhancedImageBase64) return page.enhancedImageBase64;
     return page.imageBase64;
   };
 
-  // Embed image into PDF (handles both PNG and JPEG)
+  // Embed image into PDF
   const embedImage = async (pdfDoc: PDFDocument, base64: string) => {
     const imageBytes = base64ToUint8Array(base64);
-    
     try {
       return await pdfDoc.embedPng(imageBytes);
     } catch {
@@ -186,10 +186,10 @@ export function ExportPDFModal({
     }
   };
 
-  // Generate PDF using ONLY finalLetter images
+  // Generate PDF
   const generatePDF = async (): Promise<{ pdfDoc: PDFDocument; pageCount: number }> => {
     const dimensions = PAGE_SIZES[pageSize];
-    const margins = 36; // 0.5 inch margins
+    const margins = 36;
 
     const pdfDoc = await PDFDocument.create();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -197,7 +197,6 @@ export function ExportPDFModal({
 
     let currentPageNum = 0;
 
-    // Helper to add page numbers
     const addPageNumber = (page: Awaited<ReturnType<typeof pdfDoc.addPage>>, num: number) => {
       if (!includePageNumbers) return;
       const { width } = page.getSize();
@@ -210,7 +209,7 @@ export function ExportPDFModal({
       });
     };
 
-    // 1. BELONGS TO PAGE (if enabled)
+    // 1. BELONGS TO PAGE
     if (includeBelongsTo) {
       let finalBelongsTo = belongsToData;
       if (!finalBelongsTo?.finalLetterBase64) {
@@ -219,11 +218,10 @@ export function ExportPDFModal({
 
       if (finalBelongsTo?.finalLetterBase64) {
         try {
-          setExportStep("Adding 'Belongs To' page...");
+          setExportStep("Adding ownership page...");
           const belongsToPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
           currentPageNum++;
           
-          // Use finalLetter image (already 2550x3300)
           const pngImage = await embedImage(pdfDoc, finalBelongsTo.finalLetterBase64);
           
           const availableWidth = dimensions.width - (margins * 2);
@@ -238,22 +236,15 @@ export function ExportPDFModal({
           const x = (dimensions.width - scaledWidth) / 2;
           const y = (dimensions.height - scaledHeight) / 2;
           
-          belongsToPage.drawImage(pngImage, {
-            x,
-            y,
-            width: scaledWidth,
-            height: scaledHeight,
-          });
-          
+          belongsToPage.drawImage(pngImage, { x, y, width: scaledWidth, height: scaledHeight });
           addPageNumber(belongsToPage, currentPageNum);
         } catch (imgError) {
           console.error("Failed to embed belongs-to image:", imgError);
-          toast.error("Failed to add 'Belongs To' page");
         }
       }
     }
 
-    // 2. COPYRIGHT PAGE (if enabled)
+    // 2. COPYRIGHT PAGE
     if (includeCopyright) {
       setExportStep("Adding copyright page...");
       const copyrightPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
@@ -264,7 +255,6 @@ export function ExportPDFModal({
       let textY = height / 2 + 50;
       const lineHeight = 20;
       
-      // Copyright line
       const copyrightLine = `Copyright © ${year} ${author || ""}`.trim();
       const copyrightWidth = fontBold.widthOfTextAtSize(copyrightLine, 12);
       copyrightPage.drawText(copyrightLine, {
@@ -276,7 +266,6 @@ export function ExportPDFModal({
       });
       textY -= lineHeight * 2;
       
-      // All rights reserved
       const rightsText = "All rights reserved.";
       const rightsWidth = font.widthOfTextAtSize(rightsText, 10);
       copyrightPage.drawText(rightsText, {
@@ -288,7 +277,6 @@ export function ExportPDFModal({
       });
       textY -= lineHeight * 2;
       
-      // No reproduction text
       const lines = [
         "No part of this book may be reproduced, stored, or",
         "transmitted in any form without written permission,",
@@ -307,7 +295,6 @@ export function ExportPDFModal({
         textY -= lineHeight;
       });
       
-      // Website
       if (website) {
         textY -= lineHeight;
         const websiteWidth = font.widthOfTextAtSize(website, 9);
@@ -320,7 +307,6 @@ export function ExportPDFModal({
         });
       }
       
-      // Created with
       if (includeCreatedWith) {
         textY -= lineHeight * 2;
         const createdText = "Created with ColorBookAI";
@@ -337,16 +323,15 @@ export function ExportPDFModal({
       addPageNumber(copyrightPage, currentPageNum);
     }
 
-    // 3. COLORING PAGES (using finalLetter when available)
+    // 3. COLORING PAGES
     for (let i = 0; i < coloringPages.length; i++) {
-      setExportStep(`Adding page ${i + 1} of ${coloringPages.length}...`);
+      setExportStep(`Adding coloring page ${i + 1}/${coloringPages.length}...`);
       const pageData = coloringPages[i];
       
       try {
         const coloringPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
         currentPageNum++;
         
-        // Get best available image (prioritizes finalLetter)
         const imageToUse = getPageImage(pageData);
         const pngImage = await embedImage(pdfDoc, imageToUse);
         
@@ -362,43 +347,35 @@ export function ExportPDFModal({
         const x = (dimensions.width - scaledWidth) / 2;
         const y = (dimensions.height - scaledHeight) / 2;
         
-        coloringPage.drawImage(pngImage, {
-          x,
-          y,
-          width: scaledWidth,
-          height: scaledHeight,
-        });
-        
+        coloringPage.drawImage(pngImage, { x, y, width: scaledWidth, height: scaledHeight });
         addPageNumber(coloringPage, currentPageNum);
         
-        // Add blank page after (if enabled and not the last page)
         if (insertBlankPages && i < coloringPages.length - 1) {
           pdfDoc.addPage([dimensions.width, dimensions.height]);
           currentPageNum++;
         }
       } catch (imgError) {
         console.error(`Failed to embed page ${pageData.page}:`, imgError);
-        toast.error(`Failed to add page ${pageData.page}`);
       }
     }
 
     return { pdfDoc, pageCount: currentPageNum };
   };
 
-  // Generate PDF and show preview
+  // Preview handler
   const handlePreview = async () => {
     if (coloringPages.length === 0) {
       toast.error("No pages to preview");
       return;
     }
-
     if (!title.trim()) {
       toast.error("Please enter a book title");
       return;
     }
 
     setIsExporting(true);
-    setExportStep("Generating PDF preview...");
+    setExportMode("preview");
+    setExportStep("Preparing preview...");
 
     try {
       const { pdfDoc, pageCount } = await generatePDF();
@@ -411,11 +388,12 @@ export function ExportPDFModal({
       toast.error(error instanceof Error ? error.message : "Failed to generate preview");
     } finally {
       setIsExporting(false);
+      setExportMode(null);
       setExportStep("");
     }
   };
 
-  // Download the generated PDF
+  // Download handler
   const handleDownload = useCallback(() => {
     if (!pdfData) return;
     
@@ -438,25 +416,25 @@ export function ExportPDFModal({
     setShowPreview(false);
   }, [pdfData, title, onClose]);
 
-  // Export directly without preview
+  // Direct export handler
   const handleDirectExport = async () => {
     if (coloringPages.length === 0) {
       toast.error("No pages to export");
       return;
     }
-
     if (!title.trim()) {
       toast.error("Please enter a book title");
       return;
     }
 
     setIsExporting(true);
+    setExportMode("download");
 
     try {
-      setExportStep("Creating PDF...");
+      setExportStep("Building PDF...");
       const { pdfDoc, pageCount } = await generatePDF();
       
-      setExportStep("Downloading...");
+      setExportStep("Finalizing...");
       const pdfBytes = await pdfDoc.save();
       
       const arrayBuffer = pdfBytes.buffer.slice(
@@ -475,256 +453,199 @@ export function ExportPDFModal({
 
       toast.success(`PDF exported! (${pageCount} pages)`);
       onClose();
-
     } catch (error) {
       console.error("Export error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to export PDF");
     } finally {
       setIsExporting(false);
+      setExportMode(null);
       setExportStep("");
     }
   };
 
   const availablePages = coloringPages.filter(p => p.imageBase64);
+  const totalPages = (includeBelongsTo ? 1 : 0) + (includeCopyright ? 1 : 0) + availablePages.length + (insertBlankPages ? Math.max(0, availablePages.length - 1) : 0);
 
   return (
     <>
       <Dialog open={isOpen && !showPreview} onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="sm:max-w-[520px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <BookOpen className="h-5 w-5" />
-              Export Coloring Book PDF
+        <DialogContent className="sm:max-w-[480px] p-0 gap-0 overflow-hidden">
+          {/* Header */}
+          <DialogHeader className="px-6 pt-6 pb-4 border-b bg-gradient-to-r from-amber-50 to-orange-50">
+            <DialogTitle className="flex items-center gap-3 text-xl">
+              <div className="p-2 bg-amber-100 rounded-lg">
+                <BookOpen className="h-5 w-5 text-amber-700" />
+              </div>
+              Export Coloring Book
             </DialogTitle>
-            <DialogDescription>
-              Create a print-ready US Letter PDF with {availablePages.length} coloring pages
+            <DialogDescription className="text-sm mt-1">
+              Create a print-ready PDF with {availablePages.length} coloring page{availablePages.length !== 1 ? "s" : ""}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6 py-4">
-            {/* Book Info */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium flex items-center gap-2">
+          {/* Content */}
+          <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
+            
+            {/* Book Details */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <FileText className="h-4 w-4" />
-                Book Information
-              </h4>
+                Book Details
+              </div>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label htmlFor="title" className="text-sm font-medium">Book Title *</label>
-                  <Input
-                    id="title"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="My Coloring Book"
-                    className="mt-1"
-                  />
-                </div>
+              <div className="space-y-3">
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Book Title *"
+                  className="h-10"
+                />
                 
-                <div>
-                  <label htmlFor="author" className="text-sm font-medium">Author / Company</label>
+                <div className="grid grid-cols-2 gap-3">
                   <Input
-                    id="author"
                     value={author}
                     onChange={(e) => setAuthor(e.target.value)}
-                    placeholder="Your name"
-                    className="mt-1"
+                    placeholder="Author"
+                    className="h-10"
+                  />
+                  <Input
+                    value={year}
+                    onChange={(e) => setYear(e.target.value)}
+                    placeholder="Year"
+                    className="h-10"
                   />
                 </div>
                 
-                <div>
-                  <label htmlFor="year" className="text-sm font-medium">Year</label>
-                  <Input
-                    id="year"
-                    value={year}
-                    onChange={(e) => setYear(e.target.value)}
-                    placeholder="2026"
-                    className="mt-1"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label htmlFor="website" className="text-sm font-medium">Website (optional)</label>
-                  <Input
-                    id="website"
-                    value={website}
-                    onChange={(e) => setWebsite(e.target.value)}
-                    placeholder="www.example.com"
-                    className="mt-1"
-                  />
-                </div>
+                <Input
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                  placeholder="Website (optional)"
+                  className="h-10"
+                />
               </div>
             </div>
 
-            {/* Page Options */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium">Page Options</h4>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">Page Size</label>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => setPageSize(e.target.value as "letter" | "a4")}
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  >
-                    <option value="letter">US Letter (8.5 × 11 in)</option>
-                    <option value="a4">A4 (210 × 297 mm)</option>
-                  </select>
-                </div>
+            {/* Page Format */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <Layers className="h-4 w-4" />
+                Page Format
               </div>
+              
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(e.target.value as "letter" | "a4")}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="letter">US Letter (8.5 × 11 in)</option>
+                <option value="a4">A4 (210 × 297 mm)</option>
+              </select>
             </div>
 
             {/* Content Options */}
             <div className="space-y-3">
-              <h4 className="text-sm font-medium">Content Options</h4>
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <BookMarked className="h-4 w-4" />
+                Content Options
+              </div>
               
-              <div className="space-y-3">
-                {/* Processing status */}
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm">
-                    <Sparkles className="h-4 w-4 text-amber-500" />
-                    Page processing status
-                    <span className="text-xs text-muted-foreground">
-                      ({processedCount}/{coloringPages.length} ready)
-                    </span>
-                  </label>
-                  {allPagesProcessed ? (
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                  ) : (
-                    <span className="text-xs text-amber-600">Processing needed</span>
-                  )}
-                </div>
-
-                {/* Warning if pages not processed */}
-                {!allPagesProcessed && onProcessPages && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                      <p>Some pages need processing for best print quality.</p>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="h-auto p-0 text-amber-800 underline"
-                        onClick={onProcessPages}
-                      >
-                        Process all pages now
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between">
-                  <label htmlFor="blankPages" className="flex items-center gap-2 cursor-pointer text-sm">
-                    Insert blank pages between drawings
-                    <span className="text-xs text-muted-foreground">(prevents bleed-through)</span>
-                  </label>
-                  <Switch
-                    id="blankPages"
-                    checked={insertBlankPages}
-                    onCheckedChange={setInsertBlankPages}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label htmlFor="belongsTo" className="flex items-center gap-2 cursor-pointer text-sm">
-                    Include &quot;Belongs To&quot; page
-                    {characterProfile?.species && (
-                      <span className="text-xs text-muted-foreground">
-                        (featuring {characterProfile.species})
-                      </span>
-                    )}
-                    {belongsToData?.finalLetterBase64 && (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    )}
-                  </label>
-                  <Switch
-                    id="belongsTo"
-                    checked={includeBelongsTo}
-                    onCheckedChange={setIncludeBelongsTo}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label htmlFor="copyright" className="cursor-pointer text-sm">
-                    Include copyright page
-                  </label>
-                  <Switch
-                    id="copyright"
-                    checked={includeCopyright}
-                    onCheckedChange={setIncludeCopyright}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label htmlFor="pageNumbers" className="cursor-pointer text-sm">
-                    Include page numbers
-                  </label>
-                  <Switch
-                    id="pageNumbers"
-                    checked={includePageNumbers}
-                    onCheckedChange={setIncludePageNumbers}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label htmlFor="createdWith" className="cursor-pointer text-sm text-muted-foreground">
-                    Include &quot;Created with ColorBookAI&quot;
-                  </label>
-                  <Switch
-                    id="createdWith"
-                    checked={includeCreatedWith}
-                    onCheckedChange={setIncludeCreatedWith}
-                  />
-                </div>
+              <div className="space-y-2 bg-gray-50 rounded-lg p-3">
+                <label className="flex items-center justify-between py-1 cursor-pointer">
+                  <span className="text-sm">Include &quot;Belongs To&quot; page</span>
+                  <Switch checked={includeBelongsTo} onCheckedChange={setIncludeBelongsTo} />
+                </label>
+                
+                <label className="flex items-center justify-between py-1 cursor-pointer">
+                  <span className="text-sm">Include copyright page</span>
+                  <Switch checked={includeCopyright} onCheckedChange={setIncludeCopyright} />
+                </label>
+                
+                <label className="flex items-center justify-between py-1 cursor-pointer">
+                  <span className="text-sm">Insert blank pages between drawings</span>
+                  <Switch checked={insertBlankPages} onCheckedChange={setInsertBlankPages} />
+                </label>
+                
+                <label className="flex items-center justify-between py-1 cursor-pointer">
+                  <span className="text-sm">Include page numbers</span>
+                  <Switch checked={includePageNumbers} onCheckedChange={setIncludePageNumbers} />
+                </label>
+                
+                <label className="flex items-center justify-between py-1 cursor-pointer text-muted-foreground">
+                  <span className="text-sm">Include &quot;Created with ColorBookAI&quot;</span>
+                  <Switch checked={includeCreatedWith} onCheckedChange={setIncludeCreatedWith} />
+                </label>
               </div>
             </div>
 
-            {/* Preview Summary */}
-            <div className="rounded-lg bg-muted/50 p-3 text-sm">
-              <p className="font-medium">PDF Preview:</p>
-              <ul className="mt-1 space-y-1 text-muted-foreground">
-                {includeBelongsTo && <li>• &quot;Belongs To&quot; page (auto-generated)</li>}
-                {includeCopyright && <li>• Copyright page</li>}
-                <li>• {availablePages.length} coloring pages (US Letter format)</li>
-                {insertBlankPages && <li>• {Math.max(0, availablePages.length - 1)} blank pages</li>}
-                <li className="pt-1 text-xs font-medium">
-                  Total: ~{(includeBelongsTo ? 1 : 0) + (includeCopyright ? 1 : 0) + availablePages.length + (insertBlankPages ? Math.max(0, availablePages.length - 1) : 0)} pages
-                </li>
-              </ul>
+            {/* Processing Warning */}
+            {!allPagesProcessed && onProcessPages && (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1 text-sm">
+                  <p className="font-medium text-amber-800">Processing recommended</p>
+                  <p className="text-amber-700 mt-0.5">
+                    {processedCount}/{coloringPages.length} pages are optimized for print.
+                  </p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 mt-1 text-amber-800 underline"
+                    onClick={onProcessPages}
+                  >
+                    Process all pages now →
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Summary */}
+            <div className="flex items-center justify-between py-3 px-4 bg-gray-100 rounded-lg">
+              <div className="flex items-center gap-2">
+                <FileCheck className="h-5 w-5 text-gray-600" />
+                <span className="text-sm font-medium text-gray-700">Total pages</span>
+              </div>
+              <span className="text-lg font-bold text-gray-900">{totalPages}</span>
             </div>
           </div>
 
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={onClose} disabled={isExporting}>
+          {/* Footer */}
+          <DialogFooter className="px-6 py-4 border-t bg-gray-50 gap-2 sm:gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={isExporting} className="gap-2">
+              <X className="h-4 w-4" />
               Cancel
             </Button>
+            <div className="flex-1" />
             <Button
               variant="outline"
               onClick={handlePreview}
               disabled={isExporting || availablePages.length === 0}
+              className="gap-2"
             >
-              {isExporting ? (
+              {isExporting && exportMode === "preview" ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {exportStep || "Generating..."}
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {exportStep || "Loading..."}
                 </>
               ) : (
                 <>
-                  <Eye className="mr-2 h-4 w-4" />
-                  Preview PDF
+                  <Eye className="h-4 w-4" />
+                  Preview
                 </>
               )}
             </Button>
-            <Button onClick={handleDirectExport} disabled={isExporting || availablePages.length === 0}>
-              {isExporting ? (
+            <Button 
+              onClick={handleDirectExport} 
+              disabled={isExporting || availablePages.length === 0}
+              className="gap-2 bg-amber-600 hover:bg-amber-700"
+            >
+              {isExporting && exportMode === "download" ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   {exportStep || "Exporting..."}
                 </>
               ) : (
                 <>
-                  <Download className="mr-2 h-4 w-4" />
+                  <Download className="h-4 w-4" />
                   Export PDF
                 </>
               )}
