@@ -13,12 +13,14 @@ import {
   Settings,
   Copy,
   Quote,
+  Boxes,
 } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard },
   { label: "Create Coloring Book", href: "/app/create", icon: Plus },
-  { label: "Quote Book", href: "/app/quote-book", icon: Quote, badge: "New" },
+  { label: "Quote Book", href: "/app/quote-book", icon: Quote },
+  { label: "Bulk Create", href: "/app/bulk", icon: Boxes, badge: "New" },
   { label: "Style Clone", href: "/app/batch", icon: Copy },
   { label: "My Projects", href: "/app/projects", icon: FolderOpen },
   { label: "Templates", href: "/app/templates", icon: Layers, badge: "Soon" },
