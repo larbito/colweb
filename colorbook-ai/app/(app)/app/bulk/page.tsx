@@ -779,6 +779,415 @@ export default function BulkCreatePage() {
     0
   ) || 0;
   
+  // ==================== STEP 4: GENERATE IMAGES ====================
+  
+  const [generationPaused, setGenerationPaused] = useState(false);
+  const generationAbortRef = useRef(false);
+  const [currentGeneratingPage, setCurrentGeneratingPage] = useState<{bookId: string; pageId: string} | null>(null);
+  
+  const generateImageForPage = async (book: Book, page: BookPage): Promise<boolean> => {
+    if (!batch || generationAbortRef.current) return false;
+    
+    setCurrentGeneratingPage({ bookId: book.id, pageId: page.id });
+    
+    // Update page status to generating
+    setBatch(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        books: prev.books.map(b => 
+          b.id === book.id 
+            ? {
+                ...b,
+                pages: b.pages.map(p =>
+                  p.id === page.id ? { ...p, status: "generating" as const } : p
+                )
+              }
+            : b
+        )
+      };
+    });
+    
+    try {
+      const startTime = Date.now();
+      
+      const response = await fetch("/api/batch/generate-one", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: page.finalPrompt,
+          pageNumber: page.index,
+          isStorybookMode: book.bookMode === "storybook",
+          characterProfile: book.settings.sameCharacter && book.settings.characterDescription ? {
+            species: "character",
+            description: book.settings.characterDescription,
+          } : undefined,
+          validate: false, // Skip validation for speed
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate image");
+      }
+      
+      const durationMs = Date.now() - startTime;
+      
+      // Update page with generated image
+      setBatch(prev => {
+        if (!prev) return prev;
+        const newGeneratedPages = prev.generatedPages + 1;
+        // Update average generation time
+        const newAvgMs = prev.avgGenerationMs > 0 
+          ? (prev.avgGenerationMs * prev.generatedPages + durationMs) / newGeneratedPages
+          : durationMs;
+          
+        return {
+          ...prev,
+          generatedPages: newGeneratedPages,
+          avgGenerationMs: newAvgMs,
+          books: prev.books.map(b => 
+            b.id === book.id 
+              ? {
+                  ...b,
+                  pages: b.pages.map(p =>
+                    p.id === page.id 
+                      ? { 
+                          ...p, 
+                          status: "generated" as const,
+                          imageBase64: data.imageBase64,
+                          generatedAt: Date.now(),
+                          generationDurationMs: durationMs,
+                        } 
+                      : p
+                  )
+                }
+              : b
+          )
+        };
+      });
+      
+      return true;
+    } catch (error) {
+      console.error(`Failed to generate page ${page.index}:`, error);
+      
+      // Update page status to failed
+      setBatch(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          failedPages: prev.failedPages + 1,
+          books: prev.books.map(b => 
+            b.id === book.id 
+              ? {
+                  ...b,
+                  pages: b.pages.map(p =>
+                    p.id === page.id 
+                      ? { 
+                          ...p, 
+                          status: "failed" as const,
+                          error: error instanceof Error ? error.message : "Generation failed",
+                        } 
+                      : p
+                  )
+                }
+              : b
+          )
+        };
+      });
+      
+      return false;
+    } finally {
+      setCurrentGeneratingPage(null);
+    }
+  };
+  
+  const startGeneration = async () => {
+    if (!batch) return;
+    
+    setIsGeneratingImages(true);
+    generationAbortRef.current = false;
+    
+    // Update batch status
+    setBatch(prev => prev ? { ...prev, status: "generating", startedAt: Date.now() } : prev);
+    
+    // Get all pages that need generation (have prompts but no images)
+    const pagesToGenerate: Array<{book: Book; page: BookPage}> = [];
+    for (const book of batch.books) {
+      for (const page of book.pages) {
+        if (page.finalPrompt && !page.imageBase64 && page.status !== "generating") {
+          pagesToGenerate.push({ book, page });
+        }
+      }
+    }
+    
+    // Generate pages one by one (can be parallelized later)
+    for (const { book, page } of pagesToGenerate) {
+      if (generationAbortRef.current) break;
+      
+      // Wait if paused
+      while (generationPaused && !generationAbortRef.current) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      if (generationAbortRef.current) break;
+      
+      await generateImageForPage(book, page);
+    }
+    
+    setIsGeneratingImages(false);
+    setBatch(prev => prev ? { ...prev, status: "completed", completedAt: Date.now() } : prev);
+    
+    if (!generationAbortRef.current) {
+      toast.success("All images generated!");
+    }
+  };
+  
+  const pauseGeneration = () => {
+    setGenerationPaused(true);
+  };
+  
+  const resumeGeneration = () => {
+    setGenerationPaused(false);
+  };
+  
+  const stopGeneration = () => {
+    generationAbortRef.current = true;
+    setGenerationPaused(false);
+    setIsGeneratingImages(false);
+  };
+  
+  const retryFailedPages = async () => {
+    if (!batch) return;
+    
+    // Reset failed pages
+    setBatch(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        failedPages: 0,
+        books: prev.books.map(b => ({
+          ...b,
+          pages: b.pages.map(p => 
+            p.status === "failed" ? { ...p, status: "draft" as const, error: undefined } : p
+          )
+        }))
+      };
+    });
+    
+    // Start generation again
+    await startGeneration();
+  };
+  
+  // ==================== STEP 5: REVIEW & EXPORT ====================
+  
+  const [enhancingPageIds, setEnhancingPageIds] = useState<Set<string>>(new Set());
+  const [selectedBookForExport, setSelectedBookForExport] = useState<string | null>(null);
+  const [viewingPage, setViewingPage] = useState<{bookId: string; page: BookPage} | null>(null);
+  
+  const enhancePage = async (book: Book, page: BookPage) => {
+    if (!page.imageBase64) return;
+    
+    setEnhancingPageIds(prev => new Set([...prev, page.id]));
+    
+    // Update page status
+    setBatch(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        books: prev.books.map(b => 
+          b.id === book.id 
+            ? {
+                ...b,
+                pages: b.pages.map(p =>
+                  p.id === page.id ? { ...p, status: "enhancing" as const } : p
+                )
+              }
+            : b
+        )
+      };
+    });
+    
+    try {
+      const startTime = Date.now();
+      
+      const response = await fetch("/api/image/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: page.imageBase64,
+          pageType: "coloring",
+          scale: 2,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to enhance image");
+      }
+      
+      const durationMs = Date.now() - startTime;
+      
+      // Update page with enhanced image
+      setBatch(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          enhancedPages: prev.enhancedPages + 1,
+          books: prev.books.map(b => 
+            b.id === book.id 
+              ? {
+                  ...b,
+                  pages: b.pages.map(p =>
+                    p.id === page.id 
+                      ? { 
+                          ...p, 
+                          status: "enhanced" as const,
+                          enhancedImageBase64: data.enhancedBase64,
+                          finalLetterBase64: data.finalLetterBase64,
+                          activeVersion: "finalLetter" as const,
+                          enhancedAt: Date.now(),
+                          enhancementDurationMs: durationMs,
+                        } 
+                      : p
+                  )
+                }
+              : b
+          )
+        };
+      });
+      
+      toast.success(`Enhanced page ${page.index}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to enhance image");
+      
+      // Reset status
+      setBatch(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          books: prev.books.map(b => 
+            b.id === book.id 
+              ? {
+                  ...b,
+                  pages: b.pages.map(p =>
+                    p.id === page.id ? { ...p, status: "generated" as const } : p
+                  )
+                }
+              : b
+          )
+        };
+      });
+    } finally {
+      setEnhancingPageIds(prev => {
+        const next = new Set(prev);
+        next.delete(page.id);
+        return next;
+      });
+    }
+  };
+  
+  const enhanceAllPagesInBook = async (book: Book) => {
+    const pagesToEnhance = book.pages.filter(p => p.imageBase64 && !p.enhancedImageBase64);
+    
+    for (const page of pagesToEnhance) {
+      await enhancePage(book, page);
+    }
+    
+    toast.success(`Enhanced all pages in "${book.title || 'Book'}"`);
+  };
+  
+  const enhanceAllPagesInBatch = async () => {
+    if (!batch) return;
+    
+    setIsEnhancing(true);
+    
+    for (const book of batch.books) {
+      await enhanceAllPagesInBook(book);
+    }
+    
+    setIsEnhancing(false);
+    toast.success("All pages enhanced!");
+  };
+  
+  const approvePage = (bookId: string, pageId: string) => {
+    setBatch(prev => {
+      if (!prev) return prev;
+      const newApprovedCount = prev.books.reduce((sum, b) => 
+        sum + b.pages.filter(p => p.id === pageId ? !p.approvedAt : p.approvedAt).length, 
+        0
+      );
+      
+      return {
+        ...prev,
+        approvedPages: newApprovedCount,
+        books: prev.books.map(b => 
+          b.id === bookId 
+            ? {
+                ...b,
+                pages: b.pages.map(p =>
+                  p.id === pageId 
+                    ? { ...p, approvedAt: p.approvedAt ? undefined : Date.now(), status: "approved" as const } 
+                    : p
+                )
+              }
+            : b
+        )
+      };
+    });
+  };
+  
+  const regeneratePage = async (book: Book, page: BookPage) => {
+    // Reset the page and regenerate
+    setBatch(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        generatedPages: Math.max(0, prev.generatedPages - 1),
+        books: prev.books.map(b => 
+          b.id === book.id 
+            ? {
+                ...b,
+                pages: b.pages.map(p =>
+                  p.id === page.id 
+                    ? { 
+                        ...p, 
+                        status: "draft" as const,
+                        imageBase64: undefined,
+                        enhancedImageBase64: undefined,
+                        finalLetterBase64: undefined,
+                        activeVersion: "original" as const,
+                        approvedAt: undefined,
+                      } 
+                    : p
+                )
+              }
+            : b
+        )
+      };
+    });
+    
+    // Get the updated book and page
+    const updatedBook = batch?.books.find(b => b.id === book.id);
+    const updatedPage = updatedBook?.pages.find(p => p.id === page.id);
+    
+    if (updatedBook && updatedPage) {
+      await generateImageForPage(updatedBook, { ...updatedPage, imageBase64: undefined });
+    }
+  };
+  
+  const downloadBookAsPdf = async (book: Book) => {
+    // TODO: Implement PDF export using the existing export modal logic
+    toast.info("PDF export coming soon!");
+  };
+  
+  const downloadAllAsZip = async () => {
+    // TODO: Implement ZIP download
+    toast.info("ZIP download coming soon!");
+  };
+  
   // ==================== STATS ====================
   
   const approvedCount = bookIdeas.filter(i => i.isApproved).length;
@@ -1278,41 +1687,170 @@ export default function BulkCreatePage() {
                     Generating {batch.totalPages} pages across {batch.books.length} books
                   </p>
                 </div>
+                <div className="flex items-center gap-2">
+                  {batch.failedPages > 0 && (
+                    <Button variant="outline" onClick={retryFailedPages} disabled={isGeneratingImages}>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Retry Failed ({batch.failedPages})
+                    </Button>
+                  )}
+                </div>
               </div>
               
-              {/* Progress */}
+              {/* Progress Card */}
               <Card className="p-6">
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {isGeneratingImages ? (
-                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        generationPaused ? (
+                          <Pause className="h-5 w-5 text-yellow-500" />
+                        ) : (
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        )
+                      ) : batch.generatedPages === batch.totalPages ? (
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
                       ) : (
                         <Clock className="h-5 w-5 text-muted-foreground" />
                       )}
                       <span className="font-medium">
-                        {isGeneratingImages ? "Generating..." : "Ready to start"}
+                        {isGeneratingImages 
+                          ? generationPaused 
+                            ? "Paused" 
+                            : "Generating..."
+                          : batch.generatedPages === batch.totalPages 
+                            ? "Complete!" 
+                            : "Ready to start"
+                        }
                       </span>
                     </div>
-                    <span className="text-sm text-muted-foreground">
-                      {batch.generatedPages} / {batch.totalPages} pages
-                    </span>
+                    <div className="flex items-center gap-4">
+                      {isGeneratingImages && batch.avgGenerationMs > 0 && (
+                        <span className="text-sm text-muted-foreground">
+                          ETA: {formatEta(Math.round(((batch.totalPages - batch.generatedPages) * batch.avgGenerationMs) / 1000))}
+                        </span>
+                      )}
+                      <span className="text-sm font-medium">
+                        {batch.generatedPages} / {batch.totalPages} pages
+                      </span>
+                    </div>
                   </div>
                   <Progress value={(batch.generatedPages / batch.totalPages) * 100} className="h-3" />
                   
-                  {!isGeneratingImages && (
-                    <div className="flex justify-center pt-4">
-                      <Button size="lg" onClick={() => setIsGeneratingImages(true)}>
+                  {/* Control buttons */}
+                  <div className="flex justify-center gap-3 pt-4">
+                    {!isGeneratingImages && batch.generatedPages < batch.totalPages && (
+                      <Button size="lg" onClick={startGeneration}>
                         <Play className="mr-2 h-5 w-5" />
-                        Start Generation
+                        {batch.generatedPages > 0 ? "Resume Generation" : "Start Generation"}
                       </Button>
-                    </div>
-                  )}
+                    )}
+                    {isGeneratingImages && !generationPaused && (
+                      <>
+                        <Button variant="outline" size="lg" onClick={pauseGeneration}>
+                          <Pause className="mr-2 h-5 w-5" />
+                          Pause
+                        </Button>
+                        <Button variant="destructive" size="lg" onClick={stopGeneration}>
+                          <XCircle className="mr-2 h-5 w-5" />
+                          Stop
+                        </Button>
+                      </>
+                    )}
+                    {isGeneratingImages && generationPaused && (
+                      <>
+                        <Button size="lg" onClick={resumeGeneration}>
+                          <Play className="mr-2 h-5 w-5" />
+                          Resume
+                        </Button>
+                        <Button variant="destructive" size="lg" onClick={stopGeneration}>
+                          <XCircle className="mr-2 h-5 w-5" />
+                          Stop
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </Card>
               
+              {/* Books with page thumbnails */}
+              <div className="space-y-4">
+                {batch.books.map((book, bookIdx) => {
+                  const generatedCount = book.pages.filter(p => p.imageBase64).length;
+                  const failedCount = book.pages.filter(p => p.status === "failed").length;
+                  
+                  return (
+                    <Card key={book.id}>
+                      <CardHeader className="py-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {book.bookType === "coloring_scenes" ? (
+                              <Palette className="h-5 w-5 text-primary" />
+                            ) : (
+                              <Quote className="h-5 w-5 text-purple-500" />
+                            )}
+                            <div>
+                              <CardTitle className="text-base">{book.title || `Book ${bookIdx + 1}`}</CardTitle>
+                              <CardDescription className="text-xs">
+                                {generatedCount}/{book.pages.length} generated
+                                {failedCount > 0 && <span className="text-red-500 ml-2">({failedCount} failed)</span>}
+                              </CardDescription>
+                            </div>
+                          </div>
+                          <Progress 
+                            value={(generatedCount / book.pages.length) * 100} 
+                            className="w-32 h-2" 
+                          />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <div className="grid grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
+                          {book.pages.map((page) => {
+                            const isCurrentlyGenerating = currentGeneratingPage?.bookId === book.id && currentGeneratingPage?.pageId === page.id;
+                            
+                            return (
+                              <div
+                                key={page.id}
+                                className={`
+                                  aspect-[3/4] rounded-lg border-2 overflow-hidden relative
+                                  ${page.imageBase64 ? "border-green-300 bg-white" : ""}
+                                  ${page.status === "generating" || isCurrentlyGenerating ? "border-primary bg-primary/5" : ""}
+                                  ${page.status === "failed" ? "border-red-300 bg-red-50" : ""}
+                                  ${!page.imageBase64 && page.status !== "generating" && page.status !== "failed" ? "border-muted bg-muted/30" : ""}
+                                `}
+                              >
+                                {page.imageBase64 ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={`data:image/png;base64,${page.imageBase64}`}
+                                    alt={`Page ${page.index}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : page.status === "generating" || isCurrentlyGenerating ? (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                  </div>
+                                ) : page.status === "failed" ? (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <XCircle className="h-4 w-4 text-red-500" />
+                                  </div>
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <span className="text-xs text-muted-foreground">{page.index}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+              
               <div className="flex justify-between pt-4 border-t">
-                <Button variant="outline" onClick={goToPrevStep}>
+                <Button variant="outline" onClick={goToPrevStep} disabled={isGeneratingImages}>
                   <ChevronLeft className="mr-2 h-5 w-5" />
                   Back to Prompts
                 </Button>
@@ -1333,23 +1871,178 @@ export default function BulkCreatePage() {
                     Review, enhance, and export your coloring books
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <Button variant="outline">
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Enhance All
+                <div className="flex items-center gap-3">
+                  <Badge variant="outline" className="text-sm py-1 px-3">
+                    {batch.generatedPages} generated · {batch.enhancedPages} enhanced · {batch.approvedPages} approved
+                  </Badge>
+                  <Button 
+                    variant="outline" 
+                    onClick={enhanceAllPagesInBatch}
+                    disabled={isEnhancing || batch.enhancedPages === batch.generatedPages}
+                  >
+                    {isEnhancing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Enhancing...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Enhance All
+                      </>
+                    )}
                   </Button>
-                  <Button>
+                  <Button onClick={downloadAllAsZip}>
                     <Download className="mr-2 h-4 w-4" />
                     Download All (ZIP)
                   </Button>
                 </div>
               </div>
               
-              <Card className="p-8 text-center text-muted-foreground">
-                <Eye className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>Review & Export UI coming soon...</p>
-                <p className="text-sm mt-2">Your generated books will appear here</p>
-              </Card>
+              {/* Books with page grids */}
+              <div className="space-y-6">
+                {batch.books.map((book, bookIdx) => {
+                  const generatedCount = book.pages.filter(p => p.imageBase64).length;
+                  const enhancedCount = book.pages.filter(p => p.enhancedImageBase64).length;
+                  const approvedCount = book.pages.filter(p => p.approvedAt).length;
+                  
+                  return (
+                    <Card key={book.id}>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {book.bookType === "coloring_scenes" ? (
+                              <Palette className="h-6 w-6 text-primary" />
+                            ) : (
+                              <Quote className="h-6 w-6 text-purple-500" />
+                            )}
+                            <div>
+                              <CardTitle>{book.title || `Book ${bookIdx + 1}`}</CardTitle>
+                              <CardDescription>
+                                {generatedCount} pages · {enhancedCount} enhanced · {approvedCount} approved
+                              </CardDescription>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => enhanceAllPagesInBook(book)}
+                              disabled={isEnhancing || enhancedCount === generatedCount}
+                            >
+                              <Sparkles className="mr-2 h-4 w-4" />
+                              Enhance All
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => downloadBookAsPdf(book)}
+                            >
+                              <FileDown className="mr-2 h-4 w-4" />
+                              Export PDF
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                          {book.pages.map((page) => {
+                            const isPageEnhancing = enhancingPageIds.has(page.id);
+                            const displayImage = page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64;
+                            
+                            return (
+                              <div
+                                key={page.id}
+                                className={`
+                                  group relative aspect-[3/4] rounded-xl border-2 overflow-hidden transition-all
+                                  ${page.approvedAt ? "border-green-400 ring-2 ring-green-200" : "border-border"}
+                                  ${isPageEnhancing ? "border-primary" : ""}
+                                  hover:shadow-lg
+                                `}
+                              >
+                                {displayImage ? (
+                                  <>
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={`data:image/png;base64,${displayImage}`}
+                                      alt={`Page ${page.index}`}
+                                      className="w-full h-full object-cover bg-white"
+                                    />
+                                    
+                                    {/* Status badges */}
+                                    <div className="absolute top-2 left-2 flex flex-col gap-1">
+                                      {page.enhancedImageBase64 && (
+                                        <Badge className="text-[10px] bg-purple-500">Enhanced</Badge>
+                                      )}
+                                      {page.approvedAt && (
+                                        <Badge className="text-[10px] bg-green-500">Approved</Badge>
+                                      )}
+                                    </div>
+                                    
+                                    {/* Page number */}
+                                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/50 text-white text-xs flex items-center justify-center">
+                                      {page.index}
+                                    </div>
+                                    
+                                    {/* Hover actions */}
+                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                      <Button 
+                                        size="sm" 
+                                        variant="secondary"
+                                        onClick={() => setViewingPage({ bookId: book.id, page })}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="secondary"
+                                        onClick={() => approvePage(book.id, page.id)}
+                                      >
+                                        <Check className={`h-4 w-4 ${page.approvedAt ? "text-green-500" : ""}`} />
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="secondary"
+                                        onClick={() => enhancePage(book, page)}
+                                        disabled={isPageEnhancing || !!page.enhancedImageBase64}
+                                      >
+                                        {isPageEnhancing ? (
+                                          <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <Sparkles className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="secondary"
+                                        onClick={() => regeneratePage(book, page)}
+                                      >
+                                        <RefreshCw className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                    
+                                    {/* Enhancing overlay */}
+                                    {isPageEnhancing && (
+                                      <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div className="w-full h-full flex flex-col items-center justify-center bg-muted/30">
+                                    <ImageIcon className="h-8 w-8 text-muted-foreground mb-2" />
+                                    <span className="text-xs text-muted-foreground">Not generated</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
               
               <div className="flex justify-between pt-4 border-t">
                 <Button variant="outline" onClick={goToPrevStep}>
@@ -1359,6 +2052,74 @@ export default function BulkCreatePage() {
               </div>
             </div>
           )}
+          
+          {/* Image Preview Dialog */}
+          <Dialog open={!!viewingPage} onOpenChange={() => setViewingPage(null)}>
+            <DialogContent className="max-w-4xl">
+              <DialogHeader>
+                <DialogTitle>Page {viewingPage?.page.index} Preview</DialogTitle>
+              </DialogHeader>
+              {viewingPage && (
+                <div className="space-y-4">
+                  <div className="aspect-[3/4] max-h-[60vh] rounded-lg overflow-hidden bg-white border">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`data:image/png;base64,${
+                        viewingPage.page.finalLetterBase64 || 
+                        viewingPage.page.enhancedImageBase64 || 
+                        viewingPage.page.imageBase64
+                      }`}
+                      alt={`Page ${viewingPage.page.index}`}
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <div className="flex gap-2">
+                      {viewingPage.page.enhancedImageBase64 && (
+                        <Badge variant="secondary">Enhanced</Badge>
+                      )}
+                      {viewingPage.page.finalLetterBase64 && (
+                        <Badge variant="secondary">Letter Format</Badge>
+                      )}
+                      {viewingPage.page.approvedAt && (
+                        <Badge className="bg-green-500">Approved</Badge>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline"
+                        onClick={() => {
+                          const book = batch?.books.find(b => b.id === viewingPage.bookId);
+                          if (book) {
+                            approvePage(book.id, viewingPage.page.id);
+                          }
+                        }}
+                      >
+                        <Check className="mr-2 h-4 w-4" />
+                        {viewingPage.page.approvedAt ? "Unapprove" : "Approve"}
+                      </Button>
+                      <Button 
+                        variant="outline"
+                        onClick={() => {
+                          const book = batch?.books.find(b => b.id === viewingPage.bookId);
+                          if (book && !viewingPage.page.enhancedImageBase64) {
+                            enhancePage(book, viewingPage.page);
+                          }
+                        }}
+                        disabled={!!viewingPage.page.enhancedImageBase64 || enhancingPageIds.has(viewingPage.page.id)}
+                      >
+                        {enhancingPageIds.has(viewingPage.page.id) ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enhancing...</>
+                        ) : (
+                          <><Sparkles className="mr-2 h-4 w-4" />Enhance</>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </div>
       </main>
       
