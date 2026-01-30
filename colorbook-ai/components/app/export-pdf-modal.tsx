@@ -120,14 +120,37 @@ export function ExportPDFModal({
     }
   };
 
-  // Convert base64 to Uint8Array
+  // Convert base64 to Uint8Array (strips data URL prefix if present)
   const base64ToUint8Array = (base64: string): Uint8Array => {
-    const binaryString = atob(base64);
+    // Strip data URL prefix if present
+    let cleanBase64 = base64;
+    if (base64.includes(",")) {
+      cleanBase64 = base64.split(",")[1];
+    }
+    const binaryString = atob(cleanBase64);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
     return bytes;
+  };
+
+  // Embed image into PDF (handles both PNG and JPEG)
+  const embedImage = async (pdfDoc: PDFDocument, base64: string) => {
+    const imageBytes = base64ToUint8Array(base64);
+    
+    // Try PNG first, then JPEG
+    try {
+      return await pdfDoc.embedPng(imageBytes);
+    } catch {
+      // If PNG fails, try JPEG
+      try {
+        return await pdfDoc.embedJpg(imageBytes);
+      } catch (jpgError) {
+        console.error("Failed to embed image as PNG or JPEG:", jpgError);
+        throw new Error("Unsupported image format");
+      }
+    }
   };
 
   // Get the appropriate image for a page (enhanced or original)
@@ -174,8 +197,7 @@ export function ExportPDFModal({
           const belongsToPage = pdfDoc.addPage([dimensions.width, dimensions.height]);
           currentPageNum++;
           
-          const imageBytes = base64ToUint8Array(finalBelongsToImage);
-          const pngImage = await pdfDoc.embedPng(imageBytes);
+          const pngImage = await embedImage(pdfDoc, finalBelongsToImage);
           
           const availableWidth = dimensions.width - (margins * 2);
           const availableHeight = dimensions.height - (margins * 2);
@@ -298,8 +320,7 @@ export function ExportPDFModal({
         
         // Get the appropriate image (enhanced or original)
         const imageToUse = getPageImage(pageData);
-        const imageBytes = base64ToUint8Array(imageToUse);
-        const pngImage = await pdfDoc.embedPng(imageBytes);
+        const pngImage = await embedImage(pdfDoc, imageToUse);
         
         const availableWidth = dimensions.width - (margins * 2);
         const availableHeight = dimensions.height - (margins * 2);
@@ -370,7 +391,12 @@ export function ExportPDFModal({
   const handleDownload = useCallback(() => {
     if (!pdfData) return;
     
-    const blob = new Blob([pdfData as BlobPart], { type: "application/pdf" });
+    // Create blob from Uint8Array - convert to ArrayBuffer for compatibility
+    const arrayBuffer = pdfData.buffer.slice(
+      pdfData.byteOffset,
+      pdfData.byteOffset + pdfData.byteLength
+    ) as ArrayBuffer;
+    const blob = new Blob([arrayBuffer], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -406,7 +432,12 @@ export function ExportPDFModal({
       setExportStep("Downloading...");
       const pdfBytes = await pdfDoc.save();
       
-      const blob = new Blob([pdfBytes as BlobPart], { type: "application/pdf" });
+      // Create blob from Uint8Array - convert to ArrayBuffer for compatibility
+      const arrayBuffer = pdfBytes.buffer.slice(
+        pdfBytes.byteOffset,
+        pdfBytes.byteOffset + pdfBytes.byteLength
+      ) as ArrayBuffer;
+      const blob = new Blob([arrayBuffer], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;

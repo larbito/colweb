@@ -110,7 +110,7 @@ export function PDFPreviewModal({
             </div>
           ) : pdfData && workerReady ? (
             <Document
-              file={{ data: pdfData }}
+              file={{ data: new Uint8Array(pdfData) }}
               onLoadSuccess={onDocumentLoadSuccess}
               loading={
                 <div className="flex items-center justify-center h-64">
