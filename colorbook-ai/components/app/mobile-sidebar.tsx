@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ import {
   Sparkles,
   PenTool,
   X,
+  Menu,
 } from "lucide-react";
 
 interface NavItem {
@@ -66,13 +67,11 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-interface MobileSidebarProps {
-  open: boolean;
-  onClose: () => void;
-}
-
-export function MobileSidebar({ open, onClose }: MobileSidebarProps) {
+export function MobileSidebar() {
+  const [open, setOpen] = useState(false);
   const pathname = usePathname();
+
+  const onClose = useCallback(() => setOpen(false), []);
 
   const isActive = (href: string) => {
     if (href === "/app") return pathname === "/app";
@@ -100,24 +99,36 @@ export function MobileSidebar({ open, onClose }: MobileSidebarProps) {
     onClose();
   }, [pathname, onClose]);
 
-  if (!open) return null;
-
   return (
     <>
+      {/* Toggle Button - visible on mobile only */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-9 w-9 lg:hidden"
+        onClick={() => setOpen(true)}
+        aria-label="Open menu"
+      >
+        <Menu className="h-5 w-5" />
+      </Button>
+
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm lg:hidden"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      {open && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
 
       {/* Sidebar drawer */}
-      <aside 
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 w-72 flex flex-col bg-sidebar border-r border-sidebar-border lg:hidden",
-          "animate-in slide-in-from-left duration-200"
-        )}
-      >
+      {open && (
+        <aside 
+          className={cn(
+            "fixed inset-y-0 left-0 z-50 w-72 flex flex-col bg-sidebar border-r border-sidebar-border lg:hidden",
+            "animate-in slide-in-from-left duration-200"
+          )}
+        >
         {/* Header */}
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
           <Link href="/app" className="flex items-center gap-3" onClick={onClose}>
@@ -226,7 +237,8 @@ export function MobileSidebar({ open, onClose }: MobileSidebarProps) {
           {/* User Menu */}
           <UserMenu />
         </div>
-      </aside>
+        </aside>
+      )}
     </>
   );
 }
