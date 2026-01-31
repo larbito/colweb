@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { AppTopbar } from "@/components/app/app-topbar";
+import { PageContainer } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/app/page-header";
 import { SectionCard, SubSection } from "@/components/app/section-card";
 import { ProgressPanel, StatusBadge } from "@/components/app/progress-panel";
@@ -60,6 +61,7 @@ import {
   type PageStage,
   updatePageStage,
 } from "@/components/app/generation-progress";
+import { cn } from "@/lib/utils";
 
 // Types
 type PageStatus = "pending" | "generating" | "done" | "failed";
@@ -85,7 +87,6 @@ interface PageState {
   decorationTheme: DecorationTheme;
   decorationLevel: DecorationLevel;
   iconSet?: IconSet;
-  // NEW: Topic-based decoration
   topic?: QuoteTopic;
   keywords?: string[];
   motifPack?: string[];
@@ -255,11 +256,11 @@ export default function QuoteBookPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          topicMode: "any", // Always diverse topics
+          topicMode: "any",
           tone: quoteTone,
           audience: quoteAudience,
           count: quoteCount,
-          excludeQuotes: previousQuotesRef.current.slice(-50), // Anti-repetition
+          excludeQuotes: previousQuotesRef.current.slice(-50),
         }),
       });
 
@@ -269,14 +270,13 @@ export default function QuoteBookPage() {
         throw new Error(data.error || "Failed to generate quotes");
       }
 
-      // Update anti-repetition list
       previousQuotesRef.current = [
         ...previousQuotesRef.current,
         ...data.quotes,
       ].slice(-100);
 
       setQuotesText(data.quotes.join("\n"));
-      setPages([]); // Reset pages when quotes change
+      setPages([]);
       
       toast.success(`Generated ${data.quotes.length} unique quotes!`);
     } catch (error) {
@@ -324,7 +324,6 @@ export default function QuoteBookPage() {
         throw new Error(data.error || "Failed to generate prompts");
       }
 
-      // Convert to page state with all fields from API
       const pageStates: PageState[] = data.pages.map((p: {
         page: number;
         quote: string;
@@ -368,7 +367,6 @@ export default function QuoteBookPage() {
 
   // ==================== Step 3: Generate Images ====================
 
-  // Fast preview: generate just 2 pages first
   const generatePreview = async () => {
     const pendingPages = pages.filter(p => p.status === "pending" || p.status === "failed").slice(0, 2);
     if (pendingPages.length === 0) {
@@ -379,7 +377,6 @@ export default function QuoteBookPage() {
     await generatePages(pendingPages);
   };
 
-  // Generate all remaining pages
   const generateAllImages = async () => {
     const pendingPages = pages.filter(p => p.status === "pending" || p.status === "failed");
     if (pendingPages.length === 0) {
@@ -390,7 +387,6 @@ export default function QuoteBookPage() {
     await generatePages(pendingPages);
   };
 
-  // Helper to convert PageStatus to PageStage
   const toPageStage = (status: PageStatus, enhanceStatus: EnhanceStatus, processStatus: ProcessingStatus): PageStage => {
     if (processStatus === "done") return "done";
     if (processStatus === "processing") return "processing";
@@ -402,13 +398,11 @@ export default function QuoteBookPage() {
     return "queued";
   };
 
-  // Core generation function with concurrency and progress tracking
   const generatePages = async (pagesToGenerate: PageState[]) => {
     setIsGenerating(true);
     let successCount = 0;
     let failCount = 0;
 
-    // Initialize progress tracking
     const totalPages = pages.length;
     setJobProgress(prev => ({
       ...prev,
@@ -423,7 +417,6 @@ export default function QuoteBookPage() {
 
     toast.info(`Starting generation of ${pagesToGenerate.length} images...`);
 
-    // Process pages with concurrency of 2 (to avoid rate limits)
     const concurrency = 2;
     const chunks: PageState[][] = [];
     for (let i = 0; i < pagesToGenerate.length; i += concurrency) {
@@ -431,12 +424,10 @@ export default function QuoteBookPage() {
     }
 
     for (const chunk of chunks) {
-      // Mark all pages in chunk as generating
       setPages(prev => prev.map(p =>
         chunk.some(c => c.page === p.page) ? { ...p, status: "generating" as PageStatus } : p
       ));
       
-      // Update progress - mark pages as generating
       setJobProgress(prev => {
         let updated = prev;
         for (const pageItem of chunk) {
@@ -445,8 +436,6 @@ export default function QuoteBookPage() {
         return updated;
       });
 
-      // Generate chunk in parallel with timing
-      const chunkStartTime = Date.now();
       const results = await Promise.allSettled(
         chunk.map(async (pageItem) => {
           const pageStartTime = Date.now();
@@ -469,7 +458,6 @@ export default function QuoteBookPage() {
         })
       );
 
-      // Process results
       for (const result of results) {
         if (result.status === "fulfilled") {
           const { pageItem, response, data, duration } = result.value;
@@ -481,7 +469,6 @@ export default function QuoteBookPage() {
                 : p
             ));
             
-            // Update progress with duration
             setJobProgress(prev => updatePageStage(prev, pageItem.page, "generated", duration));
             successCount++;
           } else {
@@ -499,7 +486,6 @@ export default function QuoteBookPage() {
         }
       }
 
-      // Small delay between chunks
       if (chunks.indexOf(chunk) < chunks.length - 1) {
         await new Promise(r => setTimeout(r, 200));
       }
@@ -508,7 +494,6 @@ export default function QuoteBookPage() {
     setIsGenerating(false);
     setCurrentGeneratingPage(null);
     
-    // Update final phase
     setJobProgress(prev => ({
       ...prev,
       phase: failCount === pagesToGenerate.length ? "idle" : 
@@ -585,7 +570,6 @@ export default function QuoteBookPage() {
     setIsEnhancing(true);
     let successCount = 0;
 
-    // Update progress phase
     setJobProgress(prev => ({ ...prev, phase: "enhancing" }));
 
     toast.info(`Enhancing ${pagesToEnhance.length} pages for print quality...`);
@@ -669,7 +653,6 @@ export default function QuoteBookPage() {
     setIsProcessing(true);
     let successCount = 0;
 
-    // Update progress phase
     setJobProgress(prev => ({ ...prev, phase: "processing" }));
 
     toast.info(`Processing ${pagesToProcess.length} pages to print-ready format...`);
@@ -784,14 +767,9 @@ export default function QuoteBookPage() {
   // ==================== Render ====================
 
   return (
-    <>
-      <AppTopbar
-        title="Quote Coloring Book"
-        subtitle="Create beautiful typography coloring pages"
-      />
-
-      <main className="flex-1 overflow-auto">
-        <div className="container max-w-4xl py-6 space-y-6">
+    <main className="flex-1 pt-16 lg:pt-0">
+      <PageContainer maxWidth="lg">
+        <div className="space-y-6">
           {/* Page Header */}
           <PageHeader
             title="Quote Coloring Book"
@@ -799,7 +777,7 @@ export default function QuoteBookPage() {
             icon={Quote}
             actions={
               doneCount > 0 && (
-                <Button size="sm" onClick={() => setShowExportModal(true)}>
+                <Button onClick={() => setShowExportModal(true)}>
                   <FileDown className="mr-2 h-4 w-4" />
                   Export PDF
                 </Button>
@@ -816,68 +794,71 @@ export default function QuoteBookPage() {
               ? `${quotesText.split("\n").filter(q => q.trim().length > 0).length} quotes` 
               : undefined}
           >
-            <div className="space-y-4">
+            <div className="space-y-5">
               {/* AI Quote Generator */}
-              <div className="rounded-lg border bg-gradient-to-br from-primary/5 to-primary/10 p-4 space-y-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  AI Quote Generator
-                </div>
-                
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Tone</label>
-                    <select
-                      value={quoteTone}
-                      onChange={(e) => setQuoteTone(e.target.value as ToneType)}
-                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      {TONE_OPTIONS.map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
+              <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+                <CardContent className="p-5 space-y-4">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                    </div>
+                    <span>AI Quote Generator</span>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Audience</label>
-                    <select
-                      value={quoteAudience}
-                      onChange={(e) => setQuoteAudience(e.target.value as AudienceType)}
-                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      <option value="all">All Ages</option>
-                      <option value="kids">Kids</option>
-                      <option value="teens">Teens</option>
-                      <option value="adults">Adults</option>
-                    </select>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">Tone</label>
+                      <select
+                        value={quoteTone}
+                        onChange={(e) => setQuoteTone(e.target.value as ToneType)}
+                        className="w-full h-10 rounded-xl border border-input bg-background px-3 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+                      >
+                        {TONE_OPTIONS.map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">Audience</label>
+                      <select
+                        value={quoteAudience}
+                        onChange={(e) => setQuoteAudience(e.target.value as AudienceType)}
+                        className="w-full h-10 rounded-xl border border-input bg-background px-3 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+                      >
+                        <option value="all">All Ages</option>
+                        <option value="kids">Kids</option>
+                        <option value="teens">Teens</option>
+                        <option value="adults">Adults</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">Count</label>
+                      <Input
+                        type="number"
+                        value={quoteCount}
+                        onChange={(e) => setQuoteCount(Math.min(50, Math.max(1, parseInt(e.target.value) || 10)))}
+                        min={1}
+                        max={50}
+                        className="h-10 rounded-xl"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        onClick={generateQuotes}
+                        disabled={generatingQuotes}
+                        className="w-full h-10 rounded-xl"
+                      >
+                        {generatingQuotes ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Wand2 className="mr-2 h-4 w-4" />
+                        )}
+                        {generatingQuotes ? "Generating..." : "Generate"}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Count</label>
-                    <Input
-                      type="number"
-                      value={quoteCount}
-                      onChange={(e) => setQuoteCount(Math.min(50, Math.max(1, parseInt(e.target.value) || 10)))}
-                      min={1}
-                      max={50}
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <Button
-                      onClick={generateQuotes}
-                      disabled={generatingQuotes}
-                      className="w-full h-9"
-                      size="sm"
-                    >
-                      {generatingQuotes ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Wand2 className="mr-2 h-4 w-4" />
-                      )}
-                      {generatingQuotes ? "Generating..." : "Generate"}
-                    </Button>
-                  </div>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
 
               {/* Manual Quote Input */}
               <SubSection title="Your Quotes" description="Enter one quote per line">
@@ -888,7 +869,7 @@ export default function QuoteBookPage() {
                     setPages([]);
                   }}
                   placeholder="Enter your quotes here, one per line...&#10;&#10;Example:&#10;Believe in yourself&#10;You are enough&#10;Dream big, shine bright"
-                  className="min-h-[120px] font-medium resize-none"
+                  className="min-h-[140px] font-medium resize-none rounded-xl"
                 />
               </SubSection>
             </div>
@@ -900,7 +881,7 @@ export default function QuoteBookPage() {
             description="Choose the visual style for your quote pages"
             icon={Palette}
           >
-            <div className="space-y-5">
+            <div className="space-y-6">
               {/* Decoration Level - Primary Choice */}
               <SubSection 
                 title="Decoration Level" 
@@ -911,31 +892,37 @@ export default function QuoteBookPage() {
                     <button
                       key={option.value}
                       onClick={() => setDecorationLevel(option.value)}
-                      className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      className={cn(
+                        "p-4 rounded-xl border-2 text-left transition-all duration-150",
                         decorationLevel === option.value
-                          ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-                          : "border-border hover:border-primary/50 hover:bg-muted/50"
-                      }`}
+                          ? "border-primary bg-primary/5 ring-2 ring-primary/20 shadow-sm"
+                          : "border-border hover:border-primary/40 hover:bg-muted/50"
+                      )}
                     >
-                      <div className={`mb-2 ${decorationLevel === option.value ? "text-primary" : "text-muted-foreground"}`}>
+                      <div className={cn(
+                        "mb-3 transition-colors",
+                        decorationLevel === option.value ? "text-primary" : "text-muted-foreground"
+                      )}>
                         {option.icon}
                       </div>
                       <div className="font-medium text-sm">{option.label}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{option.description}</div>
+                      <div className="text-xs text-muted-foreground mt-1">{option.description}</div>
                     </button>
                   ))}
                 </div>
                 
                 {decorationLevel === "text_only" && (
-                  <div className="mt-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
-                    <div className="flex items-start gap-2">
-                      <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
-                      <div className="text-sm text-blue-700 dark:text-blue-300">
-                        <strong>Text Only Mode:</strong> Pages will contain ONLY the quote text with no decorations, 
-                        icons, or borders. Perfect for clean, minimalist designs.
+                  <Card className="mt-4 border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30">
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3">
+                        <Info className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
+                        <div className="text-sm text-blue-700 dark:text-blue-300">
+                          <strong>Text Only Mode:</strong> Pages will contain ONLY the quote text with no decorations, 
+                          icons, or borders. Perfect for clean, minimalist designs.
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    </CardContent>
+                  </Card>
                 )}
               </SubSection>
 
@@ -947,14 +934,15 @@ export default function QuoteBookPage() {
                       <button
                         key={option.value}
                         onClick={() => setIconSet(option.value)}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all",
                           iconSet === option.value
-                            ? "border-primary bg-primary/5 text-primary"
-                            : "border-border hover:border-primary/50"
-                        }`}
+                            ? "border-primary bg-primary/5 text-primary shadow-sm"
+                            : "border-border hover:border-primary/40"
+                        )}
                       >
                         {option.icon}
-                        <span className="text-sm">{option.label}</span>
+                        <span className="text-sm font-medium">{option.label}</span>
                       </button>
                     ))}
                   </div>
@@ -969,14 +957,15 @@ export default function QuoteBookPage() {
                       <button
                         key={theme}
                         onClick={() => setDecorationTheme(theme)}
-                        className={`p-2 rounded-lg border-2 flex flex-col items-center gap-1 transition-all ${
+                        className={cn(
+                          "p-3 rounded-xl border-2 flex flex-col items-center gap-2 transition-all",
                           decorationTheme === theme
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:border-primary/50"
-                        }`}
+                            ? "border-primary bg-primary/5 shadow-sm"
+                            : "border-border hover:border-primary/40"
+                        )}
                       >
                         {THEME_ICONS[theme]}
-                        <span className="text-xs capitalize">{theme}</span>
+                        <span className="text-xs capitalize font-medium">{theme}</span>
                       </button>
                     ))}
                   </div>
@@ -988,25 +977,27 @@ export default function QuoteBookPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setBookType("different_quotes")}
-                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                    className={cn(
+                      "p-4 rounded-xl border-2 text-left transition-all",
                       bookType === "different_quotes"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
+                        ? "border-primary bg-primary/5 shadow-sm"
+                        : "border-border hover:border-primary/40"
+                    )}
                   >
                     <div className="font-medium text-sm">Different Quotes</div>
-                    <div className="text-xs text-muted-foreground">Each page has a unique quote</div>
+                    <div className="text-xs text-muted-foreground mt-1">Each page has a unique quote</div>
                   </button>
                   <button
                     onClick={() => setBookType("same_quote_variations")}
-                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                    className={cn(
+                      "p-4 rounded-xl border-2 text-left transition-all",
                       bookType === "same_quote_variations"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
+                        ? "border-primary bg-primary/5 shadow-sm"
+                        : "border-border hover:border-primary/40"
+                    )}
                   >
                     <div className="font-medium text-sm">Quote Variations</div>
-                    <div className="text-xs text-muted-foreground">Same quote, different designs</div>
+                    <div className="text-xs text-muted-foreground mt-1">Same quote, different designs</div>
                   </button>
                 </div>
               </SubSection>
@@ -1018,14 +1009,15 @@ export default function QuoteBookPage() {
                     <button
                       key={style}
                       onClick={() => setTypographyStyle(style)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+                      className={cn(
+                        "flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all",
                         typographyStyle === style
-                          ? "border-primary bg-primary/5 text-primary"
-                          : "border-border hover:border-primary/50"
-                      }`}
+                          ? "border-primary bg-primary/5 text-primary shadow-sm"
+                          : "border-border hover:border-primary/40"
+                      )}
                     >
                       <Type className="h-4 w-4" />
-                      <span className="text-sm capitalize">{style}</span>
+                      <span className="text-sm font-medium capitalize">{style}</span>
                     </button>
                   ))}
                 </div>
@@ -1042,8 +1034,7 @@ export default function QuoteBookPage() {
               </button>
 
               {showAdvanced && (
-                <div className="space-y-4 pt-2 border-t">
-                  {/* Density - Only for full_background */}
+                <div className="space-y-4 pt-4 border-t">
                   {decorationLevel === "full_background" && (
                     <SubSection title="Decoration Density">
                       <div className="flex gap-2">
@@ -1051,13 +1042,14 @@ export default function QuoteBookPage() {
                           <button
                             key={d}
                             onClick={() => setDensity(d)}
-                            className={`px-4 py-2 rounded-lg border transition-all ${
+                            className={cn(
+                              "px-4 py-2.5 rounded-xl border-2 transition-all",
                               density === d
-                                ? "border-primary bg-primary/5 text-primary"
-                                : "border-border hover:border-primary/50"
-                            }`}
+                                ? "border-primary bg-primary/5 text-primary shadow-sm"
+                                : "border-border hover:border-primary/40"
+                            )}
                           >
-                            <span className="text-sm capitalize">{d}</span>
+                            <span className="text-sm font-medium capitalize">{d}</span>
                           </button>
                         ))}
                       </div>
@@ -1077,7 +1069,7 @@ export default function QuoteBookPage() {
                     step={1}
                     className="flex-1"
                   />
-                  <span className="text-lg font-semibold text-primary w-8 text-right">{pageCount}</span>
+                  <span className="text-lg font-bold text-primary w-10 text-right">{pageCount}</span>
                 </div>
               </SubSection>
 
@@ -1085,17 +1077,17 @@ export default function QuoteBookPage() {
               <Button
                 onClick={generatePagePrompts}
                 disabled={generatingPrompts || quotesText.trim().length === 0}
-                className="w-full"
+                className="w-full h-12 rounded-xl text-base"
                 size="lg"
               >
                 {generatingPrompts ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                     Preparing Pages...
                   </>
                 ) : (
                   <>
-                    <Wand2 className="mr-2 h-4 w-4" />
+                    <Wand2 className="mr-2 h-5 w-5" />
                     Prepare {pageCount} Pages
                   </>
                 )}
@@ -1111,23 +1103,23 @@ export default function QuoteBookPage() {
               icon={Layers}
               headerActions={
                 <div className="flex gap-2">
-                  {/* Fast Preview Button */}
                   {doneCount === 0 && (
                     <Button
                       onClick={generatePreview}
                       disabled={isGenerating}
                       variant="outline"
                       size="sm"
+                      className="rounded-xl"
                     >
                       <Zap className="mr-2 h-4 w-4" />
                       Quick Preview
                     </Button>
                   )}
-                  {/* Generate All Button */}
                   <Button
                     onClick={generateAllImages}
                     disabled={isGenerating || pendingCount === 0}
                     size="sm"
+                    className="rounded-xl"
                   >
                     {isGenerating ? (
                       <>
@@ -1144,8 +1136,8 @@ export default function QuoteBookPage() {
                 </div>
               }
             >
-              <div className="space-y-4">
-                {/* Progress Bar - Show when any operation is in progress */}
+              <div className="space-y-5">
+                {/* Progress Bar */}
                 {(isGenerating || isEnhancing || isProcessing) && (
                   <ProgressPanel
                     progress={{
@@ -1158,60 +1150,65 @@ export default function QuoteBookPage() {
                   />
                 )}
 
-                {/* Action buttons - Show after some pages are done */}
+                {/* Action buttons */}
                 {doneCount > 0 && (
-                  <div className="flex flex-wrap gap-2 p-3 bg-muted/30 rounded-lg">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={enhanceAllPages}
-                      disabled={isEnhancing || enhancedCount === doneCount}
-                    >
-                      {isEnhancing ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="mr-2 h-4 w-4" />
-                      )}
-                      {isEnhancing ? "Enhancing..." : `Enhance (${enhancedCount}/${doneCount})`}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={processAllPages}
-                      disabled={isProcessing || processedCount === doneCount}
-                    >
-                      {isProcessing ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <PanelTop className="mr-2 h-4 w-4" />
-                      )}
-                      {isProcessing ? "Processing..." : `Print-Ready (${processedCount}/${doneCount})`}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={downloadAll}
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      Download All
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => setShowExportModal(true)}
-                      className="ml-auto"
-                    >
-                      <FileDown className="mr-2 h-4 w-4" />
-                      Export PDF
-                    </Button>
-                  </div>
+                  <Card className="border-border/50 bg-muted/30">
+                    <CardContent className="p-4 flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-xl"
+                        onClick={enhanceAllPages}
+                        disabled={isEnhancing || enhancedCount === doneCount}
+                      >
+                        {isEnhancing ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="mr-2 h-4 w-4" />
+                        )}
+                        {isEnhancing ? "Enhancing..." : `Enhance (${enhancedCount}/${doneCount})`}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-xl"
+                        onClick={processAllPages}
+                        disabled={isProcessing || processedCount === doneCount}
+                      >
+                        {isProcessing ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <PanelTop className="mr-2 h-4 w-4" />
+                        )}
+                        {isProcessing ? "Processing..." : `Print-Ready (${processedCount}/${doneCount})`}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-xl"
+                        onClick={downloadAll}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Download All
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="ml-auto rounded-xl"
+                        onClick={() => setShowExportModal(true)}
+                      >
+                        <FileDown className="mr-2 h-4 w-4" />
+                        Export PDF
+                      </Button>
+                    </CardContent>
+                  </Card>
                 )}
 
                 {/* Pages Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {pages.map((page) => (
-                    <div
+                    <Card
                       key={page.page}
-                      className="group rounded-lg border bg-card overflow-hidden transition-shadow hover:shadow-md"
+                      className="group overflow-hidden border-border/50 hover:shadow-lg transition-all duration-200"
                     >
                       {/* Image Preview */}
                       <div className="aspect-[3/4] bg-muted relative">
@@ -1223,10 +1220,9 @@ export default function QuoteBookPage() {
                               className="w-full h-full object-contain cursor-pointer"
                               onClick={() => setPreviewImage(`data:image/png;base64,${page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64}`)}
                             />
-                            {/* Status badges */}
                             <div className="absolute top-2 left-2 flex flex-col gap-1">
                               {page.enhanceStatus === "enhanced" && (
-                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/90">
                                   <Sparkles className="h-2.5 w-2.5 mr-1" />
                                   HD
                                 </Badge>
@@ -1266,13 +1262,12 @@ export default function QuoteBookPage() {
                       </div>
 
                       {/* Page Info */}
-                      <div className="p-2 border-t">
+                      <CardContent className="p-3 border-t">
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-1.5">
                             {getStatusIcon(page.status)}
                             <span className="text-xs font-medium">Page {page.page}</span>
                           </div>
-                          {/* Topic badge */}
                           {page.topic && page.topic !== "general" && (
                             <Badge variant="outline" className="text-[9px] px-1 py-0">
                               {page.topic.replace("_", " ")}
@@ -1340,15 +1335,15 @@ export default function QuoteBookPage() {
                             </>
                           )}
                         </div>
-                      </div>
-                    </div>
+                      </CardContent>
+                    </Card>
                   ))}
                 </div>
               </div>
             </SectionCard>
           )}
         </div>
-      </main>
+      </PageContainer>
 
       {/* Preview Modal */}
       {previewImage && (
@@ -1392,88 +1387,96 @@ export default function QuoteBookPage() {
           {viewPromptPage && (
             <div className="flex-1 overflow-auto space-y-4">
               {/* Quote */}
-              <div className="rounded-lg border p-3 bg-muted/30">
-                <div className="flex items-center gap-2 text-sm font-medium mb-1">
-                  <Quote className="h-4 w-4" />
-                  Quote
-                </div>
-                <p className="text-sm">&ldquo;{viewPromptPage.quote}&rdquo;</p>
-              </div>
+              <Card className="border-border/50 bg-muted/30">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                    <Quote className="h-4 w-4" />
+                    Quote
+                  </div>
+                  <p className="text-sm">&ldquo;{viewPromptPage.quote}&rdquo;</p>
+                </CardContent>
+              </Card>
 
               {/* Applied Settings */}
               {viewPromptPage.appliedSettings && (
-                <div className="rounded-lg border p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium mb-2">
-                    <Settings2 className="h-4 w-4" />
-                    Applied Settings
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-muted-foreground">Decoration Level:</span>{" "}
-                      <span className="font-medium">{viewPromptPage.appliedSettings.decorationLevel.replace("_", " ")}</span>
+                <Card className="border-border/50">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                      <Settings2 className="h-4 w-4" />
+                      Applied Settings
                     </div>
-                    <div>
-                      <span className="text-muted-foreground">Typography:</span>{" "}
-                      <span className="font-medium">{viewPromptPage.appliedSettings.typographyStyle}</span>
-                    </div>
-                    {viewPromptPage.appliedSettings.iconSet && (
+                    <div className="grid grid-cols-2 gap-3 text-xs">
                       <div>
-                        <span className="text-muted-foreground">Icons:</span>{" "}
-                        <span className="font-medium">{viewPromptPage.appliedSettings.iconSet}</span>
+                        <span className="text-muted-foreground">Decoration Level:</span>{" "}
+                        <span className="font-medium">{viewPromptPage.appliedSettings.decorationLevel.replace("_", " ")}</span>
                       </div>
-                    )}
-                    {viewPromptPage.appliedSettings.decorationTheme && (
                       <div>
-                        <span className="text-muted-foreground">Theme:</span>{" "}
-                        <span className="font-medium">{viewPromptPage.appliedSettings.decorationTheme}</span>
+                        <span className="text-muted-foreground">Typography:</span>{" "}
+                        <span className="font-medium">{viewPromptPage.appliedSettings.typographyStyle}</span>
                       </div>
-                    )}
-                    <div>
-                      <span className="text-muted-foreground">Density:</span>{" "}
-                      <span className="font-medium">{viewPromptPage.appliedSettings.density}</span>
+                      {viewPromptPage.appliedSettings.iconSet && (
+                        <div>
+                          <span className="text-muted-foreground">Icons:</span>{" "}
+                          <span className="font-medium">{viewPromptPage.appliedSettings.iconSet}</span>
+                        </div>
+                      )}
+                      {viewPromptPage.appliedSettings.decorationTheme && (
+                        <div>
+                          <span className="text-muted-foreground">Theme:</span>{" "}
+                          <span className="font-medium">{viewPromptPage.appliedSettings.decorationTheme}</span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-muted-foreground">Density:</span>{" "}
+                        <span className="font-medium">{viewPromptPage.appliedSettings.density}</span>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               )}
 
               {/* Topic & Motifs */}
               {(viewPromptPage.topic || viewPromptPage.motifPack) && (
-                <div className="rounded-lg border p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium mb-2">
-                    <Tag className="h-4 w-4" />
-                    Topic & Motifs (Auto-detected)
-                  </div>
-                  {viewPromptPage.topic && (
-                    <div className="text-xs mb-2">
-                      <span className="text-muted-foreground">Topic:</span>{" "}
-                      <Badge variant="secondary" className="text-xs">
-                        {viewPromptPage.topic.replace("_", " ")}
-                      </Badge>
+                <Card className="border-border/50">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                      <Tag className="h-4 w-4" />
+                      Topic & Motifs (Auto-detected)
                     </div>
-                  )}
-                  {viewPromptPage.motifPack && viewPromptPage.motifPack.length > 0 && (
-                    <div className="text-xs">
-                      <span className="text-muted-foreground">Allowed Motifs:</span>{" "}
-                      <span className="font-medium">{viewPromptPage.motifPack.slice(0, 8).join(", ")}</span>
-                    </div>
-                  )}
-                </div>
+                    {viewPromptPage.topic && (
+                      <div className="text-xs mb-2">
+                        <span className="text-muted-foreground">Topic:</span>{" "}
+                        <Badge variant="secondary" className="text-xs">
+                          {viewPromptPage.topic.replace("_", " ")}
+                        </Badge>
+                      </div>
+                    )}
+                    {viewPromptPage.motifPack && viewPromptPage.motifPack.length > 0 && (
+                      <div className="text-xs">
+                        <span className="text-muted-foreground">Allowed Motifs:</span>{" "}
+                        <span className="font-medium">{viewPromptPage.motifPack.slice(0, 8).join(", ")}</span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               )}
 
               {/* Full Prompt */}
-              <div className="rounded-lg border p-3">
-                <div className="flex items-center gap-2 text-sm font-medium mb-2">
-                  <Info className="h-4 w-4" />
-                  Full Prompt Sent to AI
-                </div>
-                <pre className="text-xs whitespace-pre-wrap font-mono bg-muted/50 p-3 rounded-md max-h-[300px] overflow-auto">
-                  {viewPromptPage.prompt}
-                </pre>
-              </div>
+              <Card className="border-border/50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                    <Info className="h-4 w-4" />
+                    Full Prompt Sent to AI
+                  </div>
+                  <pre className="text-xs whitespace-pre-wrap font-mono bg-muted/50 p-4 rounded-xl max-h-[300px] overflow-auto">
+                    {viewPromptPage.prompt}
+                  </pre>
+                </CardContent>
+              </Card>
             </div>
           )}
         </DialogContent>
       </Dialog>
-    </>
+    </main>
   );
 }

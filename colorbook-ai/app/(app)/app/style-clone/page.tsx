@@ -1,17 +1,17 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { AppTopbar } from "@/components/app/app-topbar";
+import { PageContainer } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/app/page-header";
 import { SectionCard, SubSection } from "@/components/app/section-card";
 import { StepIndicator, type Step } from "@/components/app/step-indicator";
-import { OptionCard, OptionChip } from "@/components/app/option-card";
-import { ProgressPanel, StatusBadge, formatEta } from "@/components/app/progress-panel";
+import { ProgressPanel, StatusBadge } from "@/components/app/progress-panel";
 import { EmptyState } from "@/components/app/empty-state";
 import {
   Wand2,
@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { ImagePreviewModal } from "@/components/app/image-preview-modal";
+import { cn } from "@/lib/utils";
 
 // Types
 type StyleCloneStep = 1 | 2 | 3 | 4;
@@ -71,11 +72,11 @@ interface PageIdea {
   enhancedImageBase64?: string;
 }
 
-const STEPS = [
-  { step: 1 as const, label: "Upload Reference", description: "Provide a style sample" },
-  { step: 2 as const, label: "Extract Style", description: "AI analyzes your image" },
-  { step: 3 as const, label: "Plan Pages", description: "Describe your pages" },
-  { step: 4 as const, label: "Generate", description: "Create your book" },
+const STEPS: Array<{ step: Step; label: string; description?: string }> = [
+  { step: 1 as Step, label: "Upload Reference", description: "Provide a style sample" },
+  { step: 2 as Step, label: "Extract Style", description: "AI analyzes your image" },
+  { step: 3 as Step, label: "Plan Pages", description: "Describe your pages" },
+  { step: 4 as Step, label: "Generate", description: "Create your book" },
 ];
 
 const EXAMPLE_IDEAS = [
@@ -278,7 +279,6 @@ export default function StyleClonePage() {
       const page = pageIdeas[i];
       const pageStartTime = Date.now();
 
-      // Update status
       setPageIdeas(prev => prev.map(p => 
         p.id === page.id ? { ...p, status: "generating" } : p
       ));
@@ -304,7 +304,6 @@ export default function StyleClonePage() {
           ));
           successCount++;
 
-          // Update average time
           const duration = (Date.now() - pageStartTime) / 1000;
           setAvgGenerateTime(prev => (prev + duration) / 2);
         } else {
@@ -382,14 +381,9 @@ export default function StyleClonePage() {
   // ==================== RENDER ====================
 
   return (
-    <>
-      <AppTopbar
-        title="Style Clone"
-        subtitle="Create pages that match your reference style"
-      />
-
-      <main className="flex-1 overflow-auto">
-        <div className="container max-w-4xl py-6 space-y-6">
+    <main className="flex-1 pt-16 lg:pt-0">
+      <PageContainer maxWidth="lg">
+        <div className="space-y-6">
           {/* Page Header */}
           <PageHeader
             title="Style Clone"
@@ -398,10 +392,10 @@ export default function StyleClonePage() {
             badge="Beta"
             actions={
               doneCount > 0 && (
-                <Button size="sm">
+                <Button>
                   <FileDown className="mr-2 h-4 w-4" />
                   Export PDF
-            </Button>
+                </Button>
               )
             }
           />
@@ -409,86 +403,108 @@ export default function StyleClonePage() {
           {/* Step Indicator */}
           <StepIndicator
             steps={STEPS}
-            currentStep={currentStep}
+            currentStep={currentStep as Step}
             onStepClick={(step) => canNavigateTo(step as StyleCloneStep) && setCurrentStep(step as StyleCloneStep)}
             canNavigateTo={(step) => canNavigateTo(step as StyleCloneStep)}
-            className="pb-2"
+            className="pb-4"
           />
 
           {/* Step 1: Upload Reference */}
           {currentStep === 1 && (
-            <SectionCard
-              title="Upload Reference Image"
-              description="Provide a coloring page sample whose style you want to replicate"
-              icon={Upload}
-            >
-              <div className="space-y-4">
-                {!referenceImage ? (
-                  <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-xl cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all">
-                    <div className="flex flex-col items-center justify-center py-6">
-                      <div className="p-4 rounded-full bg-muted mb-4">
-                        <Upload className="h-8 w-8 text-muted-foreground" />
+            <div className="grid lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <SectionCard
+                  title="Upload Reference Image"
+                  description="Provide a coloring page sample whose style you want to replicate"
+                  icon={Upload}
+                >
+                  <div className="space-y-5">
+                    {!referenceImage ? (
+                      <label className="flex flex-col items-center justify-center w-full h-72 border-2 border-dashed border-border rounded-2xl cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-all">
+                        <div className="flex flex-col items-center justify-center py-8">
+                          <div className="p-5 rounded-2xl bg-muted mb-4">
+                            <Upload className="h-10 w-10 text-muted-foreground" />
+                          </div>
+                          <p className="mb-2 text-base font-medium">
+                            Click to upload or drag and drop
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            PNG, JPG or WEBP (max 10MB)
+                          </p>
+                        </div>
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept="image/*"
+                          onChange={handleFileUpload}
+                          disabled={isUploading}
+                        />
+                      </label>
+                    ) : (
+                      <div className="relative">
+                        <div className="aspect-[3/4] max-w-sm mx-auto rounded-2xl overflow-hidden border bg-muted">
+                          <img
+                            src={`data:image/png;base64,${referenceImage}`}
+                            alt="Reference"
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-3 right-3 rounded-xl"
+                          onClick={clearReference}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                        <p className="text-center text-sm text-muted-foreground mt-3">
+                          {referenceFileName}
+                        </p>
                       </div>
-                      <p className="mb-2 text-sm font-medium">
-                        Click to upload or drag and drop
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        PNG, JPG or WEBP (max 10MB)
-                      </p>
-          </div>
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept="image/*"
-                      onChange={handleFileUpload}
-                      disabled={isUploading}
-                    />
-                  </label>
-                ) : (
-                  <div className="relative">
-                    <div className="aspect-[3/4] max-w-xs mx-auto rounded-lg overflow-hidden border bg-muted">
-                      <img
-                        src={`data:image/png;base64,${referenceImage}`}
-                        alt="Reference"
-                        className="w-full h-full object-contain"
-                      />
-                    </div>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="absolute top-2 right-2"
-                      onClick={clearReference}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                    <p className="text-center text-sm text-muted-foreground mt-2">
-                      {referenceFileName}
-                    </p>
-                  </div>
-                )}
+                    )}
 
-                {/* Tips */}
-                <div className="rounded-lg bg-muted/50 p-4">
-                  <div className="flex items-center gap-2 text-sm font-medium mb-2">
-                    <Lightbulb className="h-4 w-4 text-yellow-500" />
-                    Tips for best results
+                    {referenceImage && (
+                      <Button onClick={() => setCurrentStep(2)} className="w-full h-12 rounded-xl text-base" size="lg">
+                        Continue to Style Extraction
+                        <ArrowRight className="ml-2 h-5 w-5" />
+                      </Button>
+                    )}
                   </div>
-                  <ul className="text-sm text-muted-foreground space-y-1">
-                    <li>• Use a clear, high-quality coloring page image</li>
-                    <li>• Black and white line art works best</li>
-                    <li>• Avoid photos or colored images</li>
-                    <li>• The AI will analyze line weight, detail level, and composition</li>
-                  </ul>
-                </div>
-
-                {referenceImage && (
-                  <Button onClick={() => setCurrentStep(2)} className="w-full" size="lg">
-                    Continue to Style Extraction
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                )}
+                </SectionCard>
               </div>
-            </SectionCard>
+
+              {/* Tips Card */}
+              <div>
+                <Card className="border-border/50 bg-gradient-to-br from-amber-500/5 to-transparent sticky top-6">
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10">
+                        <Lightbulb className="h-5 w-5 text-amber-500" />
+                      </div>
+                      <h3 className="font-semibold">Tips for best results</h3>
+                    </div>
+                    <ul className="space-y-3 text-sm text-muted-foreground">
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-amber-500 mt-0.5">•</span>
+                        Use a clear, high-quality coloring page image
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-amber-500 mt-0.5">•</span>
+                        Black and white line art works best
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-amber-500 mt-0.5">•</span>
+                        Avoid photos or colored images
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-amber-500 mt-0.5">•</span>
+                        The AI will analyze line weight, detail level, and composition
+                      </li>
+                    </ul>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           )}
 
           {/* Step 2: Extract Style */}
@@ -498,10 +514,10 @@ export default function StyleClonePage() {
               description="Our AI will analyze the visual characteristics of your reference"
               icon={Sparkles}
             >
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {/* Reference preview */}
-                <div className="flex gap-4">
-                  <div className="w-32 h-40 rounded-lg overflow-hidden border bg-muted shrink-0">
+                <div className="flex gap-6">
+                  <div className="w-40 h-52 rounded-xl overflow-hidden border bg-muted shrink-0">
                     {referenceImage && (
                       <img
                         src={`data:image/png;base64,${referenceImage}`}
@@ -511,22 +527,22 @@ export default function StyleClonePage() {
                     )}
                   </div>
                   
-                  <div className="flex-1 space-y-3">
+                  <div className="flex-1 space-y-4">
                     {!extractedStyle ? (
                       <>
                         <p className="text-sm text-muted-foreground">
                           Click the button below to analyze your reference image. The AI will identify:
                         </p>
-                        <ul className="text-sm text-muted-foreground list-disc list-inside">
+                        <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
                           <li>Line weight and stroke style</li>
                           <li>Level of detail and complexity</li>
                           <li>Composition and layout patterns</li>
                           <li>Unique artistic elements</li>
                         </ul>
-                <Button
+                        <Button
                           onClick={extractStyle} 
                           disabled={isExtracting}
-                          className="w-full"
+                          className="w-full h-11 rounded-xl"
                         >
                           {isExtracting ? (
                             <>
@@ -538,21 +554,22 @@ export default function StyleClonePage() {
                               <Wand2 className="mr-2 h-4 w-4" />
                               Extract Style
                             </>
-                  )}
-                </Button>
+                          )}
+                        </Button>
                       </>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-5 w-5 text-green-500" />
-                          <span className="font-medium">Style Extracted Successfully</span>
-              </div>
+                          <CheckCircle2 className="h-6 w-6 text-green-500" />
+                          <span className="font-semibold text-lg">Style Extracted Successfully</span>
+                        </div>
                         <p className="text-sm text-muted-foreground">
                           {extractedStyle.summary}
                         </p>
-                      <Button
+                        <Button
                           variant="outline" 
-                        size="sm"
+                          size="sm"
+                          className="rounded-xl"
                           onClick={() => setShowStyleDetails(!showStyleDetails)}
                         >
                           {showStyleDetails ? "Hide Details" : "View Details"}
@@ -561,7 +578,7 @@ export default function StyleClonePage() {
                           ) : (
                             <ChevronDown className="ml-2 h-4 w-4" />
                           )}
-                      </Button>
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -569,56 +586,58 @@ export default function StyleClonePage() {
 
                 {/* Style details */}
                 {showStyleDetails && extractedStyle && (
-                  <div className="rounded-lg border p-4 space-y-3 bg-muted/30">
-                    <h4 className="font-medium text-sm">Extracted Style Profile</h4>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Art Style:</span>
-                        <span className="ml-2 font-medium">{extractedStyle.artStyle}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Line Weight:</span>
-                        <span className="ml-2 font-medium">{extractedStyle.lineWeight}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Detail Level:</span>
-                        <span className="ml-2 font-medium">{extractedStyle.detailLevel}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Composition:</span>
-                        <span className="ml-2 font-medium">{extractedStyle.composition}</span>
-                      </div>
-                    </div>
-                    {extractedStyle.uniqueElements.length > 0 && (
-                      <div>
-                        <span className="text-sm text-muted-foreground">Unique Elements:</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {extractedStyle.uniqueElements.map((el, i) => (
-                            <Badge key={i} variant="secondary" className="text-xs">
-                              {el}
-                            </Badge>
-                          ))}
+                  <Card className="border-border/50 bg-muted/30">
+                    <CardContent className="p-5">
+                      <h4 className="font-semibold text-sm mb-4">Extracted Style Profile</h4>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Art Style:</span>
+                          <span className="ml-2 font-medium">{extractedStyle.artStyle}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Line Weight:</span>
+                          <span className="ml-2 font-medium">{extractedStyle.lineWeight}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Detail Level:</span>
+                          <span className="ml-2 font-medium">{extractedStyle.detailLevel}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Composition:</span>
+                          <span className="ml-2 font-medium">{extractedStyle.composition}</span>
                         </div>
                       </div>
-                    )}
-                </div>
-              )}
+                      {extractedStyle.uniqueElements.length > 0 && (
+                        <div className="mt-4 pt-4 border-t">
+                          <span className="text-sm text-muted-foreground">Unique Elements:</span>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {extractedStyle.uniqueElements.map((el, i) => (
+                              <Badge key={i} variant="secondary" className="text-xs rounded-lg">
+                                {el}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Style notes */}
                 {extractedStyle && (
                   <>
                     <SubSection title="Additional Style Notes (Optional)">
-              <Textarea
+                      <Textarea
                         value={styleNotes}
                         onChange={(e) => setStyleNotes(e.target.value)}
                         placeholder="Add any specific style instructions or modifications..."
-                        className="min-h-[80px]"
+                        className="min-h-[90px] rounded-xl"
                       />
                     </SubSection>
 
-                    <Button onClick={() => setCurrentStep(3)} className="w-full" size="lg">
+                    <Button onClick={() => setCurrentStep(3)} className="w-full h-12 rounded-xl text-base" size="lg">
                       Continue to Page Planning
-                      <ArrowRight className="ml-2 h-4 w-4" />
+                      <ArrowRight className="ml-2 h-5 w-5" />
                     </Button>
                   </>
                 )}
@@ -634,106 +653,113 @@ export default function StyleClonePage() {
               icon={Layers}
               headerActions={
                 pageIdeas.length > 0 && (
-                  <Button size="sm" onClick={() => setCurrentStep(4)}>
+                  <Button size="sm" className="rounded-xl" onClick={() => setCurrentStep(4)}>
                     <Play className="mr-2 h-4 w-4" />
                     Generate Pages
-                </Button>
+                  </Button>
                 )
               }
             >
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {/* AI Generator */}
-                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Wand2 className="h-4 w-4 text-primary" />
-                    AI Page Generator
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Theme (optional)</label>
-                      <Input
-                        value={customTheme}
-                        onChange={(e) => setCustomTheme(e.target.value)}
-                        placeholder="e.g., Magical forest adventure"
-                      />
+                <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+                  <CardContent className="p-5 space-y-4">
+                    <div className="flex items-center gap-2.5 text-sm font-medium">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                        <Wand2 className="h-4 w-4 text-primary" />
+                      </div>
+                      <span>AI Page Generator</span>
                     </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Number of Pages</label>
-                      <div className="flex items-center gap-2">
-                        <Slider
-                          value={[pageCount]}
-                          onValueChange={([v]) => setPageCount(v)}
-                          min={5}
-                          max={30}
-                          step={1}
-                          className="flex-1"
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Theme (optional)</label>
+                        <Input
+                          value={customTheme}
+                          onChange={(e) => setCustomTheme(e.target.value)}
+                          placeholder="e.g., Magical forest adventure"
+                          className="h-10 rounded-xl"
                         />
-                        <span className="text-sm font-medium w-8 text-right">{pageCount}</span>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Number of Pages</label>
+                        <div className="flex items-center gap-3">
+                          <Slider
+                            value={[pageCount]}
+                            onValueChange={([v]) => setPageCount(v)}
+                            min={5}
+                            max={30}
+                            step={1}
+                            className="flex-1"
+                          />
+                          <span className="text-sm font-semibold w-8 text-right">{pageCount}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                <Button
-                    onClick={generatePageIdeas}
-                    disabled={isGeneratingIdeas || !extractedStyle}
-                    className="w-full"
-                  >
-                    {isGeneratingIdeas ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Generating Ideas...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="mr-2 h-4 w-4" />
-                        Generate {pageCount} Page Ideas
-                      </>
-                    )}
-                </Button>
-                </div>
+                    <Button
+                      onClick={generatePageIdeas}
+                      disabled={isGeneratingIdeas || !extractedStyle}
+                      className="w-full h-11 rounded-xl"
+                    >
+                      {isGeneratingIdeas ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Generating Ideas...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="mr-2 h-4 w-4" />
+                          Generate {pageCount} Page Ideas
+                        </>
+                      )}
+                    </Button>
+                  </CardContent>
+                </Card>
 
                 {/* Page ideas list */}
                 {pageIdeas.length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">Pages ({pageIdeas.length})</span>
-                      <Button variant="ghost" size="sm" onClick={addCustomPage}>
-                        <Plus className="mr-1 h-3 w-3" />
+                      <Button variant="ghost" size="sm" className="rounded-xl" onClick={addCustomPage}>
+                        <Plus className="mr-1.5 h-3.5 w-3.5" />
                         Add Page
-                </Button>
-              </div>
+                      </Button>
+                    </div>
 
                     <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
                       {pageIdeas.map((page, idx) => (
-                        <div 
+                        <Card 
                           key={page.id}
-                          className="flex items-start gap-3 p-3 rounded-lg border bg-card"
+                          className="border-border/50"
                         >
-                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium">
-                            {idx + 1}
-              </div>
-                          <div className="flex-1 min-w-0">
-                            <Input
-                              value={page.description}
-                              onChange={(e) => updatePageIdea(page.id, e.target.value)}
-                              placeholder="Describe this page..."
-                              className="border-0 p-0 h-auto text-sm focus-visible:ring-0 bg-transparent"
-                          />
-                        </div>
-                          <StatusBadge stage={page.status as any} />
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                            onClick={() => removePage(page.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
+                          <CardContent className="p-3 flex items-start gap-3">
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-semibold">
+                              {idx + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <Input
+                                value={page.description}
+                                onChange={(e) => updatePageIdea(page.id, e.target.value)}
+                                placeholder="Describe this page..."
+                                className="border-0 p-0 h-auto text-sm focus-visible:ring-0 bg-transparent"
+                              />
+                            </div>
+                            <StatusBadge stage={page.status as any} />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                              onClick={() => removePage(page.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </CardContent>
+                        </Card>
                       ))}
-                        </div>
-                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <div className="py-8">
                     <EmptyState
@@ -743,43 +769,45 @@ export default function StyleClonePage() {
                       actionLabel="Add Page Manually"
                       onAction={addCustomPage}
                     />
-                </div>
+                  </div>
                 )}
 
                 {/* Example ideas */}
                 {pageIdeas.length === 0 && (
-                  <div className="rounded-lg bg-muted/50 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium mb-2">
-                      <Lightbulb className="h-4 w-4 text-yellow-500" />
-                      Example page ideas
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {EXAMPLE_IDEAS.map((idea, i) => (
-                  <Button
-                          key={i}
-                    variant="outline"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() => setPageIdeas([
-                            ...pageIdeas,
-                            { id: `page-${Date.now()}`, description: idea, status: "pending" }
-                          ])}
-                        >
-                          <Plus className="mr-1 h-3 w-3" />
-                          {idea}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
+                  <Card className="border-border/50 bg-muted/30">
+                    <CardContent className="p-5">
+                      <div className="flex items-center gap-2.5 text-sm font-medium mb-3">
+                        <Lightbulb className="h-4 w-4 text-amber-500" />
+                        Example page ideas
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {EXAMPLE_IDEAS.map((idea, i) => (
+                          <Button
+                            key={i}
+                            variant="outline"
+                            size="sm"
+                            className="text-xs rounded-xl"
+                            onClick={() => setPageIdeas([
+                              ...pageIdeas,
+                              { id: `page-${Date.now()}`, description: idea, status: "pending" }
+                            ])}
+                          >
+                            <Plus className="mr-1 h-3 w-3" />
+                            {idea}
+                          </Button>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
                 )}
 
                 {pageIdeas.length > 0 && (
-                  <Button onClick={() => { setCurrentStep(4); generateAllPages(); }} className="w-full" size="lg">
-                    <Play className="mr-2 h-4 w-4" />
+                  <Button onClick={() => { setCurrentStep(4); generateAllPages(); }} className="w-full h-12 rounded-xl text-base" size="lg">
+                    <Play className="mr-2 h-5 w-5" />
                     Generate {pageIdeas.length} Pages
                   </Button>
                 )}
-                </div>
+              </div>
             </SectionCard>
           )}
 
@@ -791,14 +819,14 @@ export default function StyleClonePage() {
               icon={ImageIcon}
               headerActions={
                 doneCount === pageIdeas.length && (
-                  <Button size="sm">
+                  <Button size="sm" className="rounded-xl">
                     <FileDown className="mr-2 h-4 w-4" />
                     Export PDF
                   </Button>
                 )
               }
             >
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {/* Progress */}
                 {(isGenerating || doneCount > 0) && (
                   <ProgressPanel
@@ -814,9 +842,9 @@ export default function StyleClonePage() {
                 {/* Pages grid */}
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {pageIdeas.map((page, idx) => (
-                    <div
+                    <Card
                       key={page.id}
-                      className="group rounded-lg border bg-card overflow-hidden"
+                      className="group overflow-hidden border-border/50 hover:shadow-lg transition-all"
                     >
                       <div className="aspect-[3/4] bg-muted relative">
                         {page.imageBase64 ? (
@@ -843,6 +871,7 @@ export default function StyleClonePage() {
                             <Button
                               variant="secondary"
                               size="sm"
+                              className="h-9 w-9 p-0 rounded-lg"
                               onClick={() => setPreviewImage(`data:image/png;base64,${page.imageBase64}`)}
                             >
                               <Eye className="h-4 w-4" />
@@ -850,6 +879,7 @@ export default function StyleClonePage() {
                             <Button
                               variant="secondary"
                               size="sm"
+                              className="h-9 w-9 p-0 rounded-lg"
                               onClick={() => regeneratePage(page.id)}
                             >
                               <RefreshCw className="h-4 w-4" />
@@ -858,7 +888,7 @@ export default function StyleClonePage() {
                         )}
                       </div>
                       
-                      <div className="p-2 border-t">
+                      <CardContent className="p-3 border-t">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium">Page {idx + 1}</span>
                           <StatusBadge stage={page.status as any} />
@@ -866,19 +896,19 @@ export default function StyleClonePage() {
                         <p className="text-[10px] text-muted-foreground line-clamp-1 mt-1">
                           {page.description}
                         </p>
-                      </div>
-                    </div>
+                      </CardContent>
+                    </Card>
                   ))}
                 </div>
 
                 {/* Actions */}
                 {doneCount > 0 && !isGenerating && (
-                  <div className="flex gap-2">
-                    <Button variant="outline" className="flex-1">
+                  <div className="flex gap-3">
+                    <Button variant="outline" className="flex-1 h-11 rounded-xl">
                       <Download className="mr-2 h-4 w-4" />
                       Download All
                     </Button>
-                    <Button className="flex-1">
+                    <Button className="flex-1 h-11 rounded-xl">
                       <FileDown className="mr-2 h-4 w-4" />
                       Export as PDF
                     </Button>
@@ -888,7 +918,7 @@ export default function StyleClonePage() {
             </SectionCard>
           )}
         </div>
-      </main>
+      </PageContainer>
 
       {/* Preview Modal */}
       {previewImage && (
@@ -900,7 +930,6 @@ export default function StyleClonePage() {
           pageNumber={1}
         />
       )}
-    </>
+    </main>
   );
 }
-
