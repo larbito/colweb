@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useState } from "react";
+import { ReactNode } from "react";
 import { AppSidebar } from "./app-sidebar";
 import { MobileSidebar } from "./mobile-sidebar";
 import { cn } from "@/lib/utils";
@@ -15,18 +15,16 @@ interface AppShellProps {
  * Main content area is centered with a max-width container
  */
 export function AppShell({ children }: AppShellProps) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-
   return (
     <div className="min-h-screen bg-background">
       {/* Desktop Sidebar */}
-      <AppSidebar onMobileMenuClick={() => setMobileOpen(true)} />
+      <AppSidebar />
       
-      {/* Mobile Sidebar */}
-      <MobileSidebar open={mobileOpen} onClose={() => setMobileOpen(false)} />
+      {/* Mobile Sidebar (self-contained with its own toggle) */}
+      <MobileSidebar />
       
-      {/* Main content area - offset by sidebar width on lg screens */}
-      <div className="lg:pl-72 min-h-screen flex flex-col">
+      {/* Main content area - offset by sidebar width on lg screens, and top padding for mobile header */}
+      <div className="lg:pl-72 min-h-screen flex flex-col pt-16 lg:pt-0">
         {children}
       </div>
     </div>

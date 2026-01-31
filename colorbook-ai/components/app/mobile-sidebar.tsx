@@ -101,16 +101,35 @@ export function MobileSidebar() {
 
   return (
     <>
-      {/* Toggle Button - visible on mobile only */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-9 w-9 lg:hidden"
-        onClick={() => setOpen(true)}
-        aria-label="Open menu"
-      >
-        <Menu className="h-5 w-5" />
-      </Button>
+      {/* Mobile Header Bar - visible on mobile only */}
+      <header className="fixed top-0 left-0 right-0 z-40 flex h-16 items-center gap-4 border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:hidden">
+        <button
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center justify-center rounded-xl p-2.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        
+        <Link href="/app" className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/10">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-primary">
+              <path
+                d="M4 6C4 4.89543 4.89543 4 6 4H18C19.1046 4 20 4.89543 20 6V18C20 19.1046 19.1046 20 18 20H6C4.89543 20 4 19.1046 4 18V6Z"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+              <path 
+                d="M8 9H16M8 13H14M8 17H12" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+              />
+            </svg>
+          </div>
+          <span className="font-semibold text-foreground">ColorBook AI</span>
+        </Link>
+      </header>
 
       {/* Backdrop */}
       {open && (
