@@ -21,7 +21,7 @@ const navItems = [
   { label: "Create Coloring Book", href: "/app/create", icon: Plus },
   { label: "Quote Book", href: "/app/quote-book", icon: Quote },
   { label: "Bulk Create", href: "/app/bulk", icon: Boxes, badge: "New" },
-  { label: "Style Clone", href: "/app/batch", icon: Copy },
+  { label: "Style Clone", href: "/app/style-clone", icon: Copy, badge: "Beta" },
   { label: "My Projects", href: "/app/projects", icon: FolderOpen },
   { label: "Templates", href: "/app/templates", icon: Layers, badge: "Soon" },
   { label: "Exports", href: "/app/exports", icon: Download, badge: "Soon" },
@@ -57,10 +57,11 @@ export function SidebarNav() {
             <span className="flex-1">{item.label}</span>
             {item.badge && (
               <Badge 
-                variant={item.badge === "New" ? "default" : "secondary"} 
+                variant={item.badge === "New" ? "default" : item.badge === "Beta" ? "outline" : "secondary"} 
                 className={cn(
                   "text-[10px]",
-                  item.badge === "New" && "bg-green-500 hover:bg-green-600"
+                  item.badge === "New" && "bg-green-500 hover:bg-green-600",
+                  item.badge === "Beta" && "border-purple-400 text-purple-500"
                 )}
               >
                 {item.badge}

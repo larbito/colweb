@@ -378,51 +378,59 @@ function buildTextOnlyPrompt(quote: string, typographyStyle: TypographyStyle): s
   const formattedQuote = formatQuoteForPrompt(cleanQuote);
   const typoDesc = TYPOGRAPHY_STYLES[typographyStyle];
 
-  // Use a very direct, explicit prompt structure
-  return `Create a print-ready 8.5x11 inch (Letter) typography coloring page in clean black-and-white OUTLINE line art.
+  // Use a very direct, explicit prompt structure with maximum clarity
+  return `=== CRITICAL INSTRUCTION: TEXT ONLY - ZERO DECORATIONS ===
 
-TEXT ONLY MODE (STRICT):
-- Render ONLY the quote text as the entire design.
-- White background.
-- No icons, no shapes, no objects, no patterns, no scenery, no ground line, no clouds, no stars, no hearts, no flowers, no borders, no frames, no doodles, no extra marks of any kind.
-- The ONLY lines allowed are the outlines that form the letters (and internal holes of letters like 'o', 'a', 'e').
+Create a coloring page with ONLY typography. This is a TEXT-ONLY page.
 
-Typography:
-- Style: ${typoDesc}
-- All letters are HOLLOW OUTLINES (white inside, black outline stroke)
-- Make letters thick and chunky for easy coloring
+PAGE SIZE: 8.5 x 11 inches (US Letter), portrait orientation.
 
-Layout:
-- Center the quote on the page
-- Scale large to fill ~80-90% of page height
-- Use 2-4 lines if needed, well-spaced
-- Balanced margins all around
+WHAT TO DRAW (THE COMPLETE LIST):
+1. The quote text as large ${typoDesc}
+2. Nothing else. Literally nothing else.
 
-Rules (MUST FOLLOW):
-- No grayscale, no filled regions, no shading, no hatching, no gradients
-- No watermark, no signature, no border
-- Pure white background with NOTHING on it except the text
-- Clean vector-like outlines only
-
-Quote text EXACTLY (do not paraphrase):
+QUOTE TO DISPLAY (exact text):
 "${formattedQuote}"
 
-=== ABSOLUTE PROHIBITIONS ===
-DO NOT DRAW ANY OF THESE:
-- Clouds, sky, sun, moon, stars, sparkles
-- Hearts, flowers, leaves, plants, trees
-- Animals, people, characters, faces
-- Cars, houses, toys, objects
-- Ground line, grass, floor, road
-- Border, frame, corners, edges
-- Swirls, dots, patterns outside letters
-- Any decorative element whatsoever
+TYPOGRAPHY REQUIREMENTS:
+- Letters are HOLLOW OUTLINES with WHITE/EMPTY interiors (for coloring)
+- Black outline strokes only, no fills
+- Make text LARGE - fill 80-90% of page height
+- Center horizontally and vertically
+- Split into 2-4 lines if needed with comfortable spacing
+- Thick, bold letter outlines that are easy to color
 
-THE PAGE MUST CONTAIN ONLY:
-1. White background
-2. Black outlined letters forming the quote
+ART STYLE (MANDATORY):
+- Pure WHITE background - completely empty except for text
+- BLACK outline strokes ONLY
+- NO filled areas, NO solid black regions
+- NO grayscale, NO shading, NO gradients, NO textures
+- NO shadows, NO depth effects
+- Clean vector-like line work
 
-If ANYTHING else appears on the page, the image is INVALID and must be regenerated.`;
+=== ABSOLUTE ZERO-TOLERANCE PROHIBITIONS ===
+
+DO NOT ADD ANY OF THESE (if any appear, the image is WRONG):
+❌ Clouds, sky elements, sun, moon
+❌ Stars, sparkles, twinkles, dots
+❌ Hearts, flowers, leaves, plants
+❌ Animals, characters, people, faces
+❌ Icons, symbols, shapes
+❌ Border, frame, corner decorations
+❌ Ground line, grass, floor, horizon
+❌ Cars, houses, toys, objects
+❌ Swirls, flourishes, ornaments
+❌ Background patterns or textures
+❌ ANY element that is not a letter
+
+THE ENTIRE IMAGE MUST CONTAIN:
+✓ White/empty background
+✓ Black outlined letters spelling the quote
+✓ NOTHING ELSE
+
+This is a TYPOGRAPHY-ONLY coloring page. The visual interest comes from the letter shapes alone. Do NOT add decorations "to make it prettier" - that would make it WRONG.
+
+VALIDATION: If there is ANY mark on the page that is not part of a letter outline, the image fails and must be regenerated with stricter adherence to TEXT ONLY.`;
 }
 
 // ============================================================

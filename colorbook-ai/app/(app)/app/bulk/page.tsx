@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { ProgressPanel } from "@/components/app/progress-panel";
 import {
   Sparkles,
   Loader2,
@@ -24,6 +25,7 @@ import {
   ChevronLeft,
   Play,
   Pause,
+  StopCircle,
   RefreshCw,
   Eye,
   Download,
@@ -1696,80 +1698,51 @@ export default function BulkCreatePage() {
                 </div>
               </div>
               
-              {/* Progress Card */}
-              <Card className="p-6">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {isGeneratingImages ? (
-                        generationPaused ? (
-                          <Pause className="h-5 w-5 text-yellow-500" />
-                        ) : (
-                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                        )
-                      ) : batch.generatedPages === batch.totalPages ? (
-                        <CheckCircle2 className="h-5 w-5 text-green-500" />
-                      ) : (
-                        <Clock className="h-5 w-5 text-muted-foreground" />
-                      )}
-                      <span className="font-medium">
-                        {isGeneratingImages 
-                          ? generationPaused 
-                            ? "Paused" 
-                            : "Generating..."
-                          : batch.generatedPages === batch.totalPages 
-                            ? "Complete!" 
-                            : "Ready to start"
-                        }
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      {isGeneratingImages && batch.avgGenerationMs > 0 && (
-                        <span className="text-sm text-muted-foreground">
-                          ETA: {formatEta(Math.round(((batch.totalPages - batch.generatedPages) * batch.avgGenerationMs) / 1000))}
-                        </span>
-                      )}
-                      <span className="text-sm font-medium">
-                        {batch.generatedPages} / {batch.totalPages} pages
-                      </span>
-                    </div>
-                  </div>
-                  <Progress value={(batch.generatedPages / batch.totalPages) * 100} className="h-3" />
-                  
-                  {/* Control buttons */}
-                  <div className="flex justify-center gap-3 pt-4">
-                    {!isGeneratingImages && batch.generatedPages < batch.totalPages && (
-                      <Button size="lg" onClick={startGeneration}>
-                        <Play className="mr-2 h-5 w-5" />
-                        {batch.generatedPages > 0 ? "Resume Generation" : "Start Generation"}
-                      </Button>
-                    )}
-                    {isGeneratingImages && !generationPaused && (
-                      <>
-                        <Button variant="outline" size="lg" onClick={pauseGeneration}>
-                          <Pause className="mr-2 h-5 w-5" />
-                          Pause
-                        </Button>
-                        <Button variant="destructive" size="lg" onClick={stopGeneration}>
-                          <XCircle className="mr-2 h-5 w-5" />
-                          Stop
-                        </Button>
-                      </>
-                    )}
-                    {isGeneratingImages && generationPaused && (
-                      <>
-                        <Button size="lg" onClick={resumeGeneration}>
-                          <Play className="mr-2 h-5 w-5" />
-                          Resume
-                        </Button>
-                        <Button variant="destructive" size="lg" onClick={stopGeneration}>
-                          <XCircle className="mr-2 h-5 w-5" />
-                          Stop
-                        </Button>
-                      </>
-                    )}
-                  </div>
+              {/* Progress Panel - New unified design */}
+              <ProgressPanel
+                phase={
+                  isGeneratingImages 
+                    ? generationPaused 
+                      ? "paused" 
+                      : "generating"
+                    : batch.generatedPages === batch.totalPages 
+                      ? "complete" 
+                      : "idle"
+                }
+                current={batch.generatedPages}
+                total={batch.totalPages}
+                label={
+                  isGeneratingImages 
+                    ? generationPaused 
+                      ? "Paused" 
+                      : `Generating page ${batch.generatedPages + 1}...`
+                    : batch.generatedPages === batch.totalPages 
+                      ? "All pages generated!" 
+                      : "Ready to generate"
+                }
+                estimatedSeconds={
+                  isGeneratingImages && batch.avgGenerationMs > 0
+                    ? Math.round(((batch.totalPages - batch.generatedPages) * batch.avgGenerationMs) / 1000)
+                    : undefined
+                }
+                canPause={isGeneratingImages && !generationPaused}
+                canCancel={isGeneratingImages}
+                onPause={pauseGeneration}
+                onResume={resumeGeneration}
+                onCancel={stopGeneration}
+              />
+              
+              {/* Start/Resume Button when not generating */}
+              {!isGeneratingImages && batch.generatedPages < batch.totalPages && (
+                <div className="flex justify-center pt-2">
+                  <Button size="lg" onClick={startGeneration}>
+                    <Play className="mr-2 h-5 w-5" />
+                    {batch.generatedPages > 0 ? "Resume Generation" : "Start Generation"}
+                  </Button>
                 </div>
+              )}
+              
+              <Card className="p-4">
               </Card>
               
               {/* Books with page thumbnails */}
