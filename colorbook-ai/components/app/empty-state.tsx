@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { FolderOpen, Plus } from "lucide-react";
+import { FolderOpen, Plus, Image, Sparkles, FileX } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface EmptyStateProps {
   icon?: LucideIcon;
@@ -12,6 +13,11 @@ interface EmptyStateProps {
   actionLabel?: string;
   actionHref?: string;
   onAction?: () => void;
+  secondaryActionLabel?: string;
+  secondaryActionHref?: string;
+  onSecondaryAction?: () => void;
+  variant?: "default" | "compact" | "card";
+  className?: string;
 }
 
 export function EmptyState({
@@ -21,30 +27,118 @@ export function EmptyState({
   actionLabel,
   actionHref,
   onAction,
+  secondaryActionLabel,
+  secondaryActionHref,
+  onSecondaryAction,
+  variant = "default",
+  className,
 }: EmptyStateProps) {
+  const variantStyles = {
+    default: "px-6 py-16",
+    compact: "px-4 py-8",
+    card: "px-6 py-12 border border-dashed border-border bg-card/30",
+  };
+
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/30 px-6 py-16 text-center">
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-        <Icon className="h-6 w-6 text-muted-foreground" />
+    <div className={cn(
+      "flex flex-col items-center justify-center rounded-xl text-center",
+      variantStyles[variant],
+      className
+    )}>
+      <div className={cn(
+        "mb-4 flex items-center justify-center rounded-full bg-muted",
+        variant === "compact" ? "h-12 w-12" : "h-16 w-16"
+      )}>
+        <Icon className={cn(
+          "text-muted-foreground",
+          variant === "compact" ? "h-5 w-5" : "h-7 w-7"
+        )} />
       </div>
-      <h3 className="mb-1 font-semibold">{title}</h3>
-      <p className="mb-6 max-w-sm text-sm text-muted-foreground">{description}</p>
-      {actionLabel && (actionHref || onAction) && (
-        actionHref ? (
-          <Button asChild className="rounded-full">
-            <Link href={actionHref}>
-              <Plus className="mr-2 h-4 w-4" />
-              {actionLabel}
-            </Link>
-          </Button>
-        ) : (
-          <Button onClick={onAction} className="rounded-full">
-            <Plus className="mr-2 h-4 w-4" />
-            {actionLabel}
-          </Button>
-        )
+      <h3 className={cn(
+        "mb-1 font-semibold",
+        variant === "compact" ? "text-base" : "text-lg"
+      )}>
+        {title}
+      </h3>
+      <p className={cn(
+        "mb-6 max-w-sm text-muted-foreground",
+        variant === "compact" ? "text-xs" : "text-sm"
+      )}>
+        {description}
+      </p>
+      
+      {/* Actions */}
+      {(actionLabel || secondaryActionLabel) && (
+        <div className="flex items-center gap-3">
+          {actionLabel && (actionHref || onAction) && (
+            actionHref ? (
+              <Button asChild size={variant === "compact" ? "sm" : "default"}>
+                <Link href={actionHref}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  {actionLabel}
+                </Link>
+              </Button>
+            ) : (
+              <Button onClick={onAction} size={variant === "compact" ? "sm" : "default"}>
+                <Plus className="mr-2 h-4 w-4" />
+                {actionLabel}
+              </Button>
+            )
+          )}
+          {secondaryActionLabel && (secondaryActionHref || onSecondaryAction) && (
+            secondaryActionHref ? (
+              <Button asChild variant="outline" size={variant === "compact" ? "sm" : "default"}>
+                <Link href={secondaryActionHref}>
+                  {secondaryActionLabel}
+                </Link>
+              </Button>
+            ) : (
+              <Button onClick={onSecondaryAction} variant="outline" size={variant === "compact" ? "sm" : "default"}>
+                {secondaryActionLabel}
+              </Button>
+            )
+          )}
+        </div>
       )}
     </div>
   );
 }
 
+// Preset empty states for common scenarios
+export function NoProjectsEmptyState({ actionHref = "/app/new" }: { actionHref?: string }) {
+  return (
+    <EmptyState
+      icon={FolderOpen}
+      title="No projects yet"
+      description="Create your first coloring book to get started."
+      actionLabel="Create Book"
+      actionHref={actionHref}
+    />
+  );
+}
+
+export function NoImagesEmptyState({ onAction }: { onAction?: () => void }) {
+  return (
+    <EmptyState
+      icon={Image}
+      title="No images generated"
+      description="Generate images to see them appear here."
+      actionLabel="Generate Images"
+      onAction={onAction}
+      variant="compact"
+    />
+  );
+}
+
+export function GenerationFailedState({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <EmptyState
+      icon={FileX}
+      title="Generation failed"
+      description="Something went wrong. Please try again."
+      actionLabel="Retry"
+      onAction={onRetry}
+      variant="compact"
+    />
+  );
+}

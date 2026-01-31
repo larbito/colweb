@@ -10,15 +10,15 @@ interface SectionCardProps {
   description?: string;
   icon?: LucideIcon;
   iconColor?: string;
+  iconBg?: string;
   badge?: string;
   badgeVariant?: "default" | "secondary" | "destructive" | "outline";
   headerActions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
   contentClassName?: string;
-  collapsible?: boolean;
-  defaultCollapsed?: boolean;
   noPadding?: boolean;
+  variant?: "default" | "bordered" | "ghost";
 }
 
 export function SectionCard({
@@ -26,6 +26,7 @@ export function SectionCard({
   description,
   icon: Icon,
   iconColor = "text-primary",
+  iconBg = "bg-primary/10",
   badge,
   badgeVariant = "secondary",
   headerActions,
@@ -33,25 +34,33 @@ export function SectionCard({
   className = "",
   contentClassName = "",
   noPadding = false,
+  variant = "default",
 }: SectionCardProps) {
+  const variantStyles = {
+    default: "border-border/50 bg-card/60 backdrop-blur",
+    bordered: "border-border bg-card",
+    ghost: "border-transparent bg-transparent shadow-none",
+  };
+
   return (
-    <Card className={cn("overflow-hidden", className)}>
+    <Card className={cn(variantStyles[variant], "overflow-hidden", className)}>
       <CardHeader className="pb-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             {Icon && (
               <div className={cn(
-                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/80",
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
+                iconBg,
                 iconColor
               )}>
-                <Icon className="h-4 w-4" />
+                <Icon className="h-5 w-5" />
               </div>
             )}
-            <div>
+            <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold">{title}</h3>
+                <h3 className="font-semibold text-base">{title}</h3>
                 {badge && (
-                  <Badge variant={badgeVariant} className="text-[10px]">
+                  <Badge variant={badgeVariant} className="text-[10px] px-1.5 py-0">
                     {badge}
                   </Badge>
                 )}
@@ -68,14 +77,14 @@ export function SectionCard({
           )}
         </div>
       </CardHeader>
-      <CardContent className={cn(noPadding && "p-0", contentClassName)}>
+      <CardContent className={cn(noPadding && "p-0 pt-0", contentClassName)}>
         {children}
       </CardContent>
     </Card>
   );
 }
 
-// Simpler variant for sub-sections
+// Simpler sub-section for grouping form fields
 interface SubSectionProps {
   title?: string;
   description?: string;
@@ -87,7 +96,7 @@ export function SubSection({ title, description, children, className = "" }: Sub
   return (
     <div className={cn("space-y-3", className)}>
       {(title || description) && (
-        <div>
+        <div className="space-y-0.5">
           {title && <h4 className="text-sm font-medium">{title}</h4>}
           {description && <p className="text-xs text-muted-foreground">{description}</p>}
         </div>
@@ -97,3 +106,29 @@ export function SubSection({ title, description, children, className = "" }: Sub
   );
 }
 
+// Compact info card for displaying key-value pairs
+interface InfoCardProps {
+  label: string;
+  value: React.ReactNode;
+  icon?: LucideIcon;
+  className?: string;
+}
+
+export function InfoCard({ label, value, icon: Icon, className }: InfoCardProps) {
+  return (
+    <div className={cn(
+      "flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 p-3",
+      className
+    )}>
+      {Icon && (
+        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-background">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-muted-foreground truncate">{label}</p>
+        <p className="font-medium truncate">{value}</p>
+      </div>
+    </div>
+  );
+}

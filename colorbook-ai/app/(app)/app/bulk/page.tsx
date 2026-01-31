@@ -1700,36 +1700,32 @@ export default function BulkCreatePage() {
               
               {/* Progress Panel - New unified design */}
               <ProgressPanel
-                phase={
-                  isGeneratingImages 
+                progress={{
+                  totalItems: batch.totalPages,
+                  completedItems: batch.generatedPages,
+                  phase: isGeneratingImages 
                     ? generationPaused 
                       ? "paused" 
                       : "generating"
                     : batch.generatedPages === batch.totalPages 
                       ? "complete" 
-                      : "idle"
-                }
-                current={batch.generatedPages}
-                total={batch.totalPages}
-                label={
-                  isGeneratingImages 
+                      : "idle",
+                  estimatedSecondsRemaining: isGeneratingImages && batch.avgGenerationMs > 0
+                    ? Math.round(((batch.totalPages - batch.generatedPages) * batch.avgGenerationMs) / 1000)
+                    : undefined,
+                  failedCount: batch.failedPages,
+                  message: isGeneratingImages 
                     ? generationPaused 
                       ? "Paused" 
                       : `Generating page ${batch.generatedPages + 1}...`
                     : batch.generatedPages === batch.totalPages 
                       ? "All pages generated!" 
-                      : "Ready to generate"
-                }
-                estimatedSeconds={
-                  isGeneratingImages && batch.avgGenerationMs > 0
-                    ? Math.round(((batch.totalPages - batch.generatedPages) * batch.avgGenerationMs) / 1000)
-                    : undefined
-                }
-                canPause={isGeneratingImages && !generationPaused}
-                canCancel={isGeneratingImages}
+                      : "Ready to generate",
+                }}
+                showControls={isGeneratingImages}
                 onPause={pauseGeneration}
                 onResume={resumeGeneration}
-                onCancel={stopGeneration}
+                onStop={stopGeneration}
               />
               
               {/* Start/Resume Button when not generating */}

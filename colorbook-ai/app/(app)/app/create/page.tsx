@@ -2,16 +2,19 @@
 
 import { useState, useCallback } from "react";
 import { AppTopbar } from "@/components/app/app-topbar";
+import { PageHeader } from "@/components/app/page-header";
+import { SectionCard, SubSection } from "@/components/app/section-card";
+import { OptionCard, OptionChip, OptionGrid, ChipGroup } from "@/components/app/option-card";
+import { PreviewGrid, PreviewCard, PreviewStatusBadge, type PreviewStatus } from "@/components/app/preview-grid";
+import { ProgressPanel, type JobProgress, type JobPhase } from "@/components/app/progress-panel";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import {
   Sparkles,
   Loader2,
   Wand2,
-  ImageIcon,
   Book,
   Palette,
   Download,
@@ -19,9 +22,6 @@ import {
   Eye,
   Play,
   Settings2,
-  CheckCircle2,
-  XCircle,
-  Clock,
   Edit3,
   ChevronDown,
   ChevronUp,
@@ -30,12 +30,11 @@ import {
   TreePine,
   Shuffle,
   Lightbulb,
-  ArrowRight,
   Check,
-  X,
   Copy,
   Trash2,
   FileDown,
+  PenTool,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ImagePreviewModal } from "@/components/app/image-preview-modal";
@@ -43,7 +42,6 @@ import { ExportPDFModal } from "@/components/app/export-pdf-modal";
 import type {
   BatchPromptsResponse,
   PagePromptItem,
-  PageResult,
   GenerationMode,
   StoryConfig,
   StyleProfile,
@@ -51,9 +49,7 @@ import type {
 } from "@/lib/batchGenerationTypes";
 
 type PageStatus = "pending" | "generating" | "done" | "failed";
-
 type EnhanceStatus = "none" | "enhancing" | "enhanced" | "failed";
-
 type ProcessingStatus = "none" | "processing" | "done" | "failed";
 
 interface PageState extends PagePromptItem {
@@ -61,13 +57,10 @@ interface PageState extends PagePromptItem {
   imageBase64?: string;
   error?: string;
   isEditing?: boolean;
-  // Enhanced image fields
   enhancedImageBase64?: string;
   enhanceStatus: EnhanceStatus;
-  // Final Letter format (2550x3300) - REQUIRED FOR PDF
   finalLetterBase64?: string;
   finalLetterStatus: ProcessingStatus;
-  // Active version for display
   activeVersion: "original" | "enhanced" | "finalLetter";
 }
 
@@ -82,27 +75,15 @@ interface GeneratedIdea {
 }
 
 export default function CreateColoringBookPage() {
-  // ==================== State ====================
-
-  // Step 1: Idea input
+  // State
   const [userIdea, setUserIdea] = useState("");
   const [generatedIdea, setGeneratedIdea] = useState<GeneratedIdea | null>(null);
   const [generatingIdea, setGeneratingIdea] = useState(false);
-  
-  // Diversity tracking for idea regeneration
-  const [previousIdeas, setPreviousIdeas] = useState<Array<{
-    title?: string;
-    theme?: string;
-    mainCharacter?: string;
-  }>>([]);
+  const [previousIdeas, setPreviousIdeas] = useState<Array<{ title?: string; theme?: string; mainCharacter?: string }>>([]);
   const [ideaSeed, setIdeaSeed] = useState<string>("");
-
-  // Step 2: Improved prompt (MANDATORY)
   const [improvedPrompt, setImprovedPrompt] = useState("");
   const [isPromptImproved, setIsPromptImproved] = useState(false);
   const [improvingPrompt, setImprovingPrompt] = useState(false);
-
-  // Step 3: Book configuration
   const [mode, setMode] = useState<GenerationMode>("storybook");
   const [pageCount, setPageCount] = useState(8);
   const [orientation, setOrientation] = useState<"portrait" | "landscape" | "square">("portrait");
@@ -114,24 +95,26 @@ export default function CreateColoringBookPage() {
     settingConstraint: "mixed",
   });
   const [expandedSettings, setExpandedSettings] = useState(false);
-
-  // Step 4: Generated prompts and images
   const [pages, setPages] = useState<PageState[]>([]);
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-
-  // Character Identity Profile (from batch/prompts response, for validation)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [characterIdentityProfile, setCharacterIdentityProfile] = useState<any>(null);
-
-  // Preview
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-
-  // Export PDF modal
   const [showExportModal, setShowExportModal] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhancingPageId, setEnhancingPageId] = useState<number | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingPageId, setProcessingPageId] = useState<number | null>(null);
 
-  // ==================== Helpers ====================
+  // Progress tracking
+  const [jobProgress, setJobProgress] = useState<JobProgress>({
+    totalItems: 0,
+    completedItems: 0,
+    phase: "idle",
+  });
 
+  // Helpers
   const getImageSize = () => {
     if (orientation === "landscape") return "1536x1024";
     if (orientation === "portrait") return "1024x1536";
@@ -147,25 +130,15 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  // ==================== Step 1: Idea Generation ====================
-
+  // Step 1: Idea Generation
   const generateIdea = async (isRegenerate = false) => {
     setGeneratingIdea(true);
-    
-    // Generate a new unique seed for each call
     const newSeed = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setIdeaSeed(newSeed);
     
     try {
-      // Build excluded themes based on previous ideas
-      const excludeThemes = previousIdeas
-        .map(p => p.theme)
-        .filter(Boolean) as string[];
-      
-      // Build excluded character types  
-      const excludeCharacterTypes = previousIdeas
-        .map(p => p.mainCharacter?.split(" ").pop())
-        .filter(Boolean) as string[];
+      const excludeThemes = previousIdeas.map(p => p.theme).filter(Boolean) as string[];
+      const excludeCharacterTypes = previousIdeas.map(p => p.mainCharacter?.split(" ").pop()).filter(Boolean) as string[];
 
       const response = await fetch("/api/idea/generate", {
         method: "POST",
@@ -174,24 +147,18 @@ export default function CreateColoringBookPage() {
           themeHint: userIdea.trim() || undefined,
           age: storyConfig.targetAge,
           mode,
-          // Diversity parameters
           ideaSeed: newSeed,
-          previousIdeas: previousIdeas.slice(-5), // Last 5 ideas
+          previousIdeas: previousIdeas.slice(-5),
           excludeThemes: excludeThemes.slice(-5),
           excludeCharacterTypes: excludeCharacterTypes.slice(-5),
         }),
       });
 
       const data = await safeJsonParse(response);
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate idea");
-      }
+      if (!response.ok) throw new Error(data.error || "Failed to generate idea");
 
       const newIdea = data as GeneratedIdea;
       setGeneratedIdea(newIdea);
-      
-      // Track this idea for future diversity
       setPreviousIdeas(prev => [...prev.slice(-4), {
         title: newIdea.title,
         theme: newIdea.theme || newIdea.themeBucket,
@@ -199,7 +166,7 @@ export default function CreateColoringBookPage() {
       }]);
       
       toast.success(isRegenerate 
-        ? "New idea generated! This one is different from before." 
+        ? "New idea generated!" 
         : "Idea generated! Review and click 'Use This Idea' to continue."
       );
     } catch (error) {
@@ -212,7 +179,6 @@ export default function CreateColoringBookPage() {
   const useGeneratedIdea = () => {
     if (generatedIdea) {
       setUserIdea(generatedIdea.idea);
-      // Reset improved prompt when idea changes
       setImprovedPrompt("");
       setIsPromptImproved(false);
       setPages([]);
@@ -232,8 +198,7 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  // ==================== Step 2: Improve Prompt (MANDATORY) ====================
-
+  // Step 2: Improve Prompt
   const improvePrompt = async () => {
     if (!userIdea.trim()) {
       toast.error("Please enter or generate an idea first");
@@ -254,14 +219,11 @@ export default function CreateColoringBookPage() {
       });
 
       const data = await safeJsonParse(response);
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to improve prompt");
-      }
+      if (!response.ok) throw new Error(data.error || "Failed to improve prompt");
 
       setImprovedPrompt(data.prompt);
       setIsPromptImproved(true);
-      setPages([]); // Reset pages when prompt changes
+      setPages([]);
       toast.success("Prompt improved! You can edit it, then generate page prompts.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to improve prompt");
@@ -270,13 +232,7 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  const handlePromptChange = (newPrompt: string) => {
-    setImprovedPrompt(newPrompt);
-    // Don't reset isPromptImproved - user is just editing
-  };
-
-  // ==================== Step 3: Generate Page Prompts ====================
-
+  // Step 3: Generate Page Prompts
   const generatePagePrompts = async () => {
     if (!isPromptImproved || !improvedPrompt.trim()) {
       toast.error("Please improve your prompt first");
@@ -285,28 +241,16 @@ export default function CreateColoringBookPage() {
 
     setGeneratingPrompts(true);
     try {
-      // Build a minimal style profile from the improved prompt
       const styleProfile: StyleProfile = {
         lineStyle: "Clean, smooth black outlines suitable for coloring",
         compositionRules: "Subject centered and fills 85-95% of the frame",
         environmentStyle: "Simple backgrounds appropriate to the scene",
         colorScheme: "black and white line art",
-        mustAvoid: [
-          "solid black fills",
-          "filled shapes",
-          "shading",
-          "grayscale",
-          "gradients",
-          "border",
-          "frame",
-        ],
+        mustAvoid: ["solid black fills", "filled shapes", "shading", "grayscale", "gradients", "border", "frame"],
       };
 
-      // Extract character profile hint if in storybook mode
       let characterProfile: CharacterProfile | undefined;
       if (mode === "storybook") {
-        // Create a basic character profile from the prompt
-        // The batch/prompts endpoint will use this for consistency
         characterProfile = {
           species: "main character from the prompt",
           keyFeatures: ["as described in the base prompt"],
@@ -332,24 +276,15 @@ export default function CreateColoringBookPage() {
       });
 
       const data = await safeJsonParse(response);
+      if (!response.ok) throw new Error(data.error || "Failed to generate prompts");
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate prompts");
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const batchResponse = data as BatchPromptsResponse & { characterIdentityProfile?: any };
 
-      // Extended response includes characterIdentityProfile
-      const batchResponse = data as BatchPromptsResponse & { 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        characterIdentityProfile?: any 
-      };
-
-      // Store character identity profile for validation (storybook mode)
       if (batchResponse.characterIdentityProfile) {
         setCharacterIdentityProfile(batchResponse.characterIdentityProfile);
-        console.log("[create] Received character identity profile for:", batchResponse.characterIdentityProfile.species);
       }
 
-      // Convert to page state
       const pageStates: PageState[] = batchResponse.pages.map((p) => ({
         ...p,
         status: "pending" as PageStatus,
@@ -367,12 +302,7 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  // ==================== Step 4: Generate Images (One-by-One) ====================
-
-  /**
-   * Generate all images one-by-one with real-time preview updates.
-   * This avoids timeout issues by making separate API calls per image.
-   */
+  // Step 4: Generate Images
   const generateAllImages = async () => {
     if (pages.length === 0) {
       toast.error("No prompts to generate");
@@ -386,14 +316,17 @@ export default function CreateColoringBookPage() {
     }
 
     setIsGenerating(true);
+    setJobProgress({
+      totalItems: pendingPages.length,
+      completedItems: 0,
+      phase: "generating",
+      startedAt: Date.now(),
+    });
+
     let successCount = 0;
     let failCount = 0;
 
-    toast.info(`Starting generation of ${pendingPages.length} images...`);
-
-    // Generate images one-by-one for real-time preview
     for (const pageItem of pendingPages) {
-      // Mark this page as generating
       setPages(prev => prev.map(p =>
         p.page === pageItem.page ? { ...p, status: "generating" as PageStatus } : p
       ));
@@ -406,7 +339,6 @@ export default function CreateColoringBookPage() {
             page: pageItem.page,
             prompt: pageItem.prompt,
             size: getImageSize(),
-            // Storybook mode parameters for validation
             isStorybookMode: mode === "storybook",
             characterProfile: mode === "storybook" ? characterIdentityProfile : undefined,
             validateOutline: true,
@@ -417,21 +349,13 @@ export default function CreateColoringBookPage() {
         const data = await safeJsonParse(response);
 
         if (response.ok && data.status === "done" && data.imageBase64) {
-          // Success - update with image immediately
-          const hasWarning = data.warning || (data.validation && !data.validation.passed);
           setPages(prev => prev.map(p =>
             p.page === pageItem.page
-              ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: hasWarning ? data.warning : undefined }
+              ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: data.warning }
               : p
           ));
           successCount++;
-          if (hasWarning) {
-            toast.warning(`Page ${pageItem.page} generated with warnings`);
-          } else {
-            toast.success(`Page ${pageItem.page} generated!`);
-          }
         } else {
-          // Failed
           setPages(prev => prev.map(p =>
             p.page === pageItem.page
               ? { ...p, status: "failed" as PageStatus, error: data.error || "Generation failed" }
@@ -440,7 +364,6 @@ export default function CreateColoringBookPage() {
           failCount++;
         }
       } catch (error) {
-        // Error
         setPages(prev => prev.map(p =>
           p.page === pageItem.page
             ? { ...p, status: "failed" as PageStatus, error: error instanceof Error ? error.message : "Generation failed" }
@@ -449,11 +372,18 @@ export default function CreateColoringBookPage() {
         failCount++;
       }
 
-      // Small delay between requests to avoid rate limiting
+      setJobProgress(prev => ({
+        ...prev,
+        completedItems: successCount + failCount,
+        failedCount: failCount,
+        estimatedSecondsRemaining: ((Date.now() - (prev.startedAt || Date.now())) / (successCount + failCount)) * (pendingPages.length - successCount - failCount) / 1000,
+      }));
+
       await new Promise(r => setTimeout(r, 300));
     }
 
     setIsGenerating(false);
+    setJobProgress(prev => ({ ...prev, phase: "complete" }));
 
     if (failCount === 0) {
       toast.success(`All ${successCount} images generated successfully!`);
@@ -462,9 +392,6 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  /**
-   * Generate a single page image using the one-by-one endpoint.
-   */
   const generateSinglePage = async (pageNumber: number) => {
     const page = pages.find(p => p.page === pageNumber);
     if (!page) return;
@@ -481,7 +408,6 @@ export default function CreateColoringBookPage() {
           page: page.page,
           prompt: page.prompt,
           size: getImageSize(),
-          // Storybook mode parameters for validation
           isStorybookMode: mode === "storybook",
           characterProfile: mode === "storybook" ? characterIdentityProfile : undefined,
           validateOutline: true,
@@ -492,24 +418,19 @@ export default function CreateColoringBookPage() {
       const data = await safeJsonParse(response);
 
       if (response.ok && data.status === "done" && data.imageBase64) {
-        const hasWarning = data.warning || (data.validation && !data.validation.passed);
         setPages(prev => prev.map(p =>
           p.page === pageNumber
-            ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: hasWarning ? data.warning : undefined }
+            ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: data.warning }
             : p
         ));
-        if (hasWarning) {
-          toast.warning(`Page ${pageNumber} generated with warnings: ${data.warning}`);
-        } else {
-          toast.success(`Page ${pageNumber} generated!`);
-        }
+        toast.success(`Page ${pageNumber} generated!`);
       } else {
         setPages(prev => prev.map(p =>
           p.page === pageNumber
             ? { ...p, status: "failed" as PageStatus, error: data.error || "Generation failed" }
             : p
         ));
-        toast.error(`Page ${pageNumber} failed: ${data.error || "Unknown error"}`);
+        toast.error(`Page ${pageNumber} failed`);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Generation failed");
@@ -519,8 +440,7 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  // ==================== Prompt Editing ====================
-
+  // Prompt Editing
   const updatePagePrompt = (pageNumber: number, newPrompt: string) => {
     setPages(prev => prev.map(p =>
       p.page === pageNumber ? { ...p, prompt: newPrompt, isEditing: false, status: "pending" as PageStatus } : p
@@ -533,14 +453,7 @@ export default function CreateColoringBookPage() {
     ));
   };
 
-  // ==================== Enhance Images ====================
-
-  const [isEnhancing, setIsEnhancing] = useState(false);
-  const [enhancingPageId, setEnhancingPageId] = useState<number | null>(null);
-
-  /**
-   * Enhance a single page image
-   */
+  // Enhance Images
   const enhanceSinglePage = async (pageNumber: number) => {
     const page = pages.find(p => p.page === pageNumber);
     if (!page || !page.imageBase64 || page.enhanceStatus === "enhancing") return;
@@ -554,10 +467,7 @@ export default function CreateColoringBookPage() {
       const response = await fetch("/api/image/enhance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64: page.imageBase64,
-          scale: 2,
-        }),
+        body: JSON.stringify({ imageBase64: page.imageBase64, scale: 2 }),
       });
 
       const data = await response.json();
@@ -565,12 +475,7 @@ export default function CreateColoringBookPage() {
       if (response.ok && data.enhancedImageBase64) {
         setPages(prev => prev.map(p =>
           p.page === pageNumber
-            ? {
-                ...p,
-                enhancedImageBase64: data.enhancedImageBase64,
-                enhanceStatus: "enhanced" as EnhanceStatus,
-                activeVersion: "enhanced" as const,
-              }
+            ? { ...p, enhancedImageBase64: data.enhancedImageBase64, enhanceStatus: "enhanced" as EnhanceStatus, activeVersion: "enhanced" as const }
             : p
         ));
         toast.success(`Page ${pageNumber} enhanced!`);
@@ -578,7 +483,7 @@ export default function CreateColoringBookPage() {
         setPages(prev => prev.map(p =>
           p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
         ));
-        toast.error(`Failed to enhance page ${pageNumber}: ${data.error || "Unknown error"}`);
+        toast.error(`Failed to enhance page ${pageNumber}`);
       }
     } catch (error) {
       setPages(prev => prev.map(p =>
@@ -590,20 +495,21 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  /**
-   * Enhance all pages that have images but aren't enhanced yet
-   */
   const enhanceAllPages = async () => {
-    const pagesToEnhance = pages.filter(
-      p => p.status === "done" && p.imageBase64 && p.enhanceStatus !== "enhanced"
-    );
-
+    const pagesToEnhance = pages.filter(p => p.status === "done" && p.imageBase64 && p.enhanceStatus !== "enhanced");
     if (pagesToEnhance.length === 0) {
       toast.info("All pages are already enhanced!");
       return;
     }
 
     setIsEnhancing(true);
+    setJobProgress({
+      totalItems: pagesToEnhance.length,
+      completedItems: 0,
+      phase: "enhancing",
+      startedAt: Date.now(),
+    });
+
     let successCount = 0;
 
     for (const page of pagesToEnhance) {
@@ -616,10 +522,7 @@ export default function CreateColoringBookPage() {
         const response = await fetch("/api/image/enhance", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            imageBase64: page.imageBase64,
-            scale: 2,
-          }),
+          body: JSON.stringify({ imageBase64: page.imageBase64, scale: 2 }),
         });
 
         const data = await response.json();
@@ -627,12 +530,7 @@ export default function CreateColoringBookPage() {
         if (response.ok && data.enhancedImageBase64) {
           setPages(prev => prev.map(p =>
             p.page === page.page
-              ? {
-                  ...p,
-                  enhancedImageBase64: data.enhancedImageBase64,
-                  enhanceStatus: "enhanced" as EnhanceStatus,
-                  activeVersion: "enhanced" as const,
-                }
+              ? { ...p, enhancedImageBase64: data.enhancedImageBase64, enhanceStatus: "enhanced" as EnhanceStatus, activeVersion: "enhanced" as const }
               : p
           ));
           successCount++;
@@ -647,12 +545,18 @@ export default function CreateColoringBookPage() {
         ));
       }
 
-      // Small delay between enhancements
+      setJobProgress(prev => ({
+        ...prev,
+        completedItems: successCount,
+        estimatedSecondsRemaining: ((Date.now() - (prev.startedAt || Date.now())) / (successCount || 1)) * (pagesToEnhance.length - successCount) / 1000,
+      }));
+
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     setIsEnhancing(false);
     setEnhancingPageId(null);
+    setJobProgress(prev => ({ ...prev, phase: "complete" }));
 
     if (successCount === pagesToEnhance.length) {
       toast.success(`All ${successCount} pages enhanced!`);
@@ -661,14 +565,9 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  /**
-   * Toggle between original, enhanced, and finalLetter versions for a page
-   */
   const togglePageVersion = (pageNumber: number) => {
     setPages(prev => prev.map(p => {
       if (p.page !== pageNumber) return p;
-      
-      // Cycle through available versions
       if (p.activeVersion === "original" && p.enhancedImageBase64) {
         return { ...p, activeVersion: "enhanced" as const };
       } else if (p.activeVersion === "enhanced" && p.finalLetterBase64) {
@@ -682,85 +581,23 @@ export default function CreateColoringBookPage() {
     }));
   };
 
-  // ==================== Process to Letter Format ====================
-
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingPageId, setProcessingPageId] = useState<number | null>(null);
-
-  /**
-   * Process a single page to Letter format (enhance + reframe)
-   */
-  const processSinglePage = async (pageNumber: number) => {
-    const page = pages.find(p => p.page === pageNumber);
-    if (!page || !page.imageBase64 || page.finalLetterStatus === "processing") return;
-
-    setProcessingPageId(pageNumber);
-    setPages(prev => prev.map(p =>
-      p.page === pageNumber ? { ...p, finalLetterStatus: "processing" as ProcessingStatus } : p
-    ));
-
-    try {
-      const response = await fetch("/api/image/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64: page.imageBase64,
-          enhance: true,
-          enhanceScale: 2,
-          marginPercent: 3,
-          pageId: String(pageNumber),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.finalLetterBase64) {
-        setPages(prev => prev.map(p =>
-          p.page === pageNumber
-            ? {
-                ...p,
-                enhancedImageBase64: data.enhancedBase64 || p.enhancedImageBase64,
-                enhanceStatus: data.wasEnhanced ? "enhanced" as EnhanceStatus : p.enhanceStatus,
-                finalLetterBase64: data.finalLetterBase64,
-                finalLetterStatus: "done" as ProcessingStatus,
-                activeVersion: "finalLetter" as const,
-              }
-            : p
-        ));
-        toast.success(`Page ${pageNumber} processed to Letter format!`);
-      } else {
-        setPages(prev => prev.map(p =>
-          p.page === pageNumber ? { ...p, finalLetterStatus: "failed" as ProcessingStatus } : p
-        ));
-        toast.error(`Failed to process page ${pageNumber}: ${data.error || "Unknown error"}`);
-      }
-    } catch (error) {
-      setPages(prev => prev.map(p =>
-        p.page === pageNumber ? { ...p, finalLetterStatus: "failed" as ProcessingStatus } : p
-      ));
-      toast.error(error instanceof Error ? error.message : "Processing failed");
-    } finally {
-      setProcessingPageId(null);
-    }
-  };
-
-  /**
-   * Process all pages to Letter format
-   */
+  // Process to Letter Format
   const processAllPages = async () => {
-    const pagesToProcess = pages.filter(
-      p => p.status === "done" && p.imageBase64 && p.finalLetterStatus !== "done"
-    );
-
+    const pagesToProcess = pages.filter(p => p.status === "done" && p.imageBase64 && p.finalLetterStatus !== "done");
     if (pagesToProcess.length === 0) {
       toast.info("All pages are already processed!");
       return;
     }
 
     setIsProcessing(true);
-    let successCount = 0;
+    setJobProgress({
+      totalItems: pagesToProcess.length,
+      completedItems: 0,
+      phase: "processing",
+      startedAt: Date.now(),
+    });
 
-    toast.info(`Processing ${pagesToProcess.length} pages to Letter format...`);
+    let successCount = 0;
 
     for (const page of pagesToProcess) {
       setProcessingPageId(page.page);
@@ -808,22 +645,27 @@ export default function CreateColoringBookPage() {
         ));
       }
 
-      // Delay between processing to avoid rate limits
+      setJobProgress(prev => ({
+        ...prev,
+        completedItems: successCount,
+        estimatedSecondsRemaining: ((Date.now() - (prev.startedAt || Date.now())) / (successCount || 1)) * (pagesToProcess.length - successCount) / 1000,
+      }));
+
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     setIsProcessing(false);
     setProcessingPageId(null);
+    setJobProgress(prev => ({ ...prev, phase: "complete" }));
 
     if (successCount === pagesToProcess.length) {
-      toast.success(`All ${successCount} pages processed to Letter format!`);
+      toast.success(`All ${successCount} pages processed!`);
     } else {
       toast.warning(`Processed ${successCount}/${pagesToProcess.length} pages`);
     }
   };
 
-  // ==================== Download ====================
-
+  // Download
   const downloadAll = () => {
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
@@ -843,82 +685,71 @@ export default function CreateColoringBookPage() {
     toast.success(`Downloading ${donePages.length} images...`);
   };
 
-  // ==================== Render Helpers ====================
-
-  const getStatusIcon = (status: PageStatus) => {
-    switch (status) {
-      case "pending": return <Clock className="h-4 w-4 text-muted-foreground" />;
-      case "generating": return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
-      case "done": return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case "failed": return <XCircle className="h-4 w-4 text-red-500" />;
-    }
-  };
-
-  const getStatusBadge = (status: PageStatus) => {
-    const variants: Record<PageStatus, "secondary" | "default" | "destructive" | "outline"> = {
-      pending: "secondary",
-      generating: "default",
-      done: "default",
-      failed: "destructive",
-    };
-    return (
-      <Badge variant={variants[status]} className="text-xs">
-        {status}
-      </Badge>
-    );
-  };
-
+  // Computed values
   const doneCount = pages.filter(p => p.status === "done").length;
   const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed").length;
   const enhancedCount = pages.filter(p => p.enhanceStatus === "enhanced").length;
   const processedCount = pages.filter(p => p.finalLetterStatus === "done").length;
 
-  // ==================== Render ====================
+  const getPreviewStatus = (page: PageState): PreviewStatus => {
+    if (page.status === "generating") return "generating";
+    if (page.enhanceStatus === "enhancing") return "enhancing";
+    if (page.finalLetterStatus === "processing") return "processing";
+    if (page.status === "failed") return "failed";
+    if (page.status === "done") return "done";
+    return "pending";
+  };
 
   return (
     <>
-      <AppTopbar
-        title="Create Coloring Book"
-        subtitle="Generate professional coloring pages from your idea"
-      />
+      <AppTopbar title="Create Coloring Book" />
 
       <main className="p-4 lg:p-6">
-        <div className="mx-auto max-w-6xl space-y-6">
+        <div className="mx-auto max-w-5xl space-y-6">
+          <PageHeader
+            title="Create Coloring Book"
+            subtitle="Generate professional coloring pages from your idea"
+            icon={PenTool}
+            actions={
+              doneCount > 0 && (
+                <Button onClick={() => setShowExportModal(true)}>
+                  <FileDown className="mr-2 h-4 w-4" />
+                  Export PDF
+                </Button>
+              )
+            }
+          />
+
+          {/* Progress Panel - Show when any operation is running */}
+          {(isGenerating || isEnhancing || isProcessing) && (
+            <ProgressPanel progress={jobProgress} />
+          )}
 
           {/* Step 1: Idea Input */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Lightbulb className="h-5 w-5" />
-                Step 1: Your Book Idea
-              </CardTitle>
-              <CardDescription>
-                Describe your coloring book idea or let AI generate one for you
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <SectionCard
+            title="Step 1: Your Book Idea"
+            description="Describe your coloring book idea or let AI generate one for you"
+            icon={Lightbulb}
+            iconColor="text-amber-500"
+            iconBg="bg-amber-500/10"
+          >
+            <div className="space-y-4">
               <Textarea
-                placeholder="Describe your coloring book idea... e.g., 'A magical unicorn named Luna who explores different enchanted kingdoms' or 'Ocean animals doing fun activities at the beach'"
+                placeholder="Describe your coloring book idea... e.g., 'A magical unicorn named Luna who explores different enchanted kingdoms'"
                 value={userIdea}
                 onChange={(e) => {
                   setUserIdea(e.target.value);
-                  // Reset downstream state when idea changes
                   if (isPromptImproved) {
                     setIsPromptImproved(false);
                     setImprovedPrompt("");
                     setPages([]);
                   }
                 }}
-                className="min-h-[100px] rounded-xl"
+                className="min-h-[100px]"
               />
 
               <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => generateIdea(false)}
-                  disabled={generatingIdea}
-                  className="rounded-xl"
-                >
+                <Button variant="outline" onClick={() => generateIdea(false)} disabled={generatingIdea}>
                   {generatingIdea ? (
                     <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
                   ) : (
@@ -927,22 +758,13 @@ export default function CreateColoringBookPage() {
                 </Button>
 
                 {generatedIdea && (
-                  <Button
-                    variant="outline"
-                    onClick={() => generateIdea(true)}
-                    disabled={generatingIdea}
-                    className="rounded-xl"
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" /> Regenerate (Different)
+                  <Button variant="outline" onClick={() => generateIdea(true)} disabled={generatingIdea}>
+                    <RefreshCw className="mr-2 h-4 w-4" /> Different Idea
                   </Button>
                 )}
 
                 {userIdea.trim() && (
-                  <Button
-                    variant="ghost"
-                    onClick={() => clearIdea(false)}
-                    className="rounded-xl"
-                  >
+                  <Button variant="ghost" onClick={() => clearIdea(false)}>
                     <Trash2 className="mr-2 h-4 w-4" /> Clear
                   </Button>
                 )}
@@ -950,19 +772,13 @@ export default function CreateColoringBookPage() {
 
               {/* Generated Idea Preview */}
               {generatedIdea && (
-                <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4 space-y-3">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20 dark:border-emerald-800 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-green-600" />
-                      <span className="font-medium text-green-700 dark:text-green-400">
-                        AI Suggestion
-                      </span>
+                      <Sparkles className="h-4 w-4 text-emerald-600" />
+                      <span className="font-medium text-emerald-700 dark:text-emerald-400">AI Suggestion</span>
                     </div>
-                    <Button
-                      size="sm"
-                      onClick={useGeneratedIdea}
-                      className="rounded-lg"
-                    >
+                    <Button size="sm" onClick={useGeneratedIdea}>
                       <Check className="mr-1 h-3 w-3" /> Use This Idea
                     </Button>
                   </div>
@@ -970,7 +786,6 @@ export default function CreateColoringBookPage() {
                   {generatedIdea.title && (
                     <p className="font-semibold">{generatedIdea.title}</p>
                   )}
-
                   <p className="text-sm text-muted-foreground">{generatedIdea.idea}</p>
 
                   {generatedIdea.exampleScenes && generatedIdea.exampleScenes.length > 0 && (
@@ -987,196 +802,114 @@ export default function CreateColoringBookPage() {
                   )}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </SectionCard>
 
-          {/* Step 2: Improve Prompt (MANDATORY) */}
-          <Card className={!userIdea.trim() ? "opacity-50 pointer-events-none" : ""}>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Wand2 className="h-5 w-5" />
-                Step 2: Improve Prompt
-                {isPromptImproved && (
-                  <Badge variant="default" className="bg-green-500 ml-2">
-                    <Check className="mr-1 h-3 w-3" /> Improved
-                  </Badge>
-                )}
-              </CardTitle>
-              <CardDescription>
-                {isPromptImproved
-                  ? "Your prompt has been converted to a detailed, structured format. You can edit it below."
-                  : "Required: Convert your idea into a detailed prompt optimized for coloring page generation"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {!isPromptImproved ? (
-                <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed rounded-xl bg-muted/30">
-                  <Wand2 className="h-10 w-10 text-muted-foreground mb-3" />
-                  <p className="text-sm text-muted-foreground mb-4 text-center max-w-md">
-                    Click the button below to convert your idea into a professional, structured prompt
-                    with all the necessary coloring page constraints.
-                  </p>
-                  <Button
-                    onClick={improvePrompt}
-                    disabled={improvingPrompt || !userIdea.trim()}
-                    size="lg"
-                    className="rounded-xl"
-                  >
-                    {improvingPrompt ? (
-                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Improving...</>
-                    ) : (
-                      <><Sparkles className="mr-2 h-5 w-5" /> Improve Prompt</>
-                    )}
+          {/* Step 2: Improve Prompt */}
+          <SectionCard
+            title="Step 2: Improve Prompt"
+            description={isPromptImproved
+              ? "Your prompt has been converted to a detailed, structured format"
+              : "Convert your idea into a detailed prompt optimized for coloring pages"}
+            icon={Wand2}
+            iconColor="text-purple-500"
+            iconBg="bg-purple-500/10"
+            badge={isPromptImproved ? "Done" : undefined}
+            badgeVariant={isPromptImproved ? "default" : undefined}
+            className={!userIdea.trim() ? "opacity-50 pointer-events-none" : ""}
+          >
+            {!isPromptImproved ? (
+              <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed rounded-xl bg-muted/30">
+                <Wand2 className="h-10 w-10 text-muted-foreground mb-3" />
+                <p className="text-sm text-muted-foreground mb-4 text-center max-w-md">
+                  Convert your idea into a professional prompt with coloring page constraints
+                </p>
+                <Button onClick={improvePrompt} disabled={improvingPrompt || !userIdea.trim()} size="lg">
+                  {improvingPrompt ? (
+                    <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Improving...</>
+                  ) : (
+                    <><Sparkles className="mr-2 h-5 w-5" /> Improve Prompt</>
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Textarea
+                  value={improvedPrompt}
+                  onChange={(e) => setImprovedPrompt(e.target.value)}
+                  className="min-h-[180px] font-mono text-sm"
+                />
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={improvePrompt} disabled={improvingPrompt}>
+                    <RefreshCw className="mr-2 h-4 w-4" /> Re-improve
+                  </Button>
+                  <Button variant="ghost" onClick={() => navigator.clipboard.writeText(improvedPrompt)}>
+                    <Copy className="mr-2 h-4 w-4" /> Copy
                   </Button>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  <Textarea
-                    value={improvedPrompt}
-                    onChange={(e) => handlePromptChange(e.target.value)}
-                    className="min-h-[200px] rounded-xl font-mono text-sm"
-                  />
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={improvePrompt}
-                      disabled={improvingPrompt}
-                      className="rounded-xl"
-                    >
-                      <RefreshCw className="mr-2 h-4 w-4" /> Re-improve
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => navigator.clipboard.writeText(improvedPrompt)}
-                      className="rounded-xl"
-                    >
-                      <Copy className="mr-2 h-4 w-4" /> Copy
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            )}
+          </SectionCard>
 
           {/* Step 3: Configure Book */}
-          <Card className={!isPromptImproved ? "opacity-50 pointer-events-none" : ""}>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Settings2 className="h-5 w-5" />
-                Step 3: Configure Book
-              </CardTitle>
-              <CardDescription>
-                Choose mode, page count, and settings
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
+          <SectionCard
+            title="Step 3: Configure Book"
+            description="Choose mode, page count, and settings"
+            icon={Settings2}
+            iconColor="text-blue-500"
+            iconBg="bg-blue-500/10"
+            className={!isPromptImproved ? "opacity-50 pointer-events-none" : ""}
+          >
+            <div className="space-y-6">
               {/* Mode Selection */}
-              <div className="space-y-3">
-                <label className="text-sm font-medium">Book Type</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
+              <SubSection title="Book Type">
+                <OptionGrid columns={2}>
+                  <OptionCard
+                    title="Storybook"
+                    description="Same character on every page, story progression"
+                    icon={Book}
+                    selected={mode === "storybook"}
                     onClick={() => setMode("storybook")}
-                    className={`p-4 rounded-xl border-2 text-left transition-all ${
-                      mode === "storybook"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Book className="h-5 w-5" />
-                      <span className="font-medium">Storybook</span>
-                      {mode === "storybook" && <CheckCircle2 className="h-4 w-4 text-primary ml-auto" />}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Same character on every page, story progression
-                    </p>
-                  </button>
-
-                  <button
+                  />
+                  <OptionCard
+                    title="Theme Collection"
+                    description="Same style, varied scenes and characters"
+                    icon={Palette}
+                    selected={mode === "theme"}
                     onClick={() => setMode("theme")}
-                    className={`p-4 rounded-xl border-2 text-left transition-all ${
-                      mode === "theme"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Palette className="h-5 w-5" />
-                      <span className="font-medium">Theme Collection</span>
-                      {mode === "theme" && <CheckCircle2 className="h-4 w-4 text-primary ml-auto" />}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Same style, varied scenes and characters
-                    </p>
-                  </button>
-                </div>
-              </div>
+                  />
+                </OptionGrid>
+              </SubSection>
 
               {/* Page Count */}
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <label className="text-sm font-medium">Number of Pages</label>
-                  <span className="text-sm font-mono bg-muted px-2 rounded">{pageCount}</span>
+              <SubSection title="Number of Pages">
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Pages</span>
+                    <span className="text-sm font-mono bg-muted px-2 rounded">{pageCount}</span>
+                  </div>
+                  <Slider
+                    value={[pageCount]}
+                    onValueChange={(v) => setPageCount(v[0])}
+                    min={1}
+                    max={30}
+                    step={1}
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>1 page</span>
+                    <span>30 pages</span>
+                  </div>
                 </div>
-                <Slider
-                  value={[pageCount]}
-                  onValueChange={(v) => setPageCount(v[0])}
-                  min={1}
-                  max={30}
-                  step={1}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>1 page</span>
-                  <span>30 pages</span>
-                </div>
-              </div>
+              </SubSection>
 
               {/* Orientation */}
-              <div className="space-y-3">
-                <label className="text-sm font-medium">Page Orientation</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => setOrientation("portrait")}
-                    className={`p-3 rounded-xl border-2 text-center transition-all ${
-                      orientation === "portrait"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="flex flex-col items-center gap-1">
-                      <div className="w-6 h-8 border-2 border-current rounded-sm" />
-                      <span className="text-xs font-medium">Portrait</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setOrientation("landscape")}
-                    className={`p-3 rounded-xl border-2 text-center transition-all ${
-                      orientation === "landscape"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="flex flex-col items-center gap-1">
-                      <div className="w-8 h-6 border-2 border-current rounded-sm" />
-                      <span className="text-xs font-medium">Landscape</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setOrientation("square")}
-                    className={`p-3 rounded-xl border-2 text-center transition-all ${
-                      orientation === "square"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="flex flex-col items-center gap-1">
-                      <div className="w-6 h-6 border-2 border-current rounded-sm" />
-                      <span className="text-xs font-medium">Square</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
+              <SubSection title="Page Orientation">
+                <ChipGroup>
+                  <OptionChip label="Portrait" selected={orientation === "portrait"} onClick={() => setOrientation("portrait")} />
+                  <OptionChip label="Landscape" selected={orientation === "landscape"} onClick={() => setOrientation("landscape")} />
+                  <OptionChip label="Square" selected={orientation === "square"} onClick={() => setOrientation("square")} />
+                </ChipGroup>
+              </SubSection>
 
               {/* Advanced Settings */}
               <div className="border rounded-xl">
@@ -1190,127 +923,74 @@ export default function CreateColoringBookPage() {
 
                 {expandedSettings && (
                   <div className="p-4 pt-0 space-y-4 border-t">
-                    {/* Target Age */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Target Age Group</label>
-                      <div className="flex gap-2 flex-wrap">
+                    <SubSection title="Target Age Group">
+                      <ChipGroup>
                         {(["3-6", "6-9", "9-12", "all-ages"] as const).map((age) => (
-                          <Button
+                          <OptionChip
                             key={age}
-                            variant={storyConfig.targetAge === age ? "default" : "outline"}
-                            size="sm"
+                            label={age === "all-ages" ? "All Ages" : `Ages ${age}`}
+                            selected={storyConfig.targetAge === age}
                             onClick={() => setStoryConfig({ ...storyConfig, targetAge: age })}
-                            className="rounded-lg"
-                          >
-                            <Users className="mr-1 h-3 w-3" />
-                            {age === "all-ages" ? "All Ages" : `Ages ${age}`}
-                          </Button>
+                            icon={Users}
+                          />
                         ))}
-                      </div>
-                    </div>
+                      </ChipGroup>
+                    </SubSection>
 
-                    {/* Scene Variety */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Scene Variety</label>
-                      <div className="flex gap-2">
+                    <SubSection title="Scene Variety">
+                      <ChipGroup>
                         {(["low", "medium", "high"] as const).map((level) => (
-                          <Button
+                          <OptionChip
                             key={level}
-                            variant={storyConfig.sceneVariety === level ? "default" : "outline"}
-                            size="sm"
+                            label={level.charAt(0).toUpperCase() + level.slice(1)}
+                            selected={storyConfig.sceneVariety === level}
                             onClick={() => setStoryConfig({ ...storyConfig, sceneVariety: level })}
-                            className="rounded-lg capitalize"
-                          >
-                            <Shuffle className="mr-1 h-3 w-3" />
-                            {level}
-                          </Button>
+                            icon={Shuffle}
+                          />
                         ))}
-                      </div>
-                    </div>
+                      </ChipGroup>
+                    </SubSection>
 
-                    {/* Setting */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Setting</label>
-                      <div className="flex gap-2">
-                        <Button
-                          variant={storyConfig.settingConstraint === "indoors" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "indoors" })}
-                          className="rounded-lg"
-                        >
-                          <Home className="mr-1 h-3 w-3" /> Indoors
-                        </Button>
-                        <Button
-                          variant={storyConfig.settingConstraint === "outdoors" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "outdoors" })}
-                          className="rounded-lg"
-                        >
-                          <TreePine className="mr-1 h-3 w-3" /> Outdoors
-                        </Button>
-                        <Button
-                          variant={storyConfig.settingConstraint === "mixed" ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "mixed" })}
-                          className="rounded-lg"
-                        >
-                          <Shuffle className="mr-1 h-3 w-3" /> Mixed
-                        </Button>
-                      </div>
-                    </div>
+                    <SubSection title="Setting">
+                      <ChipGroup>
+                        <OptionChip label="Indoors" icon={Home} selected={storyConfig.settingConstraint === "indoors"} onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "indoors" })} />
+                        <OptionChip label="Outdoors" icon={TreePine} selected={storyConfig.settingConstraint === "outdoors"} onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "outdoors" })} />
+                        <OptionChip label="Mixed" icon={Shuffle} selected={storyConfig.settingConstraint === "mixed"} onClick={() => setStoryConfig({ ...storyConfig, settingConstraint: "mixed" })} />
+                      </ChipGroup>
+                    </SubSection>
                   </div>
                 )}
               </div>
 
               {/* Generate Prompts Button */}
-              <Button
-                onClick={generatePagePrompts}
-                disabled={generatingPrompts || !isPromptImproved}
-                size="lg"
-                className="w-full rounded-xl"
-              >
+              <Button onClick={generatePagePrompts} disabled={generatingPrompts || !isPromptImproved} size="lg" className="w-full">
                 {generatingPrompts ? (
                   <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Prompts...</>
                 ) : (
                   <><Sparkles className="mr-2 h-5 w-5" /> Generate {pageCount} Page Prompts</>
                 )}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </SectionCard>
 
           {/* Step 4: Review & Generate */}
           {pages.length > 0 && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <ImageIcon className="h-5 w-5" />
-                      Step 4: Review & Generate
-                    </CardTitle>
-                    <CardDescription>
-                      Edit prompts if needed, then generate images
-                    </CardDescription>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-sm">
-                      <span className="text-green-600 font-medium">{doneCount}</span>
-                      <span className="text-muted-foreground"> done</span>
-                      <span className="mx-1 text-muted-foreground">/</span>
-                      <span className="font-medium">{pages.length}</span>
-                      <span className="text-muted-foreground"> total</span>
-                    </div>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <SectionCard
+              title="Step 4: Review & Generate"
+              description="Edit prompts if needed, then generate images"
+              icon={Play}
+              iconColor="text-emerald-500"
+              iconBg="bg-emerald-500/10"
+              headerActions={
+                <Badge variant="outline" className="text-sm py-1 px-3">
+                  {doneCount} done / {pages.length} total
+                </Badge>
+              }
+            >
+              <div className="space-y-4">
                 {/* Action Buttons */}
                 <div className="flex gap-2 flex-wrap">
-                  <Button
-                    onClick={generateAllImages}
-                    disabled={isGenerating || pendingCount === 0}
-                    className="rounded-xl"
-                  >
+                  <Button onClick={generateAllImages} disabled={isGenerating || pendingCount === 0}>
                     {isGenerating ? (
                       <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
                     ) : (
@@ -1320,280 +1000,68 @@ export default function CreateColoringBookPage() {
 
                   {doneCount > 0 && (
                     <>
-                      {/* Enhance All button */}
-                      <Button
-                        variant="outline"
-                        onClick={enhanceAllPages}
-                        disabled={isEnhancing || enhancedCount === doneCount}
-                        className="rounded-xl"
-                      >
+                      <Button variant="outline" onClick={enhanceAllPages} disabled={isEnhancing || enhancedCount === doneCount}>
                         {isEnhancing ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Enhancing {enhancingPageId ? `(${enhancingPageId})` : "..."}
-                          </>
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Enhancing...</>
                         ) : enhancedCount === doneCount ? (
-                          <>
-                            <Sparkles className="mr-2 h-4 w-4 text-amber-500" />
-                            All Enhanced ✓
-                          </>
+                          <><Sparkles className="mr-2 h-4 w-4 text-amber-500" /> All Enhanced</>
                         ) : (
-                          <>
-                            <Sparkles className="mr-2 h-4 w-4" />
-                            Enhance All {enhancedCount > 0 && `(${enhancedCount}/${doneCount})`}
-                          </>
+                          <><Sparkles className="mr-2 h-4 w-4" /> Enhance All</>
                         )}
                       </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={downloadAll}
-                        className="rounded-xl"
-                      >
-                        <Download className="mr-2 h-4 w-4" /> Download All ({doneCount})
-                      </Button>
-
-                      <Button
-                        variant="default"
-                        onClick={() => setShowExportModal(true)}
-                        className="rounded-xl"
-                      >
-                        <FileDown className="mr-2 h-4 w-4" /> Export PDF
+                      <Button variant="outline" onClick={downloadAll}>
+                        <Download className="mr-2 h-4 w-4" /> Download All
                       </Button>
                     </>
                   )}
 
-                  <Button
-                    variant="outline"
-                    onClick={generatePagePrompts}
-                    disabled={generatingPrompts}
-                    className="rounded-xl"
-                  >
+                  <Button variant="outline" onClick={generatePagePrompts} disabled={generatingPrompts}>
                     <RefreshCw className="mr-2 h-4 w-4" /> Regenerate Prompts
                   </Button>
                 </div>
 
                 {/* Pages Grid */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <PreviewGrid columns={3}>
                   {pages.map((page) => (
-                    <div
+                    <PreviewCard
                       key={page.page}
-                      className="border rounded-xl overflow-hidden bg-card"
-                    >
-                      {/* Page Header */}
-                      <div className="p-3 border-b bg-muted/30 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          {getStatusIcon(page.status)}
-                          <span className="font-medium text-sm">Page {page.page}</span>
-                          {getStatusBadge(page.status)}
-                        </div>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => toggleEditPage(page.page)}
-                          >
-                            <Edit3 className="h-3 w-3" />
-                          </Button>
-                          {(page.status === "pending" || page.status === "failed") && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => generateSinglePage(page.page)}
-                              disabled={isGenerating}
-                            >
-                              <Play className="h-3 w-3" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Content */}
-                      <div className="p-3">
-                        {page.status === "done" && page.imageBase64 ? (
-                          <div className="space-y-2">
-                            {/* Enhanced badge */}
-                            {page.enhanceStatus === "enhanced" && (
-                              <div className="flex items-center justify-between">
-                                <Badge variant="outline" className="text-xs bg-amber-50 border-amber-200 text-amber-700">
-                                  <Sparkles className="mr-1 h-3 w-3" /> Enhanced
-                                </Badge>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 text-xs"
-                                  onClick={() => togglePageVersion(page.page)}
-                                >
-                                  {page.activeVersion === "enhanced" ? "View Original" : "View Enhanced"}
-                                </Button>
-                              </div>
-                            )}
-                            
-                            {/* Image preview - shows enhanced or original based on activeVersion */}
-                            <div
-                              className="aspect-[2/3] bg-white rounded-lg border overflow-hidden cursor-pointer relative"
-                              onClick={() => {
-                                const img = page.activeVersion === "enhanced" && page.enhancedImageBase64
-                                  ? page.enhancedImageBase64
-                                  : page.imageBase64;
-                                setPreviewImage(`data:image/png;base64,${img}`);
-                              }}
-                            >
-                              <img
-                                src={`data:image/png;base64,${
-                                  page.activeVersion === "enhanced" && page.enhancedImageBase64
-                                    ? page.enhancedImageBase64
-                                    : page.imageBase64
-                                }`}
-                                alt={`Page ${page.page}`}
-                                className="w-full h-full object-contain"
-                              />
-                              {page.enhanceStatus === "enhancing" && (
-                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                                  <Loader2 className="h-8 w-8 animate-spin text-white" />
-                                </div>
-                              )}
-                            </div>
-                            
-                            {/* Action buttons */}
-                            <div className="flex gap-1">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex-1 rounded-lg text-xs"
-                                onClick={() => {
-                                  const img = page.activeVersion === "enhanced" && page.enhancedImageBase64
-                                    ? page.enhancedImageBase64
-                                    : page.imageBase64;
-                                  setPreviewImage(`data:image/png;base64,${img}`);
-                                }}
-                              >
-                                <Eye className="mr-1 h-3 w-3" /> View
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex-1 rounded-lg text-xs"
-                                onClick={() => {
-                                  const img = page.activeVersion === "enhanced" && page.enhancedImageBase64
-                                    ? page.enhancedImageBase64
-                                    : page.imageBase64;
-                                  const link = document.createElement("a");
-                                  link.href = `data:image/png;base64,${img}`;
-                                  link.download = `coloring-page-${page.page}${page.activeVersion === "enhanced" ? "-enhanced" : ""}.png`;
-                                  link.click();
-                                }}
-                              >
-                                <Download className="mr-1 h-3 w-3" /> Save
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-lg text-xs"
-                                onClick={() => generateSinglePage(page.page)}
-                                disabled={isGenerating}
-                              >
-                                <RefreshCw className="h-3 w-3" />
-                              </Button>
-                            </div>
-                            
-                            {/* Enhance button (if not enhanced yet) */}
-                            {page.enhanceStatus !== "enhanced" && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full rounded-lg text-xs"
-                                onClick={() => enhanceSinglePage(page.page)}
-                                disabled={page.enhanceStatus === "enhancing" || isEnhancing}
-                              >
-                                {page.enhanceStatus === "enhancing" ? (
-                                  <>
-                                    <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Enhancing...
-                                  </>
-                                ) : page.enhanceStatus === "failed" ? (
-                                  <>
-                                    <RefreshCw className="mr-1 h-3 w-3" /> Retry Enhance
-                                  </>
-                                ) : (
-                                  <>
-                                    <Sparkles className="mr-1 h-3 w-3" /> Enhance Quality
-                                  </>
-                                )}
-                              </Button>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="text-xs font-medium text-muted-foreground">
-                              {page.title}
-                            </div>
-                            {page.isEditing ? (
-                              <div className="space-y-2">
-                                <Textarea
-                                  value={page.prompt}
-                                  onChange={(e) => setPages(prev => prev.map(p =>
-                                    p.page === page.page ? { ...p, prompt: e.target.value } : p
-                                  ))}
-                                  className="text-xs min-h-[100px] rounded-lg"
-                                />
-                                <div className="flex gap-1">
-                                  <Button
-                                    size="sm"
-                                    onClick={() => updatePagePrompt(page.page, page.prompt)}
-                                    className="flex-1 rounded-lg text-xs"
-                                  >
-                                    Save
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => toggleEditPage(page.page)}
-                                    className="rounded-lg text-xs"
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="text-xs text-muted-foreground line-clamp-4">
-                                {page.sceneDescription || page.prompt.slice(0, 150)}...
-                              </div>
-                            )}
-                            {page.error && (
-                              <div className="text-xs text-red-500">
-                                Error: {page.error}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                      index={page.page}
+                      label={`Page ${page.page}`}
+                      imageUrl={page.imageBase64 
+                        ? `data:image/png;base64,${page.activeVersion === "enhanced" && page.enhancedImageBase64 ? page.enhancedImageBase64 : page.imageBase64}`
+                        : undefined}
+                      status={getPreviewStatus(page)}
+                      isEnhanced={page.enhanceStatus === "enhanced"}
+                      error={page.error}
+                      onView={() => {
+                        const img = page.activeVersion === "enhanced" && page.enhancedImageBase64 ? page.enhancedImageBase64 : page.imageBase64;
+                        if (img) setPreviewImage(`data:image/png;base64,${img}`);
+                      }}
+                      onRegenerate={() => generateSinglePage(page.page)}
+                      onEnhance={page.status === "done" && page.enhanceStatus !== "enhanced" ? () => enhanceSinglePage(page.page) : undefined}
+                    />
                   ))}
-                </div>
-              </CardContent>
-            </Card>
+                </PreviewGrid>
+              </div>
+            </SectionCard>
           )}
 
           {/* Info Card */}
-          <Card className="bg-muted/30 border-dashed">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-3">
-                <Sparkles className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                <div>
-                  <p className="font-medium text-sm">How it works</p>
-                  <ol className="text-xs text-muted-foreground mt-1 space-y-1 list-decimal list-inside">
-                    <li>Enter your book idea or generate one with AI</li>
-                    <li>Click "Improve Prompt" to create a detailed, structured prompt (required)</li>
-                    <li>Choose Storybook (same character) or Theme (varied scenes) mode</li>
-                    <li>Generate prompts and review/edit them</li>
-                    <li>Generate all images at once or one by one</li>
-                  </ol>
-                </div>
+          <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4">
+            <div className="flex items-start gap-3">
+              <Sparkles className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium text-sm">How it works</p>
+                <ol className="text-xs text-muted-foreground mt-1 space-y-1 list-decimal list-inside">
+                  <li>Enter your book idea or generate one with AI</li>
+                  <li>Click "Improve Prompt" to create a detailed, structured prompt</li>
+                  <li>Choose Storybook or Theme Collection mode</li>
+                  <li>Generate prompts and review them</li>
+                  <li>Generate all images or one by one</li>
+                </ol>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       </main>
 
@@ -1635,4 +1103,3 @@ export default function CreateColoringBookPage() {
     </>
   );
 }
-

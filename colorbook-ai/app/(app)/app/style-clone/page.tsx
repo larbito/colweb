@@ -71,11 +71,11 @@ interface PageIdea {
   enhancedImageBase64?: string;
 }
 
-const STEPS: Step[] = [
-  { id: 1, label: "Upload Reference", description: "Provide a style sample" },
-  { id: 2, label: "Extract Style", description: "AI analyzes your image" },
-  { id: 3, label: "Plan Pages", description: "Describe your pages" },
-  { id: 4, label: "Generate", description: "Create your book" },
+const STEPS = [
+  { step: 1 as const, label: "Upload Reference", description: "Provide a style sample" },
+  { step: 2 as const, label: "Extract Style", description: "AI analyzes your image" },
+  { step: 3 as const, label: "Plan Pages", description: "Describe your pages" },
+  { step: 4 as const, label: "Generate", description: "Create your book" },
 ];
 
 const EXAMPLE_IDEAS = [
@@ -721,7 +721,7 @@ export default function StyleClonePage() {
                               className="border-0 p-0 h-auto text-sm focus-visible:ring-0 bg-transparent"
                           />
                         </div>
-                          <StatusBadge status={page.status} />
+                          <StatusBadge stage={page.status as any} />
                           <Button
                             variant="ghost"
                             size="sm"
@@ -802,10 +802,12 @@ export default function StyleClonePage() {
                 {/* Progress */}
                 {(isGenerating || doneCount > 0) && (
                   <ProgressPanel
-                    phase={isGenerating ? "generating" : doneCount === pageIdeas.length ? "complete" : "idle"}
-                    current={generationProgress.current}
-                    total={generationProgress.total}
-                    estimatedSeconds={remainingSeconds}
+                    progress={{
+                      totalItems: generationProgress.total,
+                      completedItems: generationProgress.current,
+                      phase: isGenerating ? "generating" : doneCount === pageIdeas.length ? "complete" : "idle",
+                      estimatedSecondsRemaining: remainingSeconds,
+                    }}
                   />
                 )}
 
@@ -859,7 +861,7 @@ export default function StyleClonePage() {
                       <div className="p-2 border-t">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium">Page {idx + 1}</span>
-                          <StatusBadge status={page.status} />
+                          <StatusBadge stage={page.status as any} />
                         </div>
                         <p className="text-[10px] text-muted-foreground line-clamp-1 mt-1">
                           {page.description}

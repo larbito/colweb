@@ -1148,11 +1148,13 @@ export default function QuoteBookPage() {
                 {/* Progress Bar - Show when any operation is in progress */}
                 {(isGenerating || isEnhancing || isProcessing) && (
                   <ProgressPanel
-                    phase={isGenerating ? "generating" : isEnhancing ? "enhancing" : "processing"}
-                    current={isGenerating ? doneCount : isEnhancing ? enhancedCount : processedCount}
-                    total={pages.length}
-                    label={isGenerating ? "Generating images..." : isEnhancing ? "Enhancing for print..." : "Processing..."}
-                    estimatedSeconds={(pages.length - (isGenerating ? doneCount : isEnhancing ? enhancedCount : processedCount)) * (isGenerating ? 30 : isEnhancing ? 15 : 5)}
+                    progress={{
+                      totalItems: pages.length,
+                      completedItems: isGenerating ? doneCount : isEnhancing ? enhancedCount : processedCount,
+                      phase: isGenerating ? "generating" : isEnhancing ? "enhancing" : "processing",
+                      message: isGenerating ? "Generating images..." : isEnhancing ? "Enhancing for print..." : "Processing...",
+                      estimatedSecondsRemaining: (pages.length - (isGenerating ? doneCount : isEnhancing ? enhancedCount : processedCount)) * (isGenerating ? 30 : isEnhancing ? 15 : 5),
+                    }}
                   />
                 )}
 
@@ -1241,24 +1243,24 @@ export default function QuoteBookPage() {
                           <div className="flex flex-col items-center justify-center h-full gap-2">
                             <Loader2 className="h-8 w-8 animate-spin text-primary" />
                             <span className="text-xs text-muted-foreground">Generating...</span>
-                            <StatusBadge status="generating" />
+                            <StatusBadge stage="generating" />
                           </div>
                         ) : page.enhanceStatus === "enhancing" ? (
                           <div className="flex flex-col items-center justify-center h-full gap-2">
                             <Sparkles className="h-8 w-8 animate-pulse text-purple-500" />
                             <span className="text-xs text-muted-foreground">Enhancing...</span>
-                            <StatusBadge status="enhancing" />
+                            <StatusBadge stage="enhancing" />
                           </div>
                         ) : page.finalLetterStatus === "processing" ? (
                           <div className="flex flex-col items-center justify-center h-full gap-2">
                             <PanelTop className="h-8 w-8 animate-pulse text-orange-500" />
                             <span className="text-xs text-muted-foreground">Processing...</span>
-                            <StatusBadge status="processing" />
+                            <StatusBadge stage="processing" />
                           </div>
                         ) : (
                           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                             <Quote className="h-10 w-10 opacity-20" />
-                            <StatusBadge status="queued" />
+                            <StatusBadge stage="queued" />
                           </div>
                         )}
                       </div>

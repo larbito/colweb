@@ -305,6 +305,9 @@ export function createInitialJobProgress(totalPages: number): JobProgress {
 }
 
 // Helper to update page stage
+// Alias for backwards compatibility
+export const StatusBadge = PageStatusBadge;
+
 export function updatePageStage(
   progress: JobProgress, 
   pageNum: number, 
