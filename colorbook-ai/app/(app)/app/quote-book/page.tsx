@@ -1065,7 +1065,7 @@ export default function QuoteBookPage() {
                     value={[pageCount]}
                     onValueChange={([value]) => setPageCount(value)}
                     min={1}
-                    max={30}
+                    max={80}
                     step={1}
                     className="flex-1"
                   />

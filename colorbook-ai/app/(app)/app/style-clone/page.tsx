@@ -52,6 +52,19 @@ import { cn } from "@/lib/utils";
 // Types
 type StyleCloneStep = 1 | 2 | 3 | 4;
 
+interface StyleContract {
+  styleSummary: string;
+  styleContractText: string;
+  forbiddenList: string[];
+  recommendedLineThickness: "thin" | "medium" | "bold";
+  recommendedComplexity: "simple" | "medium" | "detailed";
+  outlineRules: string;
+  backgroundRules: string;
+  compositionRules: string;
+  eyeRules: string;
+  extractedThemeGuess: string;
+}
+
 interface ExtractedStyle {
   artStyle: string;
   lineWeight: string;
@@ -61,6 +74,8 @@ interface ExtractedStyle {
   colorPalette: string;
   uniqueElements: string[];
   summary: string;
+  // Full style contract for debugging
+  styleContract?: StyleContract;
 }
 
 interface PageIdea {
@@ -70,6 +85,32 @@ interface PageIdea {
   status: "pending" | "generating" | "done" | "failed";
   imageBase64?: string;
   enhancedImageBase64?: string;
+  debug?: {
+    promptHash?: string;
+    finalPromptPreview?: string;
+    referenceIncluded?: boolean;
+    anchorIncluded?: boolean;
+    passedGates?: boolean;
+    metrics?: Record<string, unknown>;
+  };
+}
+
+interface GenerationDebugInfo {
+  requestId?: string;
+  imageModel?: string;
+  textModel?: string;
+  promptLength?: number;
+  finalPromptFull?: string;
+  referenceIncluded?: boolean;
+  anchorIncluded?: boolean;
+  metrics?: Record<string, unknown>;
+  thresholds?: Record<string, unknown>;
+  attempts?: Array<{
+    attempt: number;
+    passed: boolean;
+    error?: string;
+    metrics?: Record<string, unknown>;
+  }>;
 }
 
 const STEPS: Array<{ step: Step; label: string; description?: string }> = [
@@ -116,6 +157,11 @@ export default function StyleClonePage() {
   // Preview
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showStyleDetails, setShowStyleDetails] = useState(false);
+  
+  // Debug panel
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [lastDebugInfo, setLastDebugInfo] = useState<GenerationDebugInfo | null>(null);
+  const [styleContract, setStyleContract] = useState<StyleContract | null>(null);
 
   // ==================== STEP NAVIGATION ====================
   
@@ -183,7 +229,7 @@ export default function StyleClonePage() {
       const response = await fetch("/api/style-clone/extract-style", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: referenceImage }),
+        body: JSON.stringify({ referenceImageBase64: referenceImage }),
       });
 
       const data = await response.json();
@@ -192,9 +238,31 @@ export default function StyleClonePage() {
         throw new Error(data.error || "Failed to extract style");
       }
 
-      setExtractedStyle(data.style);
+      // Store the full style contract for debugging
+      const contract = data.styleContract as StyleContract;
+      setStyleContract(contract);
+      
+      // Map to ExtractedStyle for backward compatibility
+      const style: ExtractedStyle = {
+        artStyle: contract.styleSummary,
+        lineWeight: contract.recommendedLineThickness,
+        detailLevel: contract.recommendedComplexity,
+        composition: contract.compositionRules,
+        mood: contract.styleContractText.substring(0, 100),
+        colorPalette: "black-and-white",
+        uniqueElements: contract.forbiddenList.slice(0, 5),
+        summary: contract.styleSummary,
+        styleContract: contract,
+      };
+      
+      setExtractedStyle(style);
       setCurrentStep(3);
-      toast.success("Style extracted successfully!");
+      toast.success("Style extracted! Vision model analyzed your reference image.");
+      
+      // Show debug info
+      if (data.debug) {
+        console.log("[Style Clone] Extraction debug:", data.debug);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to extract style");
     } finally {
@@ -288,18 +356,42 @@ export default function StyleClonePage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            prompt: page.prompt || page.description,
-            style: extractedStyle,
-            pageNumber: i + 1,
+            pageIndex: i + 1,
+            scenePrompt: page.prompt || page.description,
+            styleContract: styleContract,
+            themePack: null,
+            complexity: styleContract?.recommendedComplexity || "medium",
+            lineThickness: styleContract?.recommendedLineThickness || "medium",
+            sizePreset: "8.5x11",
+            mode: "collection",
+            referenceImageBase64: referenceImage, // Include reference for conditioning info
           }),
         });
 
         const data = await response.json();
+        
+        // Store debug info from the latest generation
+        if (data.debug) {
+          setLastDebugInfo(data.debug);
+          console.log(`[Style Clone] Page ${i + 1} debug:`, data.debug);
+        }
 
         if (response.ok && data.imageBase64) {
           setPageIdeas(prev => prev.map(p => 
             p.id === page.id 
-              ? { ...p, status: "done", imageBase64: data.imageBase64 }
+              ? { 
+                  ...p, 
+                  status: "done", 
+                  imageBase64: data.imageBase64,
+                  debug: {
+                    promptHash: data.debug?.promptHash,
+                    finalPromptPreview: data.debug?.finalPromptPreview,
+                    referenceIncluded: data.debug?.referenceIncluded,
+                    anchorIncluded: data.debug?.anchorIncluded,
+                    passedGates: data.passedGates,
+                    metrics: data.debug?.metrics,
+                  },
+                }
               : p
           ));
           successCount++;
@@ -681,14 +773,14 @@ export default function StyleClonePage() {
                           className="h-10 rounded-xl"
                         />
                       </div>
-                      <div>
+                        <div>
                         <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Number of Pages</label>
                         <div className="flex items-center gap-3">
                           <Slider
                             value={[pageCount]}
                             onValueChange={([v]) => setPageCount(v)}
                             min={5}
-                            max={30}
+                            max={80}
                             step={1}
                             className="flex-1"
                           />
@@ -929,6 +1021,184 @@ export default function StyleClonePage() {
           title="Page Preview"
           pageNumber={1}
         />
+      )}
+
+      {/* Debug Panel - Collapsible */}
+      <div className="fixed bottom-4 right-4 z-50">
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-xl shadow-lg"
+          onClick={() => setShowDebugPanel(!showDebugPanel)}
+        >
+          <Info className="h-4 w-4 mr-2" />
+          Debug
+          {showDebugPanel ? <ChevronDown className="ml-2 h-4 w-4" /> : <ChevronUp className="ml-2 h-4 w-4" />}
+        </Button>
+      </div>
+
+      {/* Debug Panel Content */}
+      {showDebugPanel && (
+        <div className="fixed bottom-16 right-4 z-50 w-[500px] max-h-[60vh] overflow-auto bg-card border border-border rounded-2xl shadow-2xl">
+          <div className="sticky top-0 p-4 border-b border-border bg-card flex items-center justify-between">
+            <h3 className="font-semibold text-sm flex items-center gap-2">
+              <Info className="h-4 w-4 text-primary" />
+              Generation Debug Info
+            </h3>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowDebugPanel(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          
+          <div className="p-4 space-y-4 text-xs">
+            {/* Style Contract Info */}
+            {styleContract && (
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm text-primary">Style Contract</h4>
+                <div className="bg-muted/50 rounded-lg p-3 space-y-2">
+                  <div>
+                    <span className="text-muted-foreground">Summary:</span>
+                    <p className="font-mono">{styleContract.styleSummary}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Line Thickness:</span>
+                    <Badge variant="secondary" className="ml-2">{styleContract.recommendedLineThickness}</Badge>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Complexity:</span>
+                    <Badge variant="secondary" className="ml-2">{styleContract.recommendedComplexity}</Badge>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Eye Rules:</span>
+                    <p className="font-mono text-[10px]">{styleContract.eyeRules}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Theme Guess:</span>
+                    <p className="font-mono text-[10px] line-clamp-3">{styleContract.extractedThemeGuess}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Last Generation Debug */}
+            {lastDebugInfo && (
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm text-primary">Last Generation</h4>
+                <div className="bg-muted/50 rounded-lg p-3 space-y-2">
+                  <div className="flex gap-4">
+                    <div>
+                      <span className="text-muted-foreground">Image Model:</span>
+                      <Badge variant="outline" className="ml-2">{lastDebugInfo.imageModel}</Badge>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Text Model:</span>
+                      <Badge variant="outline" className="ml-2">{lastDebugInfo.textModel}</Badge>
+                    </div>
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Reference:</span>
+                      {lastDebugInfo.referenceIncluded ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-yellow-500" />
+                      )}
+                      <span>{lastDebugInfo.referenceIncluded ? "Included" : "Not included"}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Anchor:</span>
+                      {lastDebugInfo.anchorIncluded ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span>{lastDebugInfo.anchorIncluded ? "Included" : "Not included"}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Prompt Length:</span>
+                    <span className="font-mono ml-2">{lastDebugInfo.promptLength} chars</span>
+                  </div>
+                  
+                  {/* Quality Metrics */}
+                  {lastDebugInfo.metrics && (
+                    <div>
+                      <span className="text-muted-foreground">Quality Metrics:</span>
+                      <pre className="font-mono text-[10px] mt-1 bg-background p-2 rounded overflow-auto max-h-20">
+                        {JSON.stringify(lastDebugInfo.metrics, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {/* Thresholds */}
+                  {lastDebugInfo.thresholds && (
+                    <div>
+                      <span className="text-muted-foreground">Thresholds:</span>
+                      <pre className="font-mono text-[10px] mt-1 bg-background p-2 rounded">
+                        {JSON.stringify(lastDebugInfo.thresholds, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {/* Attempts */}
+                  {lastDebugInfo.attempts && lastDebugInfo.attempts.length > 0 && (
+                    <div>
+                      <span className="text-muted-foreground">Attempts ({lastDebugInfo.attempts.length}):</span>
+                      <div className="mt-1 space-y-1">
+                        {lastDebugInfo.attempts.map((attempt, idx) => (
+                          <div key={idx} className={cn(
+                            "flex items-center gap-2 px-2 py-1 rounded text-[10px]",
+                            attempt.passed ? "bg-green-500/10" : "bg-red-500/10"
+                          )}>
+                            <span>#{attempt.attempt}</span>
+                            {attempt.passed ? (
+                              <CheckCircle2 className="h-3 w-3 text-green-500" />
+                            ) : (
+                              <AlertCircle className="h-3 w-3 text-red-500" />
+                            )}
+                            {attempt.error && <span className="text-red-400 truncate">{attempt.error}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Final Prompt Preview */}
+                  {lastDebugInfo.finalPromptFull && (
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Final Prompt:</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-[10px]"
+                          onClick={() => {
+                            navigator.clipboard.writeText(lastDebugInfo.finalPromptFull || "");
+                            toast.success("Prompt copied!");
+                          }}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copy
+                        </Button>
+                      </div>
+                      <pre className="font-mono text-[10px] mt-1 bg-background p-2 rounded overflow-auto max-h-40 whitespace-pre-wrap">
+                        {lastDebugInfo.finalPromptFull}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* No debug info yet */}
+            {!styleContract && !lastDebugInfo && (
+              <div className="text-center text-muted-foreground py-8">
+                <HelpCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>Debug info will appear here after style extraction and generation.</p>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </main>
   );

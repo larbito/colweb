@@ -10,8 +10,8 @@
 // ============================================================
 
 export const MAX_BOOKS_PER_BATCH = 10;
-export const MAX_PAGES_PER_BOOK = 40;
-export const DEFAULT_PAGES_PER_BOOK = 10;
+export const MAX_PAGES_PER_BOOK = 80;
+export const DEFAULT_PAGES_PER_BOOK = 15;
 
 export type BookType = "coloring_scenes" | "quote_text";
 export type BookMode = "storybook" | "theme_book"; // storybook = same character, theme_book = different scenes/characters

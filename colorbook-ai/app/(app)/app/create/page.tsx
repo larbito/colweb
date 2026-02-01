@@ -892,12 +892,12 @@ export default function CreateColoringBookPage() {
                     value={[pageCount]}
                     onValueChange={(v) => setPageCount(v[0])}
                     min={1}
-                    max={30}
+                    max={80}
                     step={1}
                   />
                   <div className="flex justify-between text-xs text-muted-foreground">
                     <span>1 page</span>
-                    <span>30 pages</span>
+                    <span>80 pages</span>
                   </div>
                 </div>
               </SubSection>
