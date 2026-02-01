@@ -17,6 +17,21 @@
 export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024";
 export type Orientation = "portrait" | "landscape" | "square";
 
+// US Letter dimensions at 300 DPI
+export const US_LETTER_PRESET = {
+  name: "US Letter",
+  aspectRatio: 8.5 / 11, // 0.7727
+  exportPixels: { width: 2550, height: 3300 }, // 300 DPI
+  previewPixels: { width: 1275, height: 1650 }, // 150 DPI
+  thumbPixels: { width: 255, height: 330 }, // 30 DPI
+};
+
+// Model size that's closest to US Letter ratio (0.7727)
+// 1024x1536 = 0.6666 ratio (too tall)
+// 1024x1024 = 1.0 ratio (square)
+// Best available: 1024x1536 and compose to fill
+export const BEST_LETTER_SIZE: ImageSize = "1024x1536";
+
 export function getOrientationFromSize(size: ImageSize): Orientation {
   if (size === "1536x1024") return "landscape";
   if (size === "1024x1536") return "portrait";
@@ -27,6 +42,11 @@ export function getSizeFromOrientation(orientation: Orientation): ImageSize {
   if (orientation === "landscape") return "1536x1024";
   if (orientation === "portrait") return "1024x1536";
   return "1024x1024";
+}
+
+export function getModelSizeForLetterPortrait(): ImageSize {
+  // Use 1024x1536 and enforce composition that fills the page
+  return BEST_LETTER_SIZE;
 }
 
 // ============================================================
@@ -117,6 +137,45 @@ OVERALL:
 - Scene fills 92-97% of total canvas height`;
 
 /**
+ * STRICT PAGE COVERAGE CONTRACT - ensures 100% page utilization
+ * This is the strongest constraint for full-page coverage
+ */
+export const PAGE_COVERAGE_CONTRACT = `
+
+=== PAGE COVERAGE CONTRACT (MANDATORY - CRITICAL) ===
+
+This is a FULL-PAGE coloring page for US Letter (8.5x11 inches). The artwork MUST fill the ENTIRE page.
+
+VERTICAL COVERAGE (CRITICAL):
+- Main subject and scene must occupy 90-95% of canvas HEIGHT
+- Subject should NOT float in the middle with empty space above/below
+- Ink/lines must extend from near the TOP edge to near the BOTTOM edge
+
+BOTTOM FILL (CRITICAL):
+- Foreground elements MUST reach the bottom margin (no empty bottom strip)
+- Include 2-4 LARGE foreground objects overlapping the bottom edge:
+  * Indoor: rug edge, floor tiles, table edge, bed edge, countertop, carpet, toy on floor
+  * Outdoor: grass, path, road, dirt, sand, water edge, rocks, flowers, leaves
+- Ground/floor texture should fill the lower 15-20% of the canvas
+
+PERSPECTIVE/FRAMING:
+- Use slightly closer/zoomed-in framing
+- Camera positioned to capture subject filling the frame
+- Subject in lower-middle area of composition (NOT centered vertically)
+
+BACKGROUND FILL:
+- Background should include simplified environment lines extending down
+- NO large blank areas - fill with relevant scene elements
+- Floorboards, tiles, grass blades, carpet texture, etc.
+
+NEGATIVE RULES:
+- NO "floating" subject with big empty space below
+- NO generic repeated clutter (don't add random rocks/balls/leaves unless scene-appropriate)
+- Page-to-page: avoid repeating the same bottom filler props
+
+The final image should look like a page from a professional coloring book where EVERY part of the page has something to color.`;
+
+/**
  * Additional landscape-specific framing (when size is 1536x1024)
  */
 export const LANDSCAPE_EXTRA_CONSTRAINTS = `
@@ -200,7 +259,26 @@ export const NEGATIVE_PROMPT_LIST = [
   "blank space",
   "floating subject",
   "small centered artwork",
+  "empty bottom strip",
+  "large white areas",
+  "subject floating in space",
+  "tiny subject with empty background",
+  "repeated generic clutter",
+  "random rocks at bottom",
+  "random balls scattered",
 ];
+
+/**
+ * Coverage retry reinforcement - used when coverage validation fails
+ */
+export const COVERAGE_RETRY_REINFORCEMENT = `
+CRITICAL COVERAGE FIX:
+- Zoom in 20% closer to subject
+- Enlarge the main subject to fill more of the frame
+- Add a LARGE foreground floor/ground element that reaches the bottom edge
+- Reduce sky/ceiling/empty space above the subject
+- Fill the bottom 20% with ground texture and 3+ foreground props
+- The bottom edge MUST have visible content (not white space)`;
 
 // ============================================================
 // REQUIRED VALIDATION PHRASES
@@ -253,15 +331,17 @@ export function buildFinalColoringPrompt(
     isStorybookMode?: boolean;
     characterConsistencyBlock?: string;
     extraBottomReinforcement?: boolean; // Add extra bottom-fill emphasis (for retries)
+    extraCoverageReinforcement?: boolean; // Add extra coverage emphasis (for retries)
   } = {}
 ): string {
   const { 
     includeNegativeBlock = true, 
-    maxLength = 4000, 
+    maxLength = 4500, // Increased to accommodate PAGE_COVERAGE_CONTRACT
     size = "1024x1536",
     isStorybookMode = false,
     characterConsistencyBlock,
     extraBottomReinforcement = false,
+    extraCoverageReinforcement = false,
   } = options;
 
   const parts: string[] = [];
@@ -280,8 +360,11 @@ export function buildFinalColoringPrompt(
   // Add FILL CANVAS constraints (stronger framing) (always)
   parts.push(FILL_CANVAS_CONSTRAINTS);
 
-  // Add FOREGROUND / BOTTOM FILL constraints (NEW - prevents empty bottom)
+  // Add FOREGROUND / BOTTOM FILL constraints (prevents empty bottom)
   parts.push(FOREGROUND_BOTTOM_FILL_CONSTRAINTS);
+
+  // Add PAGE COVERAGE CONTRACT (CRITICAL - ensures full page utilization)
+  parts.push(PAGE_COVERAGE_CONTRACT);
 
   // Add orientation-specific framing
   const orientation = getOrientationFromSize(size);
@@ -296,6 +379,11 @@ export function buildFinalColoringPrompt(
   // Add extra bottom-fill reinforcement for retries
   if (extraBottomReinforcement) {
     parts.push(BOTTOM_FILL_RETRY_REINFORCEMENT);
+  }
+
+  // Add extra coverage reinforcement for retries
+  if (extraCoverageReinforcement) {
+    parts.push(COVERAGE_RETRY_REINFORCEMENT);
   }
 
   // Add STRICT OUTLINE-ONLY constraints (always - most important)
@@ -448,7 +536,7 @@ export async function validateColoringPageImage(
  */
 export function getRetryReinforcement(
   attemptNumber: number,
-  issues?: ImageValidationResult["issues"]
+  issues?: ImageValidationResult["issues"] & { hasCoverageIssue?: boolean }
 ): string {
   const reinforcements: string[] = [];
   
@@ -467,6 +555,11 @@ export function getRetryReinforcement(
   // Add bottom fill reinforcement if needed
   if (issues?.hasEmptyBottom) {
     reinforcements.push(BOTTOM_FILL_RETRY_REINFORCEMENT);
+  }
+  
+  // Add coverage reinforcement if coverage is low
+  if (issues?.hasCoverageIssue) {
+    reinforcements.push(COVERAGE_RETRY_REINFORCEMENT);
   }
   
   return reinforcements.join("\n");

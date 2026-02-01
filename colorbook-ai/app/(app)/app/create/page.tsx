@@ -789,6 +789,87 @@ export default function CreateColoringBookPage() {
     toast.success(`Downloading ${donePages.length} images...`);
   };
 
+  // PDF Export settings state
+  const [pdfSettings, setPdfSettings] = useState({
+    includeTitlePage: true,
+    includeCopyright: true,
+    includePageNumbers: true,
+    authorName: "",
+  });
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+
+  const generatePdfPreview = async () => {
+    const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
+    if (donePages.length === 0) {
+      toast.error("No pages to export");
+      return;
+    }
+
+    setIsExporting(true);
+    
+    try {
+      const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
+      
+      const response = await fetch("/api/export/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: bookTitle,
+          author: pdfSettings.authorName,
+          coloringPages: donePages.map(p => ({
+            page: p.page,
+            imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
+          })),
+          pageSize: "letter", // Always US Letter
+          orientation: orientation === "landscape" ? "landscape" : "portrait",
+          margin: 0.25,
+          returnBinary: true,
+          insertBlankPages: false,
+          includeBelongsTo: false,
+          includeTitlePage: pdfSettings.includeTitlePage,
+          includeCopyright: pdfSettings.includeCopyright,
+          includePageNumbers: pdfSettings.includePageNumbers,
+          includeCreatedWith: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to generate PDF");
+      }
+
+      // Create blob URL for preview
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      
+      // Clean up previous preview URL
+      if (pdfPreviewUrl) {
+        URL.revokeObjectURL(pdfPreviewUrl);
+      }
+      
+      setPdfPreviewUrl(url);
+      toast.success("PDF preview generated!");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate PDF");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const downloadPdf = () => {
+    if (!pdfPreviewUrl) {
+      toast.error("Generate preview first");
+      return;
+    }
+    
+    const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
+    const link = document.createElement("a");
+    link.href = pdfPreviewUrl;
+    link.download = `${bookTitle.replace(/[^a-zA-Z0-9]/g, "-")}.pdf`;
+    link.click();
+    toast.success("PDF downloaded!");
+  };
+
   const exportPDF = async () => {
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
@@ -806,17 +887,21 @@ export default function CreateColoringBookPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: bookTitle,
+          author: pdfSettings.authorName,
           coloringPages: donePages.map(p => ({
             page: p.page,
             imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
           })),
-          pageSize: orientation === "landscape" ? "letter" : "letter",
+          pageSize: "letter", // Always US Letter
           orientation: orientation === "landscape" ? "landscape" : "portrait",
-          margin: 0.25, // 0.25 inch margins
+          margin: 0.25,
           returnBinary: true,
-          insertBlankPages: false, // Don't insert blank pages
+          insertBlankPages: false,
           includeBelongsTo: false,
-          includeCopyright: false,
+          includeTitlePage: pdfSettings.includeTitlePage,
+          includeCopyright: pdfSettings.includeCopyright,
+          includePageNumbers: pdfSettings.includePageNumbers,
+          includeCreatedWith: true,
         }),
       });
 
@@ -1495,7 +1580,7 @@ export default function CreateColoringBookPage() {
           {currentStep === 5 && doneCount > 0 && (
             <SectionCard
               title="Preview & Export"
-              description="Review your coloring book and export as PDF"
+              description="Configure your coloring book PDF and download"
               icon={FileDown}
               iconColor="text-purple-500"
               iconBg="bg-purple-500/10"
@@ -1504,7 +1589,7 @@ export default function CreateColoringBookPage() {
                 {/* Book Info */}
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium mb-2 block">Book Title</label>
+                    <label className="text-sm font-medium mb-2 block">Book Title *</label>
                     <Input
                       value={storyConfig.title}
                       onChange={(e) => setStoryConfig({ ...storyConfig, title: e.target.value })}
@@ -1512,18 +1597,72 @@ export default function CreateColoringBookPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium mb-2 block">Pages</label>
-                    <div className="flex items-center gap-4 h-10">
-                      <Badge variant="outline" className="text-lg px-4 py-2">
-                        {doneCount} pages ready
-                      </Badge>
-                      {enhancedCount > 0 && (
-                        <Badge variant="secondary">
-                          <Sparkles className="mr-1 h-3 w-3" /> {enhancedCount} enhanced
-                        </Badge>
-                      )}
-                    </div>
+                    <label className="text-sm font-medium mb-2 block">Author / Publisher</label>
+                    <Input
+                      value={pdfSettings.authorName}
+                      onChange={(e) => setPdfSettings({ ...pdfSettings, authorName: e.target.value })}
+                      placeholder="Your name (optional)"
+                    />
                   </div>
+                </div>
+
+                {/* PDF Options */}
+                <div>
+                  <label className="text-sm font-medium mb-3 block">PDF Options</label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50">
+                      <input
+                        type="checkbox"
+                        checked={pdfSettings.includeTitlePage}
+                        onChange={(e) => setPdfSettings({ ...pdfSettings, includeTitlePage: e.target.checked })}
+                        className="h-4 w-4 rounded"
+                      />
+                      <div>
+                        <p className="text-sm font-medium">Title Page</p>
+                        <p className="text-xs text-muted-foreground">Book title & author</p>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50">
+                      <input
+                        type="checkbox"
+                        checked={pdfSettings.includeCopyright}
+                        onChange={(e) => setPdfSettings({ ...pdfSettings, includeCopyright: e.target.checked })}
+                        className="h-4 w-4 rounded"
+                      />
+                      <div>
+                        <p className="text-sm font-medium">Copyright Page</p>
+                        <p className="text-xs text-muted-foreground">Legal notice</p>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50">
+                      <input
+                        type="checkbox"
+                        checked={pdfSettings.includePageNumbers}
+                        onChange={(e) => setPdfSettings({ ...pdfSettings, includePageNumbers: e.target.checked })}
+                        className="h-4 w-4 rounded"
+                      />
+                      <div>
+                        <p className="text-sm font-medium">Page Numbers</p>
+                        <p className="text-xs text-muted-foreground">At bottom of pages</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Page Summary */}
+                <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/50">
+                  <Badge variant="outline" className="text-base px-4 py-2">
+                    {doneCount} coloring pages
+                  </Badge>
+                  {pdfSettings.includeTitlePage && (
+                    <Badge variant="secondary">+ Title page</Badge>
+                  )}
+                  {pdfSettings.includeCopyright && (
+                    <Badge variant="secondary">+ Copyright page</Badge>
+                  )}
+                  <span className="text-sm text-muted-foreground ml-auto">
+                    Format: US Letter (8.5" × 11")
+                  </span>
                 </div>
 
                 {/* Page Preview Strip */}
@@ -1549,7 +1688,21 @@ export default function CreateColoringBookPage() {
                   </div>
                 </div>
 
-                {/* Export Options */}
+                {/* PDF Preview */}
+                {pdfPreviewUrl && (
+                  <div>
+                    <label className="text-sm font-medium mb-3 block">PDF Preview</label>
+                    <div className="border rounded-xl overflow-hidden bg-muted/30">
+                      <iframe
+                        src={pdfPreviewUrl}
+                        className="w-full h-[500px]"
+                        title="PDF Preview"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Enhancement Options */}
                 <div className="grid md:grid-cols-2 gap-4">
                   <Card className="p-4">
                     <h4 className="font-medium mb-3 flex items-center gap-2">
@@ -1581,7 +1734,7 @@ export default function CreateColoringBookPage() {
                       Letter Format
                     </h4>
                     <p className="text-sm text-muted-foreground mb-3">
-                      Reframe images to US Letter size (8.5×11)
+                      Optimize images for US Letter size
                     </p>
                     <Button
                       variant="outline"
@@ -1608,13 +1761,19 @@ export default function CreateColoringBookPage() {
                   <Button variant="outline" onClick={downloadAll}>
                     <Download className="mr-2 h-4 w-4" /> Download PNGs
                   </Button>
-                  <Button onClick={exportPDF} disabled={isExporting} className="flex-1" size="lg">
-                    {isExporting ? (
-                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating PDF...</>
-                    ) : (
-                      <><FileDown className="mr-2 h-5 w-5" /> Export PDF ({doneCount} pages)</>
-                    )}
-                  </Button>
+                  {!pdfPreviewUrl ? (
+                    <Button onClick={generatePdfPreview} disabled={isExporting} className="flex-1" size="lg">
+                      {isExporting ? (
+                        <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Preview...</>
+                      ) : (
+                        <><Eye className="mr-2 h-5 w-5" /> Generate PDF Preview</>
+                      )}
+                    </Button>
+                  ) : (
+                    <Button onClick={downloadPdf} className="flex-1" size="lg">
+                      <FileDown className="mr-2 h-5 w-5" /> Download PDF ({doneCount} pages)
+                    </Button>
+                  )}
                 </div>
               </div>
             </SectionCard>
