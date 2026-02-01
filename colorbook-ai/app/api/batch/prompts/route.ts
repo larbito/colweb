@@ -372,6 +372,107 @@ Generate exactly ${count} pages. Return ONLY valid JSON:
 }
 
 /**
+ * THEME ROUTER: Detect special themes and return required motifs
+ */
+function detectThemeMotifs(themeText: string): { isSpecialTheme: boolean; themeName: string; requiredMotifs: string[]; forbiddenMotifs: string[]; examples: string[] } {
+  const lowerTheme = themeText.toLowerCase();
+  
+  // Valentine's Day
+  if (lowerTheme.includes("valentine") || lowerTheme.includes("love") || lowerTheme.includes("romantic")) {
+    return {
+      isSpecialTheme: true,
+      themeName: "Valentine's Day",
+      requiredMotifs: ["hearts", "love birds", "roses", "cupid", "chocolates", "love letters", "balloons", "ribbons", "gifts", "flowers", "butterflies"],
+      forbiddenMotifs: ["scary", "spooky", "monster", "ghost", "witch", "random fairy", "unrelated fantasy"],
+      examples: [
+        "Animals exchanging Valentine cards with hearts around them",
+        "Cute creatures having a Valentine picnic with roses and heart-shaped treats",
+        "Friends making Valentine crafts with hearts and ribbons",
+        "Love birds in a garden full of hearts and flowers",
+        "Cupid spreading love with bows and arrows among hearts",
+      ],
+    };
+  }
+  
+  // Halloween
+  if (lowerTheme.includes("halloween") || lowerTheme.includes("spooky") || lowerTheme.includes("trick or treat")) {
+    return {
+      isSpecialTheme: true,
+      themeName: "Halloween",
+      requiredMotifs: ["pumpkins", "jack-o-lanterns", "ghosts", "bats", "spiders", "witches", "costumes", "candy", "haunted house", "black cats", "moons"],
+      forbiddenMotifs: ["hearts", "love", "romantic", "christmas", "santa"],
+      examples: [
+        "Friendly ghosts having a Halloween party",
+        "Kids in costumes trick-or-treating",
+        "Cute witch brewing a magical potion",
+        "Jack-o-lanterns in a pumpkin patch",
+        "Animals in Halloween costumes collecting candy",
+      ],
+    };
+  }
+  
+  // Christmas
+  if (lowerTheme.includes("christmas") || lowerTheme.includes("santa") || lowerTheme.includes("holiday") || lowerTheme.includes("winter wonderland")) {
+    return {
+      isSpecialTheme: true,
+      themeName: "Christmas",
+      requiredMotifs: ["christmas trees", "presents", "stockings", "snowflakes", "santa", "reindeer", "ornaments", "candy canes", "snowmen", "stars", "bells"],
+      forbiddenMotifs: ["hearts", "romantic", "halloween", "pumpkins", "spooky"],
+      examples: [
+        "Decorating a Christmas tree with ornaments and stars",
+        "Santa's workshop with elves making toys",
+        "Reindeer in a snowy winter scene",
+        "Kids opening Christmas presents",
+        "Snowman family with scarves and hats",
+      ],
+    };
+  }
+  
+  // Easter
+  if (lowerTheme.includes("easter") || lowerTheme.includes("bunny") || lowerTheme.includes("egg hunt")) {
+    return {
+      isSpecialTheme: true,
+      themeName: "Easter",
+      requiredMotifs: ["easter eggs", "bunnies", "baskets", "chicks", "flowers", "spring", "grass", "carrots", "ribbons", "tulips"],
+      forbiddenMotifs: ["halloween", "christmas", "scary", "winter"],
+      examples: [
+        "Bunnies decorating Easter eggs",
+        "Easter egg hunt in a spring garden",
+        "Chicks hatching from colorful eggs",
+        "Bunny with a basket full of eggs",
+        "Spring flowers with hidden Easter eggs",
+      ],
+    };
+  }
+  
+  // Ramadan/Eid
+  if (lowerTheme.includes("ramadan") || lowerTheme.includes("eid")) {
+    return {
+      isSpecialTheme: true,
+      themeName: "Ramadan/Eid",
+      requiredMotifs: ["crescent moon", "stars", "lanterns", "mosque", "family gathering", "dates", "prayer", "decorations", "gifts", "celebration"],
+      forbiddenMotifs: ["christmas", "halloween", "easter", "santa"],
+      examples: [
+        "Family gathering for iftar dinner",
+        "Crescent moon and stars over a mosque",
+        "Colorful lanterns lighting up the night",
+        "Kids receiving Eid gifts and sweets",
+        "Decorating the home with lanterns and stars",
+      ],
+    };
+  }
+  
+  // Default - no special theme
+  return {
+    isSpecialTheme: false,
+    themeName: "General",
+    requiredMotifs: [],
+    forbiddenMotifs: [],
+    examples: [],
+  };
+}
+
+/**
  * THEME MODE: Generate diverse themed pages
  */
 async function generateThemePages(
@@ -395,7 +496,30 @@ async function generateThemePages(
     high: "High variety - each scene completely different",
   };
 
+  // Detect theme and get required motifs
+  const themeText = `${story?.title || ""} ${story?.outline || ""} ${basePrompt || ""}`;
+  const themeInfo = detectThemeMotifs(themeText);
+  
+  // Build theme-specific instructions
+  let themeInstructions = "";
+  if (themeInfo.isSpecialTheme) {
+    themeInstructions = `
+=== ${themeInfo.themeName.toUpperCase()} THEME REQUIREMENTS (CRITICAL) ===
+This is a ${themeInfo.themeName} coloring book. EVERY page MUST include at least 2-3 of these motifs:
+${themeInfo.requiredMotifs.join(", ")}
+
+DO NOT include: ${themeInfo.forbiddenMotifs.join(", ")}
+
+Example scenes for ${themeInfo.themeName}:
+${themeInfo.examples.map((e, i) => `${i + 1}. ${e}`).join("\n")}
+
+CRITICAL: Do NOT generate random unrelated scenes. Every page must clearly be a ${themeInfo.themeName} scene.
+`;
+  }
+
   const themePrompt = `Generate ${count} DIVERSE coloring book page descriptions.
+
+${themeInstructions}
 
 STYLE RULES:
 - Line style: ${styleProfile.lineStyle}
@@ -410,11 +534,19 @@ ${story?.title ? `THEME: "${story.title}"` : ""}
 ${sceneInventory?.length ? `AVAILABLE PROPS: ${sceneInventory.join(", ")}` : ""}
 ${basePrompt ? `STYLE REFERENCE: "${basePrompt.slice(0, 300)}..."` : ""}
 
+=== COMPOSITION RULES (MANDATORY) ===
+- Subject fills 70-85% of page HEIGHT (no tiny character with empty space)
+- Foreground elements MUST touch the bottom margin
+- NO big empty bottom area - fill with relevant props
+- Camera framing: slightly zoomed-in
+- 10% safe margins on all sides
+
 Generate exactly ${count} pages with:
 - Different subjects or characters
 - Unique activities
 - Varied settings
 - 4-8 specific props
+${themeInfo.isSpecialTheme ? `- MUST include ${themeInfo.themeName} motifs in EVERY scene` : ""}
 
 Return ONLY valid JSON:
 {
@@ -424,7 +556,7 @@ Return ONLY valid JSON:
       "title": "Title",
       "location": "location",
       "action": "activity",
-      "sceneDescription": "Detailed description (80-120 words) including subject, action, props, background, and framing"
+      "sceneDescription": "Detailed description (80-120 words) including subject, action, props, background, and framing. ${themeInfo.isSpecialTheme ? `Include ${themeInfo.themeName} motifs.` : ""}"
     }
   ]
 }`;

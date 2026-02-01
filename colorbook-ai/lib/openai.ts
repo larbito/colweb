@@ -9,11 +9,26 @@ if (!process.env.OPENAI_API_KEY) {
   );
 }
 
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || "",
+// Lazy initialization to avoid errors during build when API key is not set
+let _openai: OpenAI | null = null;
+
+export function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY || "placeholder-for-build",
+    });
+  }
+  return _openai;
+}
+
+// For backwards compatibility
+export const openai = new Proxy({} as OpenAI, {
+  get(target, prop) {
+    return (getOpenAI() as unknown as Record<string | symbol, unknown>)[prop];
+  },
 });
 
 export function isOpenAIConfigured(): boolean {
-  return !!process.env.OPENAI_API_KEY;
+  return !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "placeholder-for-build";
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { openai, isOpenAIConfigured } from "@/lib/openai";
 import { z } from "zod";
 
 /**
@@ -22,10 +22,6 @@ const requestSchema = z.object({
   theme: z.string().optional(),
   previousQuotes: z.array(z.string()).optional(),
   seed: z.string().optional(),
-});
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
 });
 
 // Condensed topic pool

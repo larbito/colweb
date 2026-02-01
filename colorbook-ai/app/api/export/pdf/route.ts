@@ -27,6 +27,7 @@ const requestSchema = z.object({
   pageSize: z.enum(["a4", "letter"]).default("a4"),
   orientation: z.enum(["portrait", "landscape"]).default("portrait"),
   margins: z.number().min(0).max(72).default(36), // margins in points (36pt = 0.5 inch)
+  margin: z.number().optional(), // Alternative margin in inches (converts to points)
   
   // Content options
   insertBlankPages: z.boolean().default(true),
@@ -35,12 +36,21 @@ const requestSchema = z.object({
   includePageNumbers: z.boolean().default(false),
   includeCreatedWith: z.boolean().default(false),
   
-  // Images (base64 encoded PNG)
+  // Response format
+  returnBinary: z.boolean().default(false), // If true, return binary PDF instead of base64
+  
+  // Images (base64 encoded PNG) - supports both formats
   belongsToImage: z.string().optional(),
   coloringPages: z.array(z.object({
-    page: z.number(),
+    page: z.number().optional(),
+    pageNumber: z.number().optional(), // Alternative key
     imageBase64: z.string(),
-  })),
+  })).optional(),
+  // Alternative: simple pages array
+  pages: z.array(z.object({
+    pageNumber: z.number(),
+    imageBase64: z.string(),
+  })).optional(),
 });
 
 /**
@@ -69,14 +79,27 @@ export async function POST(request: NextRequest) {
       pageSize,
       orientation,
       margins,
+      margin,
       insertBlankPages,
       includeBelongsTo,
       includeCopyright,
       includePageNumbers,
       includeCreatedWith,
+      returnBinary,
       belongsToImage,
-      coloringPages,
+      coloringPages: rawColoringPages,
+      pages: rawPages,
     } = parseResult.data;
+
+    // Support both formats: coloringPages or pages
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const coloringPages = (rawColoringPages || rawPages || []).map((p: any) => ({
+      page: p.page ?? p.pageNumber ?? 0,
+      imageBase64: p.imageBase64,
+    }));
+
+    // Convert margin from inches to points if provided
+    const finalMargins = margin ? margin * 72 : margins;
 
     console.log(`[export/pdf] Creating PDF: "${title}" with ${coloringPages.length} pages`);
 
@@ -114,8 +137,8 @@ export async function POST(request: NextRequest) {
         const pngImage = await pdfDoc.embedPng(imageBytes);
         
         // Calculate scaling to fit within margins while preserving aspect ratio
-        const availableWidth = pageDimensions.width - (margins * 2);
-        const availableHeight = pageDimensions.height - (margins * 2);
+        const availableWidth = pageDimensions.width - (finalMargins * 2);
+        const availableHeight = pageDimensions.height - (finalMargins * 2);
         const scale = Math.min(
           availableWidth / pngImage.width,
           availableHeight / pngImage.height
@@ -237,8 +260,8 @@ export async function POST(request: NextRequest) {
         const pngImage = await pdfDoc.embedPng(imageBytes);
         
         // Calculate scaling to fit within margins while preserving aspect ratio
-        const availableWidth = pageDimensions.width - (margins * 2);
-        const availableHeight = pageDimensions.height - (margins * 2);
+        const availableWidth = pageDimensions.width - (finalMargins * 2);
+        const availableHeight = pageDimensions.height - (finalMargins * 2);
         const scale = Math.min(
           availableWidth / pngImage.width,
           availableHeight / pngImage.height
@@ -275,6 +298,18 @@ export async function POST(request: NextRequest) {
 
     // Generate PDF bytes
     const pdfBytes = await pdfDoc.save();
+    
+    // Return as binary if requested
+    if (returnBinary) {
+      return new NextResponse(Buffer.from(pdfBytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(title)}.pdf"`,
+          "Content-Length": String(pdfBytes.length),
+        },
+      });
+    }
     
     // Return as base64
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");

@@ -18,9 +18,23 @@
 
 import OpenAI from "openai";
 
-// Server-side only - never expose to client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || "",
+// Lazy initialization to avoid errors during build when API key is not set
+let _openai: OpenAI | null = null;
+
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY || "placeholder-for-build",
+    });
+  }
+  return _openai;
+}
+
+// Proxy for backwards compatibility
+const openai = new Proxy({} as OpenAI, {
+  get(target, prop) {
+    return (getOpenAI() as unknown as Record<string | symbol, unknown>)[prop];
+  },
 });
 
 // Allowed sizes for GPT Image 1.5
