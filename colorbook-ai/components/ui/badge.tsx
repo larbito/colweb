@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 /**
  * Badge Design System - ColorBook AI
  * 
- * Consistent badge styling:
+ * Consistent badge styling using CSS variables:
  * - Rounded full (pill shape)
  * - Compact padding
  * - Clear status indication
@@ -16,29 +16,29 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        // Default: Subtle white background
-        default: "border-transparent bg-[hsl(0,0%,100%,0.1)] text-[hsl(0,0%,90%)]",
+        // Default: Subtle background
+        default: "border-transparent bg-primary/10 text-foreground",
         
         // Secondary: Even more subtle
-        secondary: "border-transparent bg-[hsl(0,0%,100%,0.06)] text-[hsl(0,0%,70%)]",
+        secondary: "border-transparent bg-secondary text-secondary-foreground",
         
         // Outline: Border only
-        outline: "border-[hsl(0,0%,100%,0.12)] text-[hsl(0,0%,80%)]",
+        outline: "border-border text-foreground",
         
         // Muted: Very subtle, for less important info
-        muted: "border-transparent bg-[hsl(0,0%,100%,0.04)] text-[hsl(0,0%,55%)]",
+        muted: "border-transparent bg-muted text-muted-foreground",
         
         // Destructive: Red for errors
-        destructive: "border-transparent bg-[hsl(0,62%,50%,0.15)] text-[hsl(0,62%,60%)]",
+        destructive: "border-transparent bg-destructive/15 text-destructive",
         
         // Success: Teal/green for positive states
-        success: "border-transparent bg-[hsl(160,84%,39%,0.15)] text-[hsl(160,84%,50%)]",
+        success: "border-transparent bg-success/15 text-success",
         
         // Warning: Amber for caution
-        warning: "border-transparent bg-[hsl(38,92%,50%,0.15)] text-[hsl(38,92%,55%)]",
+        warning: "border-transparent bg-warning/15 text-warning",
         
         // Info: Blue for informational
-        info: "border-transparent bg-[hsl(210,100%,50%,0.15)] text-[hsl(210,100%,60%)]",
+        info: "border-transparent bg-blue-500/15 text-blue-600 dark:text-blue-400",
       },
     },
     defaultVariants: {

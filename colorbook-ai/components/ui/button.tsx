@@ -9,36 +9,34 @@ import { cn } from "@/lib/utils";
  * Consistent button styling across the application:
  * - Border radius: 16px everywhere
  * - Heights: 44px (sm), 48px (md/default), 52px (lg)
- * - Primary: White bg, black text
- * - Secondary: Transparent, white border 10%
- * - Ghost: Transparent, no border, hover bg white 6%
+ * - Uses CSS variables for light/dark mode support
  */
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(0,0%,100%,0.3)] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))] disabled:pointer-events-none disabled:opacity-50 rounded-2xl",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 rounded-2xl",
   {
     variants: {
       variant: {
-        // Primary: White bg, black text (main CTA)
-        default: "bg-white text-black hover:bg-[hsl(0,0%,90%)]",
+        // Primary: Uses theme primary (black in light, white in dark)
+        default: "bg-primary text-primary-foreground hover:opacity-90",
         
         // Destructive: Red variant for dangerous actions
-        destructive: "bg-[hsl(0,62%,50%)] text-white hover:bg-[hsl(0,62%,45%)]",
+        destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
         
-        // Outline/Secondary: Transparent with white border
-        outline: "border border-[hsl(0,0%,100%,0.12)] bg-transparent text-[hsl(0,0%,90%)] hover:bg-[hsl(0,0%,100%,0.06)] hover:border-[hsl(0,0%,100%,0.18)]",
+        // Outline/Secondary: Transparent with border
+        outline: "border border-border bg-transparent text-foreground hover:bg-muted",
         
         // Secondary: Subtle background
-        secondary: "bg-[hsl(0,0%,100%,0.06)] text-[hsl(0,0%,90%)] hover:bg-[hsl(0,0%,100%,0.1)]",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         
         // Ghost: No background, no border
-        ghost: "text-[hsl(0,0%,65%)] hover:bg-[hsl(0,0%,100%,0.06)] hover:text-[hsl(0,0%,90%)]",
+        ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
         
         // Link: Text only with underline on hover
-        link: "text-[hsl(0,0%,90%)] underline-offset-4 hover:underline p-0 h-auto",
+        link: "text-foreground underline-offset-4 hover:underline p-0 h-auto",
         
         // Success: Teal/green for positive actions
-        success: "bg-[hsl(160,84%,39%)] text-white hover:bg-[hsl(160,84%,35%)]",
+        success: "bg-success text-success-foreground hover:opacity-90",
       },
       size: {
         // Default: 48px height

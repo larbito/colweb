@@ -7,7 +7,7 @@ import type { LucideIcon } from "lucide-react";
 
 /**
  * Option Card - Selection cards for wizard steps
- * Uses the new dark design system
+ * Uses CSS variables for light/dark mode support
  */
 
 interface OptionCardProps {
@@ -63,21 +63,21 @@ export function OptionCard({
       className={cn(
         "relative flex flex-col rounded-2xl border-2 text-left transition-all duration-150",
         sizeStyles[size],
-        // Variant styles - using new dark theme
+        // Variant styles using CSS variables
         variant === "default" && [
           selected
-            ? "border-white bg-[hsl(0,0%,100%,0.06)]"
-            : "border-[hsl(0,0%,100%,0.1)] bg-[hsl(var(--card))] hover:border-[hsl(0,0%,100%,0.2)] hover:bg-[hsl(0,0%,100%,0.04)]",
+            ? "border-primary bg-primary/5"
+            : "border-border bg-card hover:border-primary/30 hover:bg-muted/30",
         ],
         variant === "bordered" && [
           selected
-            ? "border-white bg-transparent"
-            : "border-[hsl(0,0%,100%,0.1)] bg-transparent hover:border-[hsl(0,0%,100%,0.25)]",
+            ? "border-primary bg-transparent"
+            : "border-border bg-transparent hover:border-primary/50",
         ],
         variant === "filled" && [
           selected
-            ? "border-white bg-white text-black"
-            : "border-[hsl(0,0%,100%,0.1)] bg-[hsl(0,0%,100%,0.06)] hover:bg-[hsl(0,0%,100%,0.1)]",
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-border bg-muted/50 hover:bg-muted",
         ],
         disabled && "cursor-not-allowed opacity-50",
         className
@@ -87,7 +87,7 @@ export function OptionCard({
       {selected && (
         <div className={cn(
           "absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full",
-          variant === "filled" ? "bg-black/20" : "bg-white text-black"
+          variant === "filled" ? "bg-primary-foreground/20" : "bg-primary text-primary-foreground"
         )}>
           <Check className="h-3.5 w-3.5" />
         </div>
@@ -100,9 +100,9 @@ export function OptionCard({
           iconContainerSizes[size],
           selected 
             ? variant === "filled" 
-              ? "bg-black/10" 
-              : "bg-white/10 text-white"
-            : "bg-[hsl(0,0%,100%,0.06)] text-[hsl(0,0%,60%)]"
+              ? "bg-primary-foreground/10" 
+              : "bg-primary/10 text-primary"
+            : "bg-muted text-muted-foreground"
         )}>
           {Icon ? (
             <Icon className={iconSizes[size]} />
@@ -120,7 +120,7 @@ export function OptionCard({
             size === "sm" && "text-sm",
             size === "md" && "text-base",
             size === "lg" && "text-lg",
-            selected && variant === "filled" ? "text-black" : "text-[hsl(0,0%,95%)]"
+            selected && variant === "filled" ? "text-primary-foreground" : ""
           )}>
             {title}
           </span>
@@ -129,7 +129,7 @@ export function OptionCard({
               variant="secondary" 
               className={cn(
                 "text-[10px] px-2 py-0.5",
-                selected && variant === "filled" && "bg-black/10 text-black"
+                selected && variant === "filled" && "bg-primary-foreground/10 text-primary-foreground"
               )}
             >
               {badge}
@@ -138,11 +138,11 @@ export function OptionCard({
         </div>
         {description && (
           <p className={cn(
-            "line-clamp-2",
+            "text-muted-foreground line-clamp-2",
             size === "sm" && "text-xs",
             size === "md" && "text-sm",
             size === "lg" && "text-sm",
-            selected && variant === "filled" ? "text-black/70" : "text-[hsl(0,0%,55%)]"
+            selected && variant === "filled" && "text-primary-foreground/70"
           )}>
             {description}
           </p>
@@ -182,8 +182,8 @@ export function OptionChip({
         size === "sm" && "px-3 py-1.5 text-xs",
         size === "md" && "px-4 py-2 text-sm",
         selected
-          ? "border-white bg-white text-black"
-          : "border-[hsl(0,0%,100%,0.1)] bg-transparent text-[hsl(0,0%,75%)] hover:border-[hsl(0,0%,100%,0.2)] hover:bg-[hsl(0,0%,100%,0.04)]",
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border bg-transparent text-foreground hover:border-primary/50 hover:bg-muted/50",
         disabled && "cursor-not-allowed opacity-50",
         className
       )}

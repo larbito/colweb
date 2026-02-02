@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils";
 /**
  * Card Design System - ColorBook AI
  * 
- * Consistent card styling:
+ * Consistent card styling using CSS variables for light/dark mode:
  * - Border radius: 16px (1rem)
- * - Border: white 10% opacity
- * - Background: card token (#0F1621 in dark mode)
+ * - Border: uses --border token
+ * - Background: uses --card token
  */
 
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
@@ -15,7 +15,7 @@ const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElemen
     <div
       ref={ref}
       className={cn(
-        "rounded-2xl border border-[hsl(0,0%,100%,0.1)] bg-[hsl(var(--card))] text-[hsl(var(--card-foreground))]",
+        "rounded-2xl border border-border bg-card text-card-foreground",
         className
       )}
       {...props}
@@ -35,7 +35,7 @@ const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HT
   ({ className, ...props }, ref) => (
     <h3
       ref={ref}
-      className={cn("text-lg font-semibold leading-none tracking-tight text-[hsl(0,0%,95%)]", className)}
+      className={cn("text-lg font-semibold leading-none tracking-tight", className)}
       {...props}
     />
   )
@@ -44,7 +44,7 @@ CardTitle.displayName = "CardTitle";
 
 const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
   ({ className, ...props }, ref) => (
-    <p ref={ref} className={cn("text-sm text-[hsl(0,0%,60%)]", className)} {...props} />
+    <p ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
   )
 );
 CardDescription.displayName = "CardDescription";

@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Boxes, Quote, Zap, Type, Check, ArrowRight } from "lucide-react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 const bulkFeatures = [
   "Create up to 10 books in one batch",
@@ -24,9 +25,9 @@ const quoteFeatures = [
 
 // Sample quote categories
 const quoteCategories = [
-  { label: "Love Quotes", color: "bg-pink-500/20 text-pink-400" },
-  { label: "Motivation", color: "bg-orange-500/20 text-orange-400" },
-  { label: "Kids Learning", color: "bg-cyan-500/20 text-cyan-400" },
+  { label: "Love Quotes", color: "bg-pink-500/15 text-pink-600 dark:text-pink-400" },
+  { label: "Motivation", color: "bg-orange-500/15 text-orange-600 dark:text-orange-400" },
+  { label: "Kids Learning", color: "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400" },
 ];
 
 export function NewFeaturesSection() {
@@ -38,9 +39,9 @@ export function NewFeaturesSection() {
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="inline-flex items-center gap-2 rounded-full bg-[hsl(0,0%,100%,0.06)] border border-[hsl(0,0%,100%,0.1)] px-4 py-1.5 text-sm font-medium text-[hsl(0,0%,90%)] mb-4"
+          className="inline-flex items-center gap-2 rounded-full bg-accent/10 border border-accent/20 px-4 py-1.5 text-sm font-medium mb-4"
         >
-          <Zap className="h-4 w-4 text-emerald-400" />
+          <Zap className="h-4 w-4 text-accent" />
           New Features
         </motion.div>
         <motion.h2 
@@ -57,7 +58,7 @@ export function NewFeaturesSection() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ delay: 0.2 }}
-          className="text-[hsl(0,0%,60%)] max-w-2xl mx-auto"
+          className="text-muted-foreground max-w-2xl mx-auto"
         >
           Scale your coloring book production with bulk creation and explore new genres with text & quote coloring pages.
         </motion.p>
@@ -70,8 +71,7 @@ export function NewFeaturesSection() {
           whileInView={{ opacity: 1, x: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="relative overflow-hidden rounded-2xl border border-[hsl(160,84%,39%,0.15)] bg-[hsl(var(--card))] p-8"
-          style={{ boxShadow: "0 0 60px hsl(160 84% 39% / 0.08)" }}
+          className="relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-card p-8 card-glow-green"
         >
           {/* Glow effect */}
           <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -80,15 +80,15 @@ export function NewFeaturesSection() {
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-                <Boxes className="h-7 w-7 text-emerald-400" />
+                <Boxes className="h-7 w-7 text-emerald-500" />
               </div>
               <div>
-                <h3 className="text-2xl font-semibold text-[hsl(0,0%,95%)]">Bulk Book Creation</h3>
-                <p className="text-sm text-[hsl(0,0%,55%)]">Production at scale</p>
+                <h3 className="text-2xl font-semibold">Bulk Book Creation</h3>
+                <p className="text-sm text-muted-foreground">Production at scale</p>
               </div>
             </div>
 
-            <p className="text-[hsl(0,0%,60%)] mb-6 leading-relaxed">
+            <p className="text-muted-foreground mb-6 leading-relaxed">
               Create multiple complete coloring books in a single session. Perfect for publishers, 
               teachers, and creators who need volume.
             </p>
@@ -102,10 +102,10 @@ export function NewFeaturesSection() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.08 }}
-                  className="flex items-center gap-3 text-sm text-[hsl(0,0%,75%)]"
+                  className="flex items-center gap-3 text-sm"
                 >
                   <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/20">
-                    <Check className="h-3 w-3 text-emerald-400" />
+                    <Check className="h-3 w-3 text-emerald-500" />
                   </div>
                   {feature}
                 </motion.li>
@@ -113,13 +113,13 @@ export function NewFeaturesSection() {
             </ul>
 
             {/* CTA */}
-            <Link href="/app/bulk">
-              <button className="btn btn-md btn-primary group">
-                <Boxes className="h-4 w-4" />
+            <Button asChild>
+              <Link href="/app/bulk">
+                <Boxes className="mr-2 h-4 w-4" />
                 Start Bulk Creation
-                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-              </button>
-            </Link>
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
           </div>
         </motion.div>
 
@@ -129,8 +129,7 @@ export function NewFeaturesSection() {
           whileInView={{ opacity: 1, x: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="relative overflow-hidden rounded-2xl border border-[hsl(270,70%,50%,0.15)] bg-[hsl(var(--card))] p-8"
-          style={{ boxShadow: "0 0 60px hsl(270 70% 50% / 0.06)" }}
+          className="relative overflow-hidden rounded-2xl border border-purple-500/20 bg-card p-8 card-glow-purple"
         >
           {/* Glow effect */}
           <div className="absolute top-0 right-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -139,11 +138,11 @@ export function NewFeaturesSection() {
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-500/10 border border-purple-500/20">
-                <Quote className="h-7 w-7 text-purple-400" />
+                <Quote className="h-7 w-7 text-purple-500" />
               </div>
               <div>
-                <h3 className="text-2xl font-semibold text-[hsl(0,0%,95%)]">Quote & Text Pages</h3>
-                <p className="text-sm text-[hsl(0,0%,55%)]">Typography coloring books</p>
+                <h3 className="text-2xl font-semibold">Quote & Text Pages</h3>
+                <p className="text-sm text-muted-foreground">Typography coloring books</p>
               </div>
             </div>
 
@@ -159,7 +158,7 @@ export function NewFeaturesSection() {
               ))}
             </div>
 
-            <p className="text-[hsl(0,0%,60%)] mb-6 leading-relaxed">
+            <p className="text-muted-foreground mb-6 leading-relaxed">
               Create beautiful typography-based coloring pages with motivational quotes, 
               affirmations, and custom text designs.
             </p>
@@ -173,10 +172,10 @@ export function NewFeaturesSection() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.08 }}
-                  className="flex items-center gap-3 text-sm text-[hsl(0,0%,75%)]"
+                  className="flex items-center gap-3 text-sm"
                 >
                   <div className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-500/20">
-                    <Type className="h-3 w-3 text-purple-400" />
+                    <Type className="h-3 w-3 text-purple-500" />
                   </div>
                   {feature}
                 </motion.li>
@@ -184,13 +183,13 @@ export function NewFeaturesSection() {
             </ul>
 
             {/* CTA */}
-            <Link href="/app/quote-book">
-              <button className="btn btn-md btn-secondary group">
-                <Quote className="h-4 w-4" />
+            <Button asChild variant="outline">
+              <Link href="/app/quote-book">
+                <Quote className="mr-2 h-4 w-4" />
                 Create Quote Book
-                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-              </button>
-            </Link>
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
           </div>
         </motion.div>
       </div>
@@ -201,23 +200,23 @@ export function NewFeaturesSection() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
         transition={{ delay: 0.3 }}
-        className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-6 p-6 rounded-2xl bg-[hsl(0,0%,100%,0.03)] border border-[hsl(0,0%,100%,0.08)]"
+        className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-6 p-6 rounded-2xl bg-muted/30 border border-border"
       >
         <div className="text-center">
-          <div className="text-3xl font-bold text-emerald-400">10</div>
-          <div className="text-sm text-[hsl(0,0%,55%)]">Books per batch</div>
+          <div className="text-3xl font-bold text-emerald-500">10</div>
+          <div className="text-sm text-muted-foreground">Books per batch</div>
         </div>
         <div className="text-center">
-          <div className="text-3xl font-bold text-emerald-400">80</div>
-          <div className="text-sm text-[hsl(0,0%,55%)]">Pages per book</div>
+          <div className="text-3xl font-bold text-emerald-500">80</div>
+          <div className="text-sm text-muted-foreground">Pages per book</div>
         </div>
         <div className="text-center">
-          <div className="text-3xl font-bold text-purple-400">4+</div>
-          <div className="text-sm text-[hsl(0,0%,55%)]">Typography styles</div>
+          <div className="text-3xl font-bold text-purple-500">4+</div>
+          <div className="text-sm text-muted-foreground">Typography styles</div>
         </div>
         <div className="text-center">
-          <div className="text-3xl font-bold text-purple-400">∞</div>
-          <div className="text-sm text-[hsl(0,0%,55%)]">Quote topics</div>
+          <div className="text-3xl font-bold text-purple-500">∞</div>
+          <div className="text-sm text-muted-foreground">Quote topics</div>
         </div>
       </motion.div>
     </section>

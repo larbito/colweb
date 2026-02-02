@@ -10,7 +10,7 @@ const features = [
     description: "Generate cohesive page-by-page prompts that tell a unified story throughout your book.",
     glowClass: "card-glow-cyan",
     iconBg: "bg-cyan-500/10",
-    iconColor: "text-cyan-400",
+    iconColor: "text-cyan-500",
   },
   {
     icon: Ruler,
@@ -18,7 +18,7 @@ const features = [
     description: "8.5×11, 8×10, A4 and more — all with proper bleed and margins for print-on-demand.",
     glowClass: "card-glow-blue",
     iconBg: "bg-blue-500/10",
-    iconColor: "text-blue-400",
+    iconColor: "text-blue-500",
   },
   {
     icon: PenTool,
@@ -26,7 +26,7 @@ const features = [
     description: "Choose thin, medium, or bold outlines to match your audience's coloring preferences.",
     glowClass: "card-glow-green",
     iconBg: "bg-emerald-500/10",
-    iconColor: "text-emerald-400",
+    iconColor: "text-emerald-500",
   },
   {
     icon: SlidersHorizontal,
@@ -34,7 +34,7 @@ const features = [
     description: "Simple designs for kids to intricate patterns for adults — adjust with one slider.",
     glowClass: "card-glow-orange",
     iconBg: "bg-orange-500/10",
-    iconColor: "text-orange-400",
+    iconColor: "text-orange-500",
   },
   {
     icon: RefreshCw,
@@ -42,7 +42,7 @@ const features = [
     description: "Not happy with a page? Regenerate it instantly while keeping your prompt intact.",
     glowClass: "card-glow-pink",
     iconBg: "bg-pink-500/10",
-    iconColor: "text-pink-400",
+    iconColor: "text-pink-500",
   },
   {
     icon: FileOutput,
@@ -50,7 +50,7 @@ const features = [
     description: "Export PDFs with page numbers, blank backs, and copyright page included.",
     glowClass: "card-glow-purple",
     iconBg: "bg-purple-500/10",
-    iconColor: "text-purple-400",
+    iconColor: "text-purple-500",
   },
 ];
 
@@ -62,7 +62,7 @@ export function FeatureBento() {
           initial={{ opacity: 0, y: 10 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="mb-3 text-sm font-medium text-[hsl(0,0%,65%)] uppercase tracking-wider"
+          className="mb-3 text-sm font-medium text-muted-foreground uppercase tracking-wider"
         >
           Features
         </motion.p>
@@ -93,10 +93,10 @@ export function FeatureBento() {
             </div>
             
             {/* Content */}
-            <h3 className="mb-2 text-lg font-semibold text-[hsl(0,0%,95%)]">
+            <h3 className="mb-2 text-lg font-semibold">
               {feature.title}
             </h3>
-            <p className="text-sm leading-relaxed text-[hsl(0,0%,60%)]">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               {feature.description}
             </p>
           </motion.div>
@@ -111,14 +111,14 @@ export function FeatureBento() {
         transition={{ delay: 0.5 }}
         className="mt-16 text-center"
       >
-        <p className="text-sm text-[hsl(0,0%,45%)] mb-6">Trusted by creators worldwide</p>
+        <p className="text-sm text-muted-foreground mb-6">Trusted by creators worldwide</p>
         <div className="flex items-center justify-center gap-8 opacity-40">
           {/* Placeholder logos - you can replace with actual logos */}
-          <div className="h-6 w-20 rounded bg-white/20" />
-          <div className="h-6 w-24 rounded bg-white/20" />
-          <div className="h-6 w-16 rounded bg-white/20" />
-          <div className="h-6 w-20 rounded bg-white/20" />
-          <div className="h-6 w-18 rounded bg-white/20" />
+          <div className="h-6 w-20 rounded bg-foreground/20" />
+          <div className="h-6 w-24 rounded bg-foreground/20" />
+          <div className="h-6 w-16 rounded bg-foreground/20" />
+          <div className="h-6 w-20 rounded bg-foreground/20" />
+          <div className="h-6 w-18 rounded bg-foreground/20" />
         </div>
       </motion.div>
     </section>

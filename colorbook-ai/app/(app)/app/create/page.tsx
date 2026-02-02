@@ -1490,7 +1490,7 @@ export default function CreateColoringBookPage() {
           />
 
           {/* Wizard Step Navigation - Sticky header */}
-          <div className="sticky top-0 z-40 -mx-6 px-6 py-4 bg-[hsl(var(--background))]/95 backdrop-blur-sm border-b border-[hsl(0,0%,100%,0.08)]">
+          <div className="sticky top-0 z-40 -mx-6 px-6 py-4 bg-background/95 backdrop-blur-sm border-b border-border">
             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             {[
               { step: 0, label: "Type", icon: Book },
@@ -1521,25 +1521,25 @@ export default function CreateColoringBookPage() {
                 className={cn(
                   "flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-medium transition-all whitespace-nowrap",
                   currentStep === step
-                    ? "bg-white text-black"
+                    ? "bg-primary text-primary-foreground"
                     : isCompleted
-                      ? "bg-[hsl(160,84%,39%,0.15)] text-emerald-400 hover:bg-[hsl(160,84%,39%,0.2)]"
+                      ? "bg-success/15 text-success hover:bg-success/20"
                     : isAccessible
-                      ? "bg-[hsl(0,0%,100%,0.06)] text-[hsl(0,0%,75%)] hover:bg-[hsl(0,0%,100%,0.1)]"
-                      : "bg-[hsl(0,0%,100%,0.03)] text-[hsl(0,0%,45%)] cursor-not-allowed"
+                      ? "bg-muted text-foreground/75 hover:bg-muted/80"
+                      : "bg-muted/50 text-muted-foreground cursor-not-allowed"
                 )}
               >
                 {isCompleted && step !== currentStep ? (
-                  <Check className="h-4 w-4 text-emerald-400" />
+                  <Check className="h-4 w-4" />
                 ) : (
                 <Icon className="h-4 w-4" />
                 )}
                 <span className="hidden sm:inline">{label}</span>
                 {step === 2 && pages.length > 0 && (
-                  <span className="bg-[hsl(0,0%,100%,0.15)] text-xs px-1.5 py-0.5 rounded-md">{pages.length}</span>
+                  <span className="bg-primary/10 text-xs px-1.5 py-0.5 rounded-md">{pages.length}</span>
                 )}
                 {step === 3 && pages.length > 0 && (
-                  <span className="bg-[hsl(0,0%,100%,0.15)] text-xs px-1.5 py-0.5 rounded-md">{doneCount}/{pages.length}</span>
+                  <span className="bg-primary/10 text-xs px-1.5 py-0.5 rounded-md">{doneCount}/{pages.length}</span>
                 )}
               </button>
               );
