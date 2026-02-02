@@ -67,13 +67,21 @@ const requestSchema = z.object({
  * Includes: belongs-to page, copyright page, coloring pages with optional blank pages.
  */
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  
   try {
     const body = await request.json();
     const parseResult = requestSchema.safeParse(body);
 
     if (!parseResult.success) {
+      console.error("[export/pdf] Validation error:", parseResult.error.flatten());
       return NextResponse.json(
-        { error: "Invalid request", details: parseResult.error.flatten() },
+        { 
+          ok: false,
+          error: "Invalid request - check page data format", 
+          errorCode: "VALIDATION_ERROR",
+          details: parseResult.error.flatten(),
+        },
         { status: 400 }
       );
     }
@@ -412,9 +420,40 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error("[export/pdf] Error:", error);
+    const durationMs = Date.now() - startTime;
+    console.error("[export/pdf] Error after", durationMs, "ms:", error);
+    console.error("[export/pdf] Stack:", error instanceof Error ? error.stack : "no stack");
+    
+    // Provide specific error messages
+    let errorMessage = "Failed to generate PDF";
+    let errorCode = "PDF_GENERATION_ERROR";
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      
+      if (error.message.includes("embed")) {
+        errorCode = "IMAGE_EMBED_ERROR";
+        errorMessage = "Failed to embed image into PDF - check image format";
+      } else if (error.message.includes("buffer") || error.message.includes("base64")) {
+        errorCode = "INVALID_IMAGE_DATA";
+        errorMessage = "Invalid image data - check base64 encoding";
+      } else if (error.message.includes("timeout")) {
+        errorCode = "TIMEOUT_ERROR";
+        errorMessage = "PDF generation timed out - try with fewer pages";
+      } else if (error.message.includes("memory")) {
+        errorCode = "MEMORY_ERROR";
+        errorMessage = "Out of memory - try with smaller images or fewer pages";
+      }
+    }
+    
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate PDF" },
+      { 
+        ok: false,
+        error: errorMessage,
+        errorCode,
+        details: error instanceof Error ? error.stack : String(error),
+        durationMs,
+      },
       { status: 500 }
     );
   }

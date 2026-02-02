@@ -810,6 +810,8 @@ export default function CreateColoringBookPage() {
     try {
       const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
       
+      console.log("[PDF Export] Sending request with", donePages.length, "pages");
+      
       const response = await fetch("/api/export/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -834,12 +836,20 @@ export default function CreateColoringBookPage() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to generate PDF");
+        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        console.error("[PDF Export] Error response:", errorData);
+        throw new Error(errorData.error || errorData.errorMessage || `Failed to generate PDF (${response.status})`);
       }
 
       // Create blob URL for preview
       const blob = await response.blob();
+      
+      if (blob.size === 0) {
+        throw new Error("PDF generation returned empty file");
+      }
+      
+      console.log("[PDF Export] PDF generated:", blob.size, "bytes");
+      
       const url = URL.createObjectURL(blob);
       
       // Clean up previous preview URL
@@ -848,9 +858,10 @@ export default function CreateColoringBookPage() {
       }
       
       setPdfPreviewUrl(url);
-      toast.success("PDF preview generated!");
+      toast.success(`PDF preview generated! (${(blob.size / 1024 / 1024).toFixed(1)} MB)`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to generate PDF");
+      console.error("[PDF Export] Client error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate PDF. Check console for details.");
     } finally {
       setIsExporting(false);
     }
