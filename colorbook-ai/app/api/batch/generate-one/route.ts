@@ -225,13 +225,31 @@ export async function POST(request: NextRequest) {
             console.log(`[generate-one] Page ${page}: Outline issue - fills: ${validationResult.outlineValidation.fillLocations.join(", ")}`);
           }
 
-          // If this is the last attempt, return with validation failure info
+          // If this is the last attempt, return FAILED (not done with warning)
+          // User wants ONLY passing images in the grid
           if (attempt === totalAttempts) {
-            console.log(`[generate-one] Page ${page}: Max retries reached, returning with validation failure`);
+            console.log(`[generate-one] Page ${page}: Max retries reached, VALIDATION FAILED - returning failed status`);
+            
+            // Build a descriptive error message
+            const issues: string[] = [];
+            if (validationResult.characterValidation && !validationResult.characterValidation.valid) {
+              issues.push(`character mismatch (expected ${characterProfile?.species}, got ${validationResult.characterValidation.detectedSpecies})`);
+            }
+            if (validationResult.outlineValidation && !validationResult.outlineValidation.valid) {
+              issues.push(`outline issues (black fills at: ${validationResult.outlineValidation.fillLocations?.slice(0, 2).join(", ") || "unknown"})`);
+            }
+            if (validationResult.coverageValidation && !validationResult.coverageValidation.valid) {
+              issues.push(`coverage too low (${validationResult.coverageValidation.bboxHeightRatio}%)`);
+            }
+            if (validationResult.bottomFillValidation && !validationResult.bottomFillValidation.valid) {
+              issues.push(`empty bottom (${validationResult.bottomFillValidation.bottomCoveragePercent}%)`);
+            }
+            
             return NextResponse.json({
               page,
-              status: "done", // Still return the image, but mark validation as failed
-              imageBase64,
+              status: "failed", // FAILED - not done with warning
+              error: `Quality validation failed after ${attempt} attempts: ${issues.join("; ") || "unknown issues"}`,
+              errorCode: "VALIDATION_FAILED",
               attempts: attempt,
               validation: {
                 passed: false,
@@ -240,7 +258,8 @@ export async function POST(request: NextRequest) {
                 coverage: validationResult.coverageValidation,
                 bottomFill: validationResult.bottomFillValidation,
               },
-              warning: "Image may have quality issues (validation failed after retries)",
+              // Store the best candidate image for debugging (not shown in grid)
+              bestCandidateBase64: imageBase64,
             });
           }
 
@@ -273,32 +292,45 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // All attempts exhausted
-    console.log(`[generate-one] Page ${page}: All ${totalAttempts} attempts exhausted`);
+    // All attempts exhausted without validation pass
+    console.log(`[generate-one] Page ${page}: All ${totalAttempts} attempts exhausted without validation pass`);
     
-    // If we have a last image, return it with failure status
-    if (lastImage) {
-      return NextResponse.json({
-        page,
-        status: "done",
-        imageBase64: lastImage,
-        attempts: totalAttempts,
-        validation: lastValidationResult ? {
-          passed: false,
-          character: lastValidationResult.characterValidation,
-          outline: lastValidationResult.outlineValidation,
-          coverage: lastValidationResult.coverageValidation,
-          bottomFill: lastValidationResult.bottomFillValidation,
-        } : undefined,
-        warning: "Image may have quality issues",
-      });
+    // Build error message from last validation
+    let errorMessage = "No image generated after all attempts";
+    if (lastValidationResult) {
+      const issues: string[] = [];
+      if (lastValidationResult.characterValidation && !lastValidationResult.characterValidation.valid) {
+        issues.push("character mismatch");
+      }
+      if (lastValidationResult.outlineValidation && !lastValidationResult.outlineValidation.valid) {
+        issues.push("outline/fill issues");
+      }
+      if (lastValidationResult.coverageValidation && !lastValidationResult.coverageValidation.valid) {
+        issues.push("coverage too low");
+      }
+      if (lastValidationResult.bottomFillValidation && !lastValidationResult.bottomFillValidation.valid) {
+        issues.push("empty bottom");
+      }
+      if (issues.length > 0) {
+        errorMessage = `Quality validation failed: ${issues.join(", ")}`;
+      }
     }
 
     return NextResponse.json({
       page,
       status: "failed",
-      error: "No image generated after all attempts",
+      error: errorMessage,
+      errorCode: lastImage ? "VALIDATION_FAILED" : "GENERATION_FAILED",
       attempts: totalAttempts,
+      validation: lastValidationResult ? {
+        passed: false,
+        character: lastValidationResult.characterValidation,
+        outline: lastValidationResult.outlineValidation,
+        coverage: lastValidationResult.coverageValidation,
+        bottomFill: lastValidationResult.bottomFillValidation,
+      } : undefined,
+      // Store best candidate for debugging (not shown in grid)
+      bestCandidateBase64: lastImage || undefined,
     });
 
   } catch (error) {

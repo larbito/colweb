@@ -46,8 +46,14 @@ const requestSchema = z.object({
   // Response format
   returnBinary: z.boolean().default(false), // If true, return binary PDF instead of base64
   
-  // Images (base64 encoded PNG) - supports both formats
-  belongsToImage: z.string().optional(),
+  // Pre-generated front matter images (base64 PNG)
+  // These are generated in the Front Matter step, NOT during export
+  titlePageImage: z.string().optional(),      // Pre-generated title page
+  copyrightPageImage: z.string().optional(),  // Pre-generated copyright page
+  belongsToPageImage: z.string().optional(),  // Pre-generated belongs-to page
+  belongsToImage: z.string().optional(),      // Legacy: fallback for belongs-to
+  
+  // Coloring page images (base64 encoded PNG)
   coloringPages: z.array(z.object({
     page: z.number().optional(),
     pageNumber: z.number().optional(), // Alternative key
@@ -103,10 +109,17 @@ export async function POST(request: NextRequest) {
       includeCreatedWith,
       includeTitlePage,
       returnBinary,
-      belongsToImage,
+      // Pre-generated front matter images
+      titlePageImage,
+      copyrightPageImage,
+      belongsToPageImage,
+      belongsToImage, // Legacy fallback
       coloringPages: rawColoringPages,
       pages: rawPages,
     } = parseResult.data;
+    
+    // Use pre-generated or legacy belongs-to image
+    const finalBelongsToImage = belongsToPageImage || belongsToImage;
 
     // Support both formats: coloringPages or pages
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -154,61 +167,90 @@ export async function POST(request: NextRequest) {
     };
 
     // 1. TITLE PAGE (if enabled)
+    // Uses pre-generated image if available, otherwise falls back to text rendering
     if (includeTitlePage) {
       const titlePage = pdfDoc.addPage([pageDimensions.width, pageDimensions.height]);
       currentPageNum++;
       
-      const { width, height } = titlePage.getSize();
-      const centerX = width / 2;
-      
-      // Title - centered, larger font
-      const titleFontSize = Math.min(36, width / (title.length * 0.6));
-      const titleWidth = fontBold.widthOfTextAtSize(title, titleFontSize);
-      titlePage.drawText(title, {
-        x: centerX - titleWidth / 2,
-        y: height * 0.6,
-        size: titleFontSize,
-        font: fontBold,
-        color: rgb(0.1, 0.1, 0.1),
-      });
-      
-      // Subtitle line
-      const subtitleText = "A Coloring Book";
-      const subtitleWidth = fontItalic.widthOfTextAtSize(subtitleText, 14);
-      titlePage.drawText(subtitleText, {
-        x: centerX - subtitleWidth / 2,
-        y: height * 0.6 - 50,
-        size: 14,
-        font: fontItalic,
-        color: rgb(0.3, 0.3, 0.3),
-      });
-      
-      // Author/Publisher (if provided)
-      if (author || publisher) {
-        const byLine = author ? `By ${author}` : publisher || "";
-        const byLineWidth = font.widthOfTextAtSize(byLine, 12);
-        titlePage.drawText(byLine, {
-          x: centerX - byLineWidth / 2,
-          y: height * 0.3,
-          size: 12,
-          font: font,
+      if (titlePageImage) {
+        // Use pre-generated title page image
+        try {
+          const imageBytes = Buffer.from(titlePageImage, "base64");
+          const pngImage = await pdfDoc.embedPng(imageBytes);
+          
+          const availableWidth = pageDimensions.width - (finalMargins * 2);
+          const availableHeight = pageDimensions.height - (finalMargins * 2);
+          const scale = Math.min(
+            availableWidth / pngImage.width,
+            availableHeight / pngImage.height
+          );
+          const scaledWidth = pngImage.width * scale;
+          const scaledHeight = pngImage.height * scale;
+          
+          const x = (pageDimensions.width - scaledWidth) / 2;
+          const y = (pageDimensions.height - scaledHeight) / 2;
+          
+          titlePage.drawImage(pngImage, {
+            x,
+            y,
+            width: scaledWidth,
+            height: scaledHeight,
+          });
+          console.log("[export/pdf] Added pre-generated title page");
+        } catch (imgError) {
+          console.error("[export/pdf] Failed to embed title page image, using text fallback:", imgError);
+          // Fall through to text rendering
+        }
+      } else {
+        // Fallback: text-based title page
+        const { width, height } = titlePage.getSize();
+        const centerX = width / 2;
+        
+        const titleFontSize = Math.min(36, width / (title.length * 0.6));
+        const titleWidth = fontBold.widthOfTextAtSize(title, titleFontSize);
+        titlePage.drawText(title, {
+          x: centerX - titleWidth / 2,
+          y: height * 0.6,
+          size: titleFontSize,
+          font: fontBold,
+          color: rgb(0.1, 0.1, 0.1),
+        });
+        
+        const subtitleText = "A Coloring Book";
+        const subtitleWidth = fontItalic.widthOfTextAtSize(subtitleText, 14);
+        titlePage.drawText(subtitleText, {
+          x: centerX - subtitleWidth / 2,
+          y: height * 0.6 - 50,
+          size: 14,
+          font: fontItalic,
           color: rgb(0.3, 0.3, 0.3),
         });
+        
+        if (author || publisher) {
+          const byLine = author ? `By ${author}` : publisher || "";
+          const byLineWidth = font.widthOfTextAtSize(byLine, 12);
+          titlePage.drawText(byLine, {
+            x: centerX - byLineWidth / 2,
+            y: height * 0.3,
+            size: 12,
+            font: font,
+            color: rgb(0.3, 0.3, 0.3),
+          });
+        }
+        console.log("[export/pdf] Added text-based title page");
       }
-      
-      console.log("[export/pdf] Added title page");
     }
 
     // 2. BELONGS TO PAGE (if enabled and image provided)
-    if (includeBelongsTo && belongsToImage) {
+    // Uses pre-generated image from Front Matter step
+    if (includeBelongsTo && finalBelongsToImage) {
       const belongsToPage = pdfDoc.addPage([pageDimensions.width, pageDimensions.height]);
       currentPageNum++;
       
       try {
-        const imageBytes = Buffer.from(belongsToImage, "base64");
+        const imageBytes = Buffer.from(finalBelongsToImage, "base64");
         const pngImage = await pdfDoc.embedPng(imageBytes);
         
-        // Calculate scaling to fit within margins while preserving aspect ratio
         const availableWidth = pageDimensions.width - (finalMargins * 2);
         const availableHeight = pageDimensions.height - (finalMargins * 2);
         const scale = Math.min(
@@ -218,7 +260,6 @@ export async function POST(request: NextRequest) {
         const scaledWidth = pngImage.width * scale;
         const scaledHeight = pngImage.height * scale;
         
-        // Center the image
         const x = (pageDimensions.width - scaledWidth) / 2;
         const y = (pageDimensions.height - scaledHeight) / 2;
         
@@ -236,111 +277,143 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. COPYRIGHT PAGE (if enabled)
+    // Uses pre-generated image if available, otherwise falls back to text rendering
     if (includeCopyright) {
       const copyrightPage = pdfDoc.addPage([pageDimensions.width, pageDimensions.height]);
       currentPageNum++;
       
-      const { width, height } = copyrightPage.getSize();
-      const centerX = width / 2;
-      let textY = height * 0.55;
-      const lineHeight = 18;
-      
-      // Book title
-      const bookTitleWidth = fontBold.widthOfTextAtSize(title, 14);
-      copyrightPage.drawText(title, {
-        x: centerX - bookTitleWidth / 2,
-        y: textY,
-        size: 14,
-        font: fontBold,
-        color: rgb(0, 0, 0),
-      });
-      textY -= lineHeight * 2;
-      
-      // Copyright symbol and year
-      const copyrightHolder = publisher || author || "";
-      const copyrightLine = `© ${year} ${copyrightHolder}`.trim();
-      const copyrightWidth = font.widthOfTextAtSize(copyrightLine, 11);
-      copyrightPage.drawText(copyrightLine, {
-        x: centerX - copyrightWidth / 2,
-        y: textY,
-        size: 11,
-        font: font,
-        color: rgb(0.1, 0.1, 0.1),
-      });
-      textY -= lineHeight * 1.5;
-      
-      // All rights reserved
-      const rightsText = "All rights reserved.";
-      const rightsWidth = font.widthOfTextAtSize(rightsText, 10);
-      copyrightPage.drawText(rightsText, {
-        x: centerX - rightsWidth / 2,
-        y: textY,
-        size: 10,
-        font: font,
-        color: rgb(0.2, 0.2, 0.2),
-      });
-      textY -= lineHeight * 2;
-      
-      // No reproduction text
-      const noReprodText = [
-        "No part of this book may be reproduced, stored, or",
-        "transmitted in any form without written permission,",
-        "except for personal use.",
-      ];
-      
-      noReprodText.forEach(line => {
-        const lineWidth = font.widthOfTextAtSize(line, 9);
-        copyrightPage.drawText(line, {
-          x: centerX - lineWidth / 2,
+      if (copyrightPageImage) {
+        // Use pre-generated copyright page image
+        try {
+          const imageBytes = Buffer.from(copyrightPageImage, "base64");
+          const pngImage = await pdfDoc.embedPng(imageBytes);
+          
+          const availableWidth = pageDimensions.width - (finalMargins * 2);
+          const availableHeight = pageDimensions.height - (finalMargins * 2);
+          const scale = Math.min(
+            availableWidth / pngImage.width,
+            availableHeight / pngImage.height
+          );
+          const scaledWidth = pngImage.width * scale;
+          const scaledHeight = pngImage.height * scale;
+          
+          const x = (pageDimensions.width - scaledWidth) / 2;
+          const y = (pageDimensions.height - scaledHeight) / 2;
+          
+          copyrightPage.drawImage(pngImage, {
+            x,
+            y,
+            width: scaledWidth,
+            height: scaledHeight,
+          });
+          console.log("[export/pdf] Added pre-generated copyright page");
+        } catch (imgError) {
+          console.error("[export/pdf] Failed to embed copyright page image, using text fallback:", imgError);
+          // Fall through to text rendering below
+        }
+      } else {
+        // Fallback: text-based copyright page
+        const { width, height } = copyrightPage.getSize();
+        const centerX = width / 2;
+        let textY = height * 0.55;
+        const lineHeight = 18;
+        
+        // Book title
+        const bookTitleWidth = fontBold.widthOfTextAtSize(title, 14);
+        copyrightPage.drawText(title, {
+          x: centerX - bookTitleWidth / 2,
           y: textY,
-          size: 9,
-          font: font,
-          color: rgb(0.35, 0.35, 0.35),
+          size: 14,
+          font: fontBold,
+          color: rgb(0, 0, 0),
         });
-        textY -= lineHeight * 0.9;
-      });
-      
-      textY -= lineHeight;
-      
-      // Coloring book notice
-      const coloringNotice = "This is a coloring book. Images contain black outlines only.";
-      const noticeWidth = fontItalic.widthOfTextAtSize(coloringNotice, 9);
-      copyrightPage.drawText(coloringNotice, {
-        x: centerX - noticeWidth / 2,
-        y: textY,
-        size: 9,
-        font: fontItalic,
-        color: rgb(0.4, 0.4, 0.4),
-      });
-      textY -= lineHeight * 2;
-      
-      // Website (if provided)
-      if (website) {
-        const websiteWidth = font.widthOfTextAtSize(website, 9);
-        copyrightPage.drawText(website, {
-          x: centerX - websiteWidth / 2,
+        textY -= lineHeight * 2;
+        
+        // Copyright symbol and year
+        const copyrightHolder = publisher || author || "";
+        const copyrightLine = `© ${year} ${copyrightHolder}`.trim();
+        const copyrightWidth = font.widthOfTextAtSize(copyrightLine, 11);
+        copyrightPage.drawText(copyrightLine, {
+          x: centerX - copyrightWidth / 2,
           y: textY,
-          size: 9,
+          size: 11,
           font: font,
-          color: rgb(0.3, 0.3, 0.3),
+          color: rgb(0.1, 0.1, 0.1),
         });
         textY -= lineHeight * 1.5;
-      }
-      
-      // Created with ColorBookAI (if enabled)
-      if (includeCreatedWith) {
-        const createdText = "Created with ColorBook AI";
-        const createdWidth = font.widthOfTextAtSize(createdText, 8);
-        copyrightPage.drawText(createdText, {
-          x: centerX - createdWidth / 2,
+        
+        // All rights reserved
+        const rightsText = "All rights reserved.";
+        const rightsWidth = font.widthOfTextAtSize(rightsText, 10);
+        copyrightPage.drawText(rightsText, {
+          x: centerX - rightsWidth / 2,
           y: textY,
-          size: 8,
+          size: 10,
           font: font,
-          color: rgb(0.5, 0.5, 0.5),
+          color: rgb(0.2, 0.2, 0.2),
         });
+        textY -= lineHeight * 2;
+        
+        // No reproduction text
+        const noReprodText = [
+          "No part of this book may be reproduced, stored, or",
+          "transmitted in any form without written permission,",
+          "except for personal use.",
+        ];
+        
+        noReprodText.forEach(line => {
+          const lineWidth = font.widthOfTextAtSize(line, 9);
+          copyrightPage.drawText(line, {
+            x: centerX - lineWidth / 2,
+            y: textY,
+            size: 9,
+            font: font,
+            color: rgb(0.35, 0.35, 0.35),
+          });
+          textY -= lineHeight * 0.9;
+        });
+        
+        textY -= lineHeight;
+        
+        // Coloring book notice
+        const coloringNotice = "This is a coloring book. Images contain black outlines only.";
+        const noticeWidth = fontItalic.widthOfTextAtSize(coloringNotice, 9);
+        copyrightPage.drawText(coloringNotice, {
+          x: centerX - noticeWidth / 2,
+          y: textY,
+          size: 9,
+          font: fontItalic,
+          color: rgb(0.4, 0.4, 0.4),
+        });
+        textY -= lineHeight * 2;
+        
+        // Website (if provided)
+        if (website) {
+          const websiteWidth = font.widthOfTextAtSize(website, 9);
+          copyrightPage.drawText(website, {
+            x: centerX - websiteWidth / 2,
+            y: textY,
+            size: 9,
+            font: font,
+            color: rgb(0.3, 0.3, 0.3),
+          });
+          textY -= lineHeight * 1.5;
+        }
+        
+        // Created with ColorBookAI (if enabled)
+        if (includeCreatedWith) {
+          const createdText = "Created with ColorBook AI";
+          const createdWidth = font.widthOfTextAtSize(createdText, 8);
+          copyrightPage.drawText(createdText, {
+            x: centerX - createdWidth / 2,
+            y: textY,
+            size: 8,
+            font: font,
+            color: rgb(0.5, 0.5, 0.5),
+          });
+        }
+        console.log("[export/pdf] Added text-based copyright page");
       }
-      
-      console.log("[export/pdf] Added copyright page");
     }
 
     // 4. COLORING PAGES

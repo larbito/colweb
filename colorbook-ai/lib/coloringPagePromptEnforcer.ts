@@ -322,6 +322,21 @@ const REQUIRED_BOTTOM_FILL_PHRASES = [
  * - Orientation-specific layout
  * - OUTLINE-ONLY constraints
  */
+/**
+ * COMPRESSED essential constraints - these are the MANDATORY rules
+ * that must always be present, kept short for prompt length efficiency
+ */
+const COMPRESSED_ESSENTIAL_CONSTRAINTS = `
+=== COLORING PAGE RULES ===
+OUTLINES ONLY: Clean black lines on white. NO fills, NO gray, NO shading.
+Dark features (panda patches): OUTLINE shapes only, interior WHITE.
+Eyes: hollow circles with white centers.
+NO border, NO frame, NO crop marks.
+FULL PAGE: Subject fills 90-95% height. Ground reaches bottom edge.
+Bottom: floor texture + 2-4 foreground props. NO empty bottom strip.
+Subject in lower-middle area, not floating.
+AVOID: fills, shading, grayscale, borders, empty areas, floating subjects.`;
+
 export function buildFinalColoringPrompt(
   userPrompt: string,
   options: {
@@ -330,87 +345,146 @@ export function buildFinalColoringPrompt(
     size?: ImageSize;
     isStorybookMode?: boolean;
     characterConsistencyBlock?: string;
-    extraBottomReinforcement?: boolean; // Add extra bottom-fill emphasis (for retries)
-    extraCoverageReinforcement?: boolean; // Add extra coverage emphasis (for retries)
+    extraBottomReinforcement?: boolean;
+    extraCoverageReinforcement?: boolean;
+    compressConstraints?: boolean; // Use compressed version for shorter prompts
   } = {}
 ): string {
   const { 
     includeNegativeBlock = true, 
-    maxLength = 4500, // Increased to accommodate PAGE_COVERAGE_CONTRACT
+    maxLength = 3500, // STRICT LIMIT: 3500 chars max for better generation quality
     size = "1024x1536",
     isStorybookMode = false,
     characterConsistencyBlock,
     extraBottomReinforcement = false,
     extraCoverageReinforcement = false,
+    compressConstraints = true, // Default to compressed for better results
   } = options;
 
   const parts: string[] = [];
 
-  // Start with the user's prompt
-  parts.push(userPrompt.trim());
+  // Start with a concise scene description header
+  parts.push("Create a kids coloring book page:");
 
-  // Add character consistency block for storybook mode
+  // Compress the user prompt if it's too long
+  let scenePrompt = userPrompt.trim();
+  if (scenePrompt.length > 1500) {
+    // Extract key parts and compress
+    scenePrompt = compressUserPrompt(scenePrompt, 1500);
+  }
+  parts.push(scenePrompt);
+
+  // Add character consistency block for storybook mode (compressed if needed)
   if (isStorybookMode && characterConsistencyBlock) {
-    parts.push(characterConsistencyBlock);
+    const charBlock = characterConsistencyBlock.length > 500 
+      ? compressCharacterBlock(characterConsistencyBlock)
+      : characterConsistencyBlock;
+    parts.push(charBlock);
   }
 
-  // Add NO BORDER constraints (always)
-  parts.push(NO_BORDER_CONSTRAINTS);
-
-  // Add FILL CANVAS constraints (stronger framing) (always)
-  parts.push(FILL_CANVAS_CONSTRAINTS);
-
-  // Add FOREGROUND / BOTTOM FILL constraints (prevents empty bottom)
-  parts.push(FOREGROUND_BOTTOM_FILL_CONSTRAINTS);
-
-  // Add PAGE COVERAGE CONTRACT (CRITICAL - ensures full page utilization)
-  parts.push(PAGE_COVERAGE_CONTRACT);
-
-  // Add orientation-specific framing
-  const orientation = getOrientationFromSize(size);
-  if (orientation === "landscape") {
-    parts.push(LANDSCAPE_EXTRA_CONSTRAINTS);
-  } else if (orientation === "portrait") {
-    parts.push(PORTRAIT_EXTRA_CONSTRAINTS);
+  // Use compressed or full constraints based on remaining space
+  if (compressConstraints) {
+    parts.push(COMPRESSED_ESSENTIAL_CONSTRAINTS);
   } else {
-    parts.push(SQUARE_EXTRA_CONSTRAINTS);
+    // Full constraints (only use if we have room)
+    parts.push(NO_BORDER_CONSTRAINTS);
+    parts.push(FILL_CANVAS_CONSTRAINTS);
+    parts.push(FOREGROUND_BOTTOM_FILL_CONSTRAINTS);
+    
+    // Add orientation-specific framing
+    const orientation = getOrientationFromSize(size);
+    if (orientation === "landscape") {
+      parts.push(LANDSCAPE_EXTRA_CONSTRAINTS);
+    } else if (orientation === "portrait") {
+      parts.push(PORTRAIT_EXTRA_CONSTRAINTS);
+    } else {
+      parts.push(SQUARE_EXTRA_CONSTRAINTS);
+    }
   }
 
-  // Add extra bottom-fill reinforcement for retries
+  // Add extra reinforcement for retries (short version)
   if (extraBottomReinforcement) {
-    parts.push(BOTTOM_FILL_RETRY_REINFORCEMENT);
+    parts.push("CRITICAL: Extend ground to bottom edge. Add floor texture + foreground props.");
   }
 
-  // Add extra coverage reinforcement for retries
   if (extraCoverageReinforcement) {
-    parts.push(COVERAGE_RETRY_REINFORCEMENT);
+    parts.push("CRITICAL: Zoom in 20%. Fill bottom 20% with ground. NO empty areas.");
   }
 
-  // Add STRICT OUTLINE-ONLY constraints (always - most important)
-  parts.push(OUTLINE_ONLY_CONSTRAINTS);
-
-  // Add negative block
+  // Add short negative block
   if (includeNegativeBlock) {
-    parts.push(`\nAVOID: ${NEGATIVE_PROMPT_LIST.join(", ")}.`);
+    const shortNegatives = NEGATIVE_PROMPT_LIST.slice(0, 10).join(", ");
+    parts.push(`\nAVOID: ${shortNegatives}.`);
   }
 
   let finalPrompt = parts.join("\n");
 
-  // Truncate if over limit while preserving constraints
+  // STRICT truncation to maxLength
   if (finalPrompt.length > maxLength) {
-    const constraintsStart = finalPrompt.indexOf("=== NO BORDER");
-    if (constraintsStart > 0) {
-      const allConstraints = finalPrompt.substring(constraintsStart);
-      const availableLength = maxLength - allConstraints.length - 100;
-      if (availableLength > 200) {
-        finalPrompt = userPrompt.substring(0, availableLength) + "\n\n" + allConstraints;
+    // Keep essential constraints, truncate user prompt
+    const essentialEnd = finalPrompt.indexOf("=== COLORING PAGE RULES ===");
+    if (essentialEnd > 0) {
+      const essentials = finalPrompt.substring(essentialEnd);
+      const availableForScene = maxLength - essentials.length - 100;
+      if (availableForScene > 200) {
+        const header = "Create a kids coloring book page:\n";
+        const compressedScene = scenePrompt.substring(0, availableForScene - header.length);
+        finalPrompt = header + compressedScene + "\n\n" + essentials;
+      } else {
+        // Last resort: hard truncate
+        finalPrompt = finalPrompt.substring(0, maxLength);
       }
     } else {
       finalPrompt = finalPrompt.substring(0, maxLength);
     }
   }
 
+  // Log if prompt is still long
+  if (finalPrompt.length > 3500) {
+    console.warn(`[PROMPT WARNING] Final prompt is ${finalPrompt.length} chars (target: <=3500)`);
+  }
+
   return finalPrompt;
+}
+
+/**
+ * Compress a user prompt by removing redundant text
+ */
+function compressUserPrompt(prompt: string, maxLen: number): string {
+  // Remove duplicate constraint blocks that might be in user prompt
+  let compressed = prompt
+    .replace(/===.*?===/g, "") // Remove constraint headers
+    .replace(/CRITICAL:.*?\n/gi, "") // Remove CRITICAL lines (we'll add our own)
+    .replace(/MANDATORY:.*?\n/gi, "")
+    .replace(/\n\n+/g, "\n") // Collapse multiple newlines
+    .replace(/\s+/g, " ") // Collapse whitespace
+    .trim();
+  
+  if (compressed.length > maxLen) {
+    compressed = compressed.substring(0, maxLen - 3) + "...";
+  }
+  
+  return compressed;
+}
+
+/**
+ * Compress character consistency block
+ */
+function compressCharacterBlock(block: string): string {
+  // Extract just the key identity info
+  const speciesMatch = block.match(/Species.*?:\s*([^\n]+)/i);
+  const featuresMatch = block.match(/Features.*?:\s*([^\n]+)/i);
+  const proportionsMatch = block.match(/Proportions.*?:\s*([^\n]+)/i);
+  
+  const species = speciesMatch?.[1] || "character";
+  const features = featuresMatch?.[1]?.substring(0, 100) || "";
+  const proportions = proportionsMatch?.[1] || "";
+  
+  return `
+=== CHARACTER (SAME ON ALL PAGES) ===
+${species}. ${features}. ${proportions}.
+DO NOT change: face, eyes, ears, body ratio, features.
+ONLY change: pose, action.`;
 }
 
 // ============================================================

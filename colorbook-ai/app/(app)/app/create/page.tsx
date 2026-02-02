@@ -67,7 +67,20 @@ type BookType = "storybook" | "theme";
 type PageStatus = "queued" | "pending" | "generating" | "done" | "failed";
 type EnhanceStatus = "none" | "enhancing" | "enhanced" | "failed";
 type ProcessingStatus = "none" | "processing" | "done" | "failed";
-type CreateStep = 0 | 1 | 2 | 3 | 4 | 5;
+type CreateStep = 0 | 1 | 2 | 3 | 4 | 5 | 6; // Added step 5 for Front Matter, step 6 for Export
+type FrontMatterKey = "title" | "copyright" | "belongsTo";
+type FrontMatterStatus = "pending" | "generating" | "done" | "failed";
+
+// Front matter page state
+interface FrontMatterPage {
+  key: FrontMatterKey;
+  label: string;
+  enabled: boolean;
+  status: FrontMatterStatus;
+  imageBase64?: string;
+  error?: string;
+  attempts: number;
+}
 
 // Validation result info for debugging
 interface ValidationDebug {
@@ -1158,6 +1171,85 @@ export default function CreateColoringBookPage() {
     authorName: "",
   });
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  
+  // Front Matter state - previewed and regeneratable before PDF export
+  const [frontMatter, setFrontMatter] = useState<FrontMatterPage[]>([
+    { key: "title", label: "Title Page", enabled: true, status: "pending", attempts: 0 },
+    { key: "copyright", label: "Copyright Page", enabled: true, status: "pending", attempts: 0 },
+    { key: "belongsTo", label: "Belongs To Page", enabled: true, status: "pending", attempts: 0 },
+  ]);
+  const [generatingFrontMatter, setGeneratingFrontMatter] = useState<FrontMatterKey | null>(null);
+  
+  // Front matter computed values
+  const enabledFrontMatter = frontMatter.filter(fm => fm.enabled);
+  const doneFrontMatterCount = frontMatter.filter(fm => fm.enabled && fm.status === "done").length;
+  const frontMatterReady = enabledFrontMatter.every(fm => fm.status === "done");
+  
+  // Generate a single front matter page
+  const generateFrontMatterPage = async (key: FrontMatterKey) => {
+    setGeneratingFrontMatter(key);
+    setFrontMatter(prev => prev.map(fm => 
+      fm.key === key ? { ...fm, status: "generating" as FrontMatterStatus } : fm
+    ));
+    
+    try {
+      const response = await fetch("/api/front-matter/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key,
+          options: {
+            bookTitle: storyConfig.title || generatedIdea?.title || "My Coloring Book",
+            authorName: pdfSettings.authorName,
+            year: new Date().getFullYear().toString(),
+            belongsToName: "", // Leave blank for write-in line
+          },
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.status === "done" && data.imageBase64) {
+        setFrontMatter(prev => prev.map(fm =>
+          fm.key === key
+            ? { ...fm, status: "done" as FrontMatterStatus, imageBase64: data.imageBase64, error: undefined }
+            : fm
+        ));
+        toast.success(`${key === "title" ? "Title" : key === "copyright" ? "Copyright" : "Belongs To"} page generated!`);
+      } else {
+        setFrontMatter(prev => prev.map(fm =>
+          fm.key === key
+            ? { ...fm, status: "failed" as FrontMatterStatus, error: data.error || "Generation failed", attempts: fm.attempts + 1 }
+            : fm
+        ));
+        toast.error(`Failed to generate ${key} page`);
+      }
+    } catch (error) {
+      setFrontMatter(prev => prev.map(fm =>
+        fm.key === key
+          ? { ...fm, status: "failed" as FrontMatterStatus, error: error instanceof Error ? error.message : "Error", attempts: fm.attempts + 1 }
+          : fm
+      ));
+      toast.error(`Error generating ${key} page`);
+    } finally {
+      setGeneratingFrontMatter(null);
+    }
+  };
+  
+  // Generate all enabled front matter pages
+  const generateAllFrontMatter = async () => {
+    const toGenerate = frontMatter.filter(fm => fm.enabled && fm.status !== "done");
+    for (const fm of toGenerate) {
+      await generateFrontMatterPage(fm.key);
+    }
+  };
+  
+  // Toggle front matter page enabled/disabled
+  const toggleFrontMatter = (key: FrontMatterKey) => {
+    setFrontMatter(prev => prev.map(fm =>
+      fm.key === key ? { ...fm, enabled: !fm.enabled } : fm
+    ));
+  };
 
   const generatePdfPreview = async () => {
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
@@ -1173,7 +1265,13 @@ export default function CreateColoringBookPage() {
     try {
       const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
       
-      console.log("[PDF Export] Sending request with", donePages.length, "pages");
+      // Collect already-generated front matter images
+      const titlePage = frontMatter.find(fm => fm.key === "title" && fm.enabled && fm.status === "done");
+      const copyrightPage = frontMatter.find(fm => fm.key === "copyright" && fm.enabled && fm.status === "done");
+      const belongsToPage = frontMatter.find(fm => fm.key === "belongsTo" && fm.enabled && fm.status === "done");
+      
+      console.log("[PDF Export] Sending request with", donePages.length, "coloring pages +", 
+        [titlePage, copyrightPage, belongsToPage].filter(Boolean).length, "front matter pages");
       
       const response = await fetch("/api/export/pdf", {
         method: "POST",
@@ -1185,6 +1283,10 @@ export default function CreateColoringBookPage() {
             page: p.page,
             imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
           })),
+          // Use pre-generated front matter images (no generation during export)
+          titlePageImage: titlePage?.imageBase64,
+          copyrightPageImage: copyrightPage?.imageBase64,
+          belongsToPageImage: belongsToPage?.imageBase64,
           pageSize: "letter", // Always US Letter
           orientation: orientation === "landscape" ? "landscape" : "portrait",
           margin: 0.25,
@@ -2084,7 +2186,12 @@ export default function CreateColoringBookPage() {
                   </Button>
                   {doneCount === pages.length && (
                     <Button onClick={() => setCurrentStep(5)} className="flex-1" size="lg">
-                      <FileDown className="mr-2 h-5 w-5" /> Continue to Export
+                      <FileDown className="mr-2 h-5 w-5" /> Continue to Front Matter
+                    </Button>
+                  )}
+                  {doneCount > 0 && doneCount < pages.length && (
+                    <Button variant="outline" onClick={() => setCurrentStep(5)}>
+                      <FileDown className="mr-2 h-4 w-4" /> Preview Front Matter ({doneCount} pages ready)
                     </Button>
                   )}
                 </div>
@@ -2093,7 +2200,170 @@ export default function CreateColoringBookPage() {
           )}
 
           {/* ==================== STEP 5: EXPORT ==================== */}
+          {/* ==================== STEP 5: FRONT MATTER ==================== */}
           {currentStep === 5 && doneCount > 0 && (
+            <SectionCard
+              title="Book Pages (Extras)"
+              description="Preview and customize your title page, copyright page, and belongs-to page before export"
+              icon={Book}
+              iconColor="text-indigo-500"
+              iconBg="bg-indigo-500/10"
+              headerActions={
+                <Badge variant="outline" className="text-sm">
+                  {doneFrontMatterCount} / {enabledFrontMatter.length} ready
+                </Badge>
+              }
+            >
+              <div className="space-y-6">
+                {/* Front Matter Cards */}
+                <div className="grid md:grid-cols-3 gap-4">
+                  {frontMatter.map((fm) => (
+                    <Card key={fm.key} className={cn(
+                      "overflow-hidden transition-all",
+                      !fm.enabled && "opacity-50"
+                    )}>
+                      {/* Toggle Header */}
+                      <div className="p-3 border-b flex items-center justify-between bg-muted/30">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={fm.enabled}
+                            onChange={() => toggleFrontMatter(fm.key)}
+                            className="h-4 w-4 rounded"
+                          />
+                          <span className="font-medium text-sm">{fm.label}</span>
+                        </label>
+                        {fm.status === "done" && (
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        )}
+                        {fm.status === "failed" && (
+                          <AlertCircle className="h-4 w-4 text-red-500" />
+                        )}
+                      </div>
+                      
+                      {/* Preview Area */}
+                      <div className="aspect-[8.5/11] bg-muted relative">
+                        {fm.imageBase64 ? (
+                          <img
+                            src={`data:image/png;base64,${fm.imageBase64}`}
+                            alt={fm.label}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : fm.status === "generating" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <span className="text-xs text-muted-foreground">Generating...</span>
+                          </div>
+                        ) : fm.status === "failed" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
+                            <AlertCircle className="h-8 w-8 text-red-500" />
+                            <span className="text-xs text-red-500 text-center">{fm.error || "Failed"}</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
+                            <FileText className="h-8 w-8 text-muted-foreground/30" />
+                            <span className="text-xs text-muted-foreground">Not generated yet</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Actions */}
+                      <div className="p-3 border-t">
+                        <Button
+                          size="sm"
+                          className="w-full"
+                          variant={fm.status === "done" ? "outline" : "default"}
+                          onClick={() => generateFrontMatterPage(fm.key)}
+                          disabled={!fm.enabled || generatingFrontMatter === fm.key}
+                        >
+                          {generatingFrontMatter === fm.key ? (
+                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                          ) : fm.status === "done" ? (
+                            <><RefreshCw className="mr-2 h-4 w-4" /> Regenerate</>
+                          ) : (
+                            <><Sparkles className="mr-2 h-4 w-4" /> Generate</>
+                          )}
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+                
+                {/* Generate All Button */}
+                {enabledFrontMatter.some(fm => fm.status !== "done") && (
+                  <Button 
+                    onClick={generateAllFrontMatter} 
+                    disabled={generatingFrontMatter !== null}
+                    className="w-full"
+                  >
+                    {generatingFrontMatter ? (
+                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating...</>
+                    ) : (
+                      <><Sparkles className="mr-2 h-5 w-5" /> Generate All Front Matter</>
+                    )}
+                  </Button>
+                )}
+                
+                {/* Edit Options */}
+                <div className="grid md:grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Book Title</label>
+                    <Input
+                      value={storyConfig.title}
+                      onChange={(e) => {
+                        setStoryConfig({ ...storyConfig, title: e.target.value });
+                        // Mark title page as needing regeneration
+                        setFrontMatter(prev => prev.map(fm =>
+                          fm.key === "title" && fm.status === "done" 
+                            ? { ...fm, status: "pending" as FrontMatterStatus, imageBase64: undefined }
+                            : fm
+                        ));
+                      }}
+                      placeholder="My Coloring Book"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Author / Publisher</label>
+                    <Input
+                      value={pdfSettings.authorName}
+                      onChange={(e) => {
+                        setPdfSettings({ ...pdfSettings, authorName: e.target.value });
+                        // Mark copyright page as needing regeneration
+                        setFrontMatter(prev => prev.map(fm =>
+                          (fm.key === "copyright" || fm.key === "title") && fm.status === "done"
+                            ? { ...fm, status: "pending" as FrontMatterStatus, imageBase64: undefined }
+                            : fm
+                        ));
+                      }}
+                      placeholder="Your name (optional)"
+                    />
+                  </div>
+                </div>
+                
+                {/* Navigation */}
+                <div className="flex gap-3 pt-4 border-t">
+                  <Button variant="outline" onClick={() => setCurrentStep(4)}>
+                    <ArrowLeft className="mr-2 h-4 w-4" /> Back to Images
+                  </Button>
+                  <Button 
+                    onClick={() => setCurrentStep(6)}
+                    disabled={enabledFrontMatter.some(fm => fm.status !== "done")}
+                    className="flex-1"
+                    size="lg"
+                  >
+                    {enabledFrontMatter.every(fm => fm.status === "done") ? (
+                      <><FileDown className="mr-2 h-5 w-5" /> Continue to Export</>
+                    ) : (
+                      <><AlertCircle className="mr-2 h-5 w-5" /> Generate Front Matter First</>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </SectionCard>
+          )}
+
+          {/* ==================== STEP 6: EXPORT ==================== */}
+          {currentStep === 6 && doneCount > 0 && (
             <SectionCard
               title="Preview & Export"
               description="Configure your coloring book PDF and download"
@@ -2370,8 +2640,8 @@ export default function CreateColoringBookPage() {
                 {/* Export Actions */}
                 <div className="flex flex-col gap-3 pt-4 border-t">
                   <div className="flex gap-3 flex-wrap">
-                    <Button variant="outline" onClick={() => setCurrentStep(4)}>
-                      <ArrowLeft className="mr-2 h-4 w-4" /> Back to Review
+                    <Button variant="outline" onClick={() => setCurrentStep(5)}>
+                      <ArrowLeft className="mr-2 h-4 w-4" /> Back to Front Matter
                     </Button>
                     <Button variant="outline" onClick={downloadAll}>
                       <Download className="mr-2 h-4 w-4" /> Download PNGs
