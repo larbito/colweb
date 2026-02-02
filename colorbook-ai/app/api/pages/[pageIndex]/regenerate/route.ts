@@ -28,7 +28,7 @@ const requestSchema = z.object({
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { pageIndex: string } }
+  { params }: { params: Promise<{ pageIndex: string }> }
 ) {
   if (!isOpenAIImageGenConfigured()) {
     return NextResponse.json(
@@ -41,7 +41,8 @@ export async function POST(
     );
   }
 
-  const pageIndex = parseInt(params.pageIndex);
+  const { pageIndex: pageIndexStr } = await params;
+  const pageIndex = parseInt(pageIndexStr);
 
   try {
     const body = await request.json();
