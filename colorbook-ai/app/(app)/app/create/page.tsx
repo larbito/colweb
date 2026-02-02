@@ -208,7 +208,7 @@ export default function CreateColoringBookPage() {
     sceneVariety: "medium",
     settingConstraint: "mixed",
   });
-  const [expandedSettings, setExpandedSettings] = useState(false);
+  const [expandedSettings, setExpandedSettings] = useState(true); // Always visible by default
   
   // Image Viewer
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -1489,43 +1489,62 @@ export default function CreateColoringBookPage() {
             }
           />
 
-          {/* Step Indicator */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-2">
+          {/* Wizard Step Navigation - Sticky header */}
+          <div className="sticky top-0 z-40 -mx-6 px-6 py-4 bg-[hsl(var(--background))]/95 backdrop-blur-sm border-b border-[hsl(0,0%,100%,0.08)]">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             {[
-              { step: 0, label: "Book Type", icon: Book },
+              { step: 0, label: "Type", icon: Book },
               { step: 1, label: "Idea", icon: Lightbulb },
               { step: 2, label: "Prompts", icon: FileText },
               { step: 3, label: "Generate", icon: ImageIcon },
               { step: 4, label: "Review", icon: Eye },
-              { step: 5, label: "Export", icon: FileDown },
-            ].map(({ step, label, icon: Icon }, idx) => (
+              { step: 5, label: "Front Matter", icon: Users },
+              { step: 6, label: "Export", icon: FileDown },
+            ].map(({ step, label, icon: Icon }, idx) => {
+              const isAccessible = step <= currentStep || 
+                (step === 2 && pages.length > 0) || 
+                (step >= 3 && doneCount > 0) ||
+                (step === 5 && doneCount >= pages.length && pages.length > 0) ||
+                (step === 6 && doneCount >= pages.length && pages.length > 0);
+              const isCompleted = step < currentStep || 
+                (step === 2 && pages.length > 0 && currentStep > 2) ||
+                (step === 3 && doneCount >= pages.length && currentStep > 3);
+              
+              return (
               <button
                 key={step}
                 onClick={() => {
-                  // Only allow going back or to completed steps
-                  if (step <= currentStep || (step === 2 && pages.length > 0) || (step >= 3 && doneCount > 0)) {
+                  if (isAccessible) {
                     setCurrentStep(step as CreateStep);
                   }
                 }}
                 className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap",
+                  "flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-medium transition-all whitespace-nowrap",
                   currentStep === step
-                    ? "bg-primary text-primary-foreground"
-                    : step < currentStep || (step === 2 && pages.length > 0) || (step >= 3 && doneCount > 0)
-                      ? "bg-muted hover:bg-muted/80 cursor-pointer"
-                      : "bg-muted/50 text-muted-foreground cursor-not-allowed"
+                    ? "bg-white text-black"
+                    : isCompleted
+                      ? "bg-[hsl(160,84%,39%,0.15)] text-emerald-400 hover:bg-[hsl(160,84%,39%,0.2)]"
+                    : isAccessible
+                      ? "bg-[hsl(0,0%,100%,0.06)] text-[hsl(0,0%,75%)] hover:bg-[hsl(0,0%,100%,0.1)]"
+                      : "bg-[hsl(0,0%,100%,0.03)] text-[hsl(0,0%,45%)] cursor-not-allowed"
                 )}
               >
+                {isCompleted && step !== currentStep ? (
+                  <Check className="h-4 w-4 text-emerald-400" />
+                ) : (
                 <Icon className="h-4 w-4" />
-                {label}
-                {step === 2 && pages.length > 0 && (
-                  <Badge variant="secondary" className="ml-1">{pages.length}</Badge>
                 )}
-                {step === 3 && doneCount > 0 && (
-                  <Badge variant="secondary" className="ml-1">{doneCount}/{pages.length}</Badge>
+                <span className="hidden sm:inline">{label}</span>
+                {step === 2 && pages.length > 0 && (
+                  <span className="bg-[hsl(0,0%,100%,0.15)] text-xs px-1.5 py-0.5 rounded-md">{pages.length}</span>
+                )}
+                {step === 3 && pages.length > 0 && (
+                  <span className="bg-[hsl(0,0%,100%,0.15)] text-xs px-1.5 py-0.5 rounded-md">{doneCount}/{pages.length}</span>
                 )}
               </button>
-            ))}
+              );
+            })}
+            </div>
           </div>
 
           {/* Progress Panel */}

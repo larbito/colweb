@@ -5,7 +5,11 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
 
-// Full option card with icon and description
+/**
+ * Option Card - Selection cards for wizard steps
+ * Uses the new dark design system
+ */
+
 interface OptionCardProps {
   title: string;
   description?: string;
@@ -34,21 +38,21 @@ export function OptionCard({
   className,
 }: OptionCardProps) {
   const sizeStyles = {
-    sm: "p-3",
-    md: "p-4",
-    lg: "p-5",
+    sm: "p-4",
+    md: "p-5",
+    lg: "p-6",
   };
 
   const iconSizes = {
-    sm: "h-4 w-4",
-    md: "h-5 w-5",
-    lg: "h-6 w-6",
+    sm: "h-5 w-5",
+    md: "h-6 w-6",
+    lg: "h-7 w-7",
   };
 
   const iconContainerSizes = {
-    sm: "h-8 w-8",
-    md: "h-10 w-10",
-    lg: "h-12 w-12",
+    sm: "h-10 w-10",
+    md: "h-12 w-12",
+    lg: "h-14 w-14",
   };
 
   return (
@@ -57,23 +61,23 @@ export function OptionCard({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "relative flex flex-col rounded-xl border-2 text-left transition-all",
+        "relative flex flex-col rounded-2xl border-2 text-left transition-all duration-150",
         sizeStyles[size],
-        // Variant styles
+        // Variant styles - using new dark theme
         variant === "default" && [
           selected
-            ? "border-primary bg-primary/5 shadow-sm"
-            : "border-border bg-card hover:border-primary/30 hover:bg-muted/30",
+            ? "border-white bg-[hsl(0,0%,100%,0.06)]"
+            : "border-[hsl(0,0%,100%,0.1)] bg-[hsl(var(--card))] hover:border-[hsl(0,0%,100%,0.2)] hover:bg-[hsl(0,0%,100%,0.04)]",
         ],
         variant === "bordered" && [
           selected
-            ? "border-primary bg-transparent"
-            : "border-border bg-transparent hover:border-primary/50",
+            ? "border-white bg-transparent"
+            : "border-[hsl(0,0%,100%,0.1)] bg-transparent hover:border-[hsl(0,0%,100%,0.25)]",
         ],
         variant === "filled" && [
           selected
-            ? "border-primary bg-primary text-primary-foreground"
-            : "border-border bg-muted/50 hover:bg-muted",
+            ? "border-white bg-white text-black"
+            : "border-[hsl(0,0%,100%,0.1)] bg-[hsl(0,0%,100%,0.06)] hover:bg-[hsl(0,0%,100%,0.1)]",
         ],
         disabled && "cursor-not-allowed opacity-50",
         className
@@ -82,23 +86,23 @@ export function OptionCard({
       {/* Selected indicator */}
       {selected && (
         <div className={cn(
-          "absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full",
-          variant === "filled" ? "bg-white/20" : "bg-primary text-primary-foreground"
+          "absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full",
+          variant === "filled" ? "bg-black/20" : "bg-white text-black"
         )}>
-          <Check className="h-3 w-3" />
+          <Check className="h-3.5 w-3.5" />
         </div>
       )}
 
       {/* Icon */}
       {(Icon || iconElement) && (
         <div className={cn(
-          "mb-3 flex items-center justify-center rounded-lg",
+          "mb-4 flex items-center justify-center rounded-xl",
           iconContainerSizes[size],
           selected 
             ? variant === "filled" 
-              ? "bg-white/10" 
-              : "bg-primary/10 text-primary"
-            : "bg-muted text-muted-foreground"
+              ? "bg-black/10" 
+              : "bg-white/10 text-white"
+            : "bg-[hsl(0,0%,100%,0.06)] text-[hsl(0,0%,60%)]"
         )}>
           {Icon ? (
             <Icon className={iconSizes[size]} />
@@ -109,13 +113,14 @@ export function OptionCard({
       )}
 
       {/* Content */}
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <div className="flex items-center gap-2">
           <span className={cn(
-            "font-medium",
+            "font-semibold",
             size === "sm" && "text-sm",
-            size === "md" && "text-sm",
-            size === "lg" && "text-base"
+            size === "md" && "text-base",
+            size === "lg" && "text-lg",
+            selected && variant === "filled" ? "text-black" : "text-[hsl(0,0%,95%)]"
           )}>
             {title}
           </span>
@@ -123,8 +128,8 @@ export function OptionCard({
             <Badge 
               variant="secondary" 
               className={cn(
-                "text-[9px] px-1 py-0",
-                selected && variant === "filled" && "bg-white/20 text-white"
+                "text-[10px] px-2 py-0.5",
+                selected && variant === "filled" && "bg-black/10 text-black"
               )}
             >
               {badge}
@@ -133,11 +138,11 @@ export function OptionCard({
         </div>
         {description && (
           <p className={cn(
-            "text-muted-foreground line-clamp-2",
+            "line-clamp-2",
             size === "sm" && "text-xs",
-            size === "md" && "text-xs",
+            size === "md" && "text-sm",
             size === "lg" && "text-sm",
-            selected && variant === "filled" && "text-primary-foreground/70"
+            selected && variant === "filled" ? "text-black/70" : "text-[hsl(0,0%,55%)]"
           )}>
             {description}
           </p>
@@ -173,19 +178,19 @@ export function OptionChip({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border font-medium transition-all",
-        size === "sm" && "px-2.5 py-1 text-xs",
-        size === "md" && "px-3 py-1.5 text-sm",
+        "inline-flex items-center gap-1.5 rounded-xl border font-medium transition-all duration-150",
+        size === "sm" && "px-3 py-1.5 text-xs",
+        size === "md" && "px-4 py-2 text-sm",
         selected
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border bg-card text-foreground hover:border-primary/50 hover:bg-muted/50",
+          ? "border-white bg-white text-black"
+          : "border-[hsl(0,0%,100%,0.1)] bg-transparent text-[hsl(0,0%,75%)] hover:border-[hsl(0,0%,100%,0.2)] hover:bg-[hsl(0,0%,100%,0.04)]",
         disabled && "cursor-not-allowed opacity-50",
         className
       )}
     >
       {Icon && (
         <Icon className={cn(
-          size === "sm" ? "h-3 w-3" : "h-4 w-4",
+          size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4",
         )} />
       )}
       {label}
@@ -203,13 +208,13 @@ interface OptionGridProps {
 
 export function OptionGrid({ children, columns = 3, className }: OptionGridProps) {
   const gridCols = {
-    2: "grid-cols-2",
-    3: "grid-cols-2 md:grid-cols-3",
-    4: "grid-cols-2 md:grid-cols-4",
+    2: "grid-cols-1 sm:grid-cols-2",
+    3: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+    4: "grid-cols-2 lg:grid-cols-4",
   };
 
   return (
-    <div className={cn("grid gap-3", gridCols[columns], className)}>
+    <div className={cn("grid gap-4", gridCols[columns], className)}>
       {children}
     </div>
   );
