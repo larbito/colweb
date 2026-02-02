@@ -64,12 +64,21 @@ import type {
 // ============================================================
 
 type BookType = "storybook" | "theme";
-type PageStatus = "queued" | "pending" | "generating" | "done" | "failed";
+type PageStatus = "queued" | "pending" | "generating" | "done" | "failed" | "paused";
 type EnhanceStatus = "none" | "enhancing" | "enhanced" | "failed";
 type ProcessingStatus = "none" | "processing" | "done" | "failed";
 type CreateStep = 0 | 1 | 2 | 3 | 4 | 5 | 6; // Added step 5 for Front Matter, step 6 for Export
 type FrontMatterKey = "title" | "copyright" | "belongsTo";
 type FrontMatterStatus = "pending" | "generating" | "done" | "failed";
+
+// Batch generation pause info
+interface BatchPauseInfo {
+  isPaused: boolean;
+  reason?: string;
+  errorCode?: string;
+  actionHint?: string;
+  pausedAt?: number;
+}
 
 // Front matter page state
 interface FrontMatterPage {
@@ -111,6 +120,9 @@ interface PageState extends PagePromptItem {
   lastAttemptAt?: number;
   validation?: ValidationDebug;
   warning?: string;
+  // Pause info for non-retryable errors
+  pauseReason?: string;
+  actionHint?: string;
 }
 
 interface GeneratedIdea {
@@ -179,6 +191,7 @@ export default function CreateColoringBookPage() {
   
   // Step 3: Generation
   const [isGenerating, setIsGenerating] = useState(false);
+  const [batchPause, setBatchPause] = useState<BatchPauseInfo>({ isPaused: false });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [characterIdentityProfile, setCharacterIdentityProfile] = useState<any>(null);
   
@@ -263,9 +276,10 @@ export default function CreateColoringBookPage() {
   // Computed values - comprehensive status tracking
   const doneCount = pages.filter(p => p.status === "done").length;
   const failedCount = pages.filter(p => p.status === "failed").length;
+  const pausedCount = pages.filter(p => p.status === "paused").length;
   const queuedCount = pages.filter(p => p.status === "queued").length;
   const generatingCount = pages.filter(p => p.status === "generating").length;
-  const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed" || p.status === "queued").length;
+  const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed" || p.status === "queued" || p.status === "paused").length;
   const notDoneCount = pages.length - doneCount;
   const enhancedCount = pages.filter(p => p.enhanceStatus === "enhanced").length;
   const processedCount = pages.filter(p => p.finalLetterStatus === "done").length;
@@ -534,7 +548,8 @@ export default function CreateColoringBookPage() {
       return;
     }
 
-    const pagesToGenerate = pages.filter(p => p.status === "pending" || p.status === "failed" || p.status === "queued");
+    // Include paused pages in generation queue
+    const pagesToGenerate = pages.filter(p => p.status === "pending" || p.status === "failed" || p.status === "queued" || p.status === "paused");
     if (pagesToGenerate.length === 0) {
       toast.info("All pages already generated!");
       return;
@@ -624,8 +639,51 @@ export default function CreateColoringBookPage() {
               : p
           ));
           successCount++;
+        } else if (data.status === "paused" && data.errorType === "non_retryable") {
+          // NON-RETRYABLE ERROR (billing limit, invalid API key, etc.)
+          // Mark this page as paused and STOP the batch
+          setPages(prev => prev.map(p =>
+            p.page === pageItem.page
+              ? { 
+                  ...p, 
+                  status: "paused" as PageStatus, 
+                  error: data.error || "Generation paused",
+                  errorCode: data.errorCode,
+                  pauseReason: data.pauseReason,
+                  actionHint: data.actionHint,
+                  attempts: (p.attempts || 0) + 1,
+                }
+              : p
+          ));
+          
+          // Mark remaining queued pages as paused too
+          setPages(prev => prev.map(p =>
+            p.status === "queued"
+              ? { 
+                  ...p, 
+                  status: "paused" as PageStatus, 
+                  pauseReason: data.pauseReason,
+                }
+              : p
+          ));
+          
+          // Set batch pause state
+          setBatchPause({
+            isPaused: true,
+            reason: data.pauseReason || data.error,
+            errorCode: data.errorCode,
+            actionHint: data.actionHint,
+            pausedAt: Date.now(),
+          });
+          
+          // Show toast and STOP processing
+          toast.error(data.pauseReason || "Generation paused due to billing limit");
+          console.error(`[generateAllImages] NON-RETRYABLE ERROR on page ${pageItem.page}: ${data.errorCode}`);
+          
+          // Exit the loop - don't continue with remaining pages
+          break;
         } else {
-          // Generation failed
+          // Regular generation failure (retryable errors exhausted)
           setPages(prev => prev.map(p =>
             p.page === pageItem.page
               ? { 
@@ -879,6 +937,24 @@ export default function CreateColoringBookPage() {
     } else {
       toast.info(`Regenerated ${successCount} pages, ${failCount} still failed.`);
     }
+  };
+
+  // Resume generation after billing limit pause
+  const resumeGeneration = async () => {
+    // Clear pause state
+    setBatchPause({ isPaused: false });
+    
+    // Reset paused pages to queued
+    setPages(prev => prev.map(p =>
+      p.status === "paused" 
+        ? { ...p, status: "queued" as PageStatus, error: undefined, pauseReason: undefined, actionHint: undefined } 
+        : p
+    ));
+    
+    toast.info("Resuming generation...");
+    
+    // Trigger generation of remaining pages
+    await generateAllImages();
   };
 
   // ============================================================
@@ -2085,12 +2161,50 @@ export default function CreateColoringBookPage() {
                       {failedCount} failed
                     </Badge>
                   )}
+                  {pausedCount > 0 && (
+                    <Badge variant="warning" className="text-sm bg-amber-500/20 text-amber-500 border-amber-500/50">
+                      <AlertCircle className="mr-1 h-3 w-3" />
+                      {pausedCount} paused (billing)
+                    </Badge>
+                  )}
                   {pagesWithWarnings > 0 && (
                     <Badge variant="outline" className="text-sm border-amber-500 text-amber-600">
                       {pagesWithWarnings} with warnings
                     </Badge>
                   )}
                 </div>
+                
+                {/* PAUSE BANNER - Show when billing limit reached */}
+                {batchPause.isPaused && (
+                  <div className="p-4 rounded-lg border border-amber-500/50 bg-amber-500/10 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 space-y-1">
+                        <p className="font-medium text-amber-500">Generation Paused</p>
+                        <p className="text-sm text-muted-foreground">
+                          {batchPause.reason || "API billing limit reached"}
+                        </p>
+                        {batchPause.actionHint && (
+                          <p className="text-sm text-muted-foreground/80">
+                            {batchPause.actionHint}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-8">
+                      <Button onClick={resumeGeneration} className="bg-amber-500 hover:bg-amber-600 text-black">
+                        <Play className="mr-2 h-4 w-4" />
+                        Resume Generation
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => window.open("https://platform.openai.com/account/billing", "_blank")}>
+                        View OpenAI Billing
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground/60 ml-8">
+                      {doneCount} pages generated successfully • {pausedCount} pages paused
+                    </p>
+                  </div>
+                )}
                 
                 {/* Action Buttons */}
                 <div className="flex gap-2 flex-wrap">
@@ -2151,7 +2265,8 @@ export default function CreateColoringBookPage() {
                       className={cn(
                         "group overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-primary",
                         page.status === "done" && "border-green-500/30",
-                        page.status === "failed" && "border-red-500/30"
+                        page.status === "failed" && "border-red-500/30",
+                        page.status === "paused" && "border-amber-500/30 bg-amber-500/5"
                       )}
                       onClick={() => page.imageBase64 && openViewer(page.page)}
                     >
@@ -2212,6 +2327,22 @@ export default function CreateColoringBookPage() {
                               <RefreshCw className="mr-1 h-3 w-3" /> Retry
                             </Button>
                           </div>
+                        ) : page.status === "paused" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
+                            <AlertCircle className="h-8 w-8 text-amber-500" />
+                            <span className="text-xs text-amber-500 font-medium">Paused</span>
+                            <span className="text-[10px] text-amber-400 line-clamp-2">
+                              {page.pauseReason || "Billing limit reached"}
+                            </span>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="mt-1 border-amber-500/50 text-amber-500 hover:bg-amber-500/10"
+                              onClick={(e) => { e.stopPropagation(); resumeGeneration(); }}
+                            >
+                              <Play className="mr-1 h-3 w-3" /> Resume
+                            </Button>
+                          </div>
                         ) : (
                           <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
                             <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
@@ -2245,6 +2376,9 @@ export default function CreateColoringBookPage() {
                             )}
                             {page.status === "failed" && (
                               <AlertCircle className="h-4 w-4 text-red-500" />
+                            )}
+                            {page.status === "paused" && (
+                              <AlertCircle className="h-4 w-4 text-amber-500" />
                             )}
                             {page.status === "queued" && (
                               <span className="text-[10px] text-muted-foreground">Queued</span>

@@ -13,6 +13,10 @@ import {
   buildCharacterRetryReinforcement,
 } from "@/lib/characterIdentity";
 import { validateGeneratedImage, type ComplexityLevel } from "@/lib/services/imageValidator";
+import { 
+  isNonRetryableError, 
+  NonRetryableGenerationError,
+} from "@/lib/errors/generationErrors";
 
 /**
  * Route segment config - single image generation with validation retries
@@ -159,11 +163,13 @@ export async function POST(request: NextRequest) {
 
         console.log(`[generate-one] Page ${page}: Attempt ${attempt}/${totalAttempts} (prompt: ${finalPrompt.length} chars)`);
 
-        // Generate image
+        // Generate image with context for error tracking
         const result = await generateImage({
           prompt: finalPrompt,
           n: 1,
           size: size as ImageSize,
+        }, {
+          pageIndex: page,
         });
 
         if (!result.images || result.images.length === 0) {
@@ -284,6 +290,33 @@ export async function POST(request: NextRequest) {
         }
 
       } catch (attemptError) {
+        // CHECK FOR NON-RETRYABLE ERRORS - STOP IMMEDIATELY
+        if (isNonRetryableError(attemptError)) {
+          console.error(`[generate-one] Page ${page}: NON-RETRYABLE ERROR - ${attemptError.code}`);
+          console.error(`[generate-one] Page ${page}: ${attemptError.message}`);
+          console.error(`[generate-one] Page ${page}: Context:`, attemptError.context);
+          
+          // Return "paused" status for billing/quota errors, "failed" for others
+          const isPausable = ["BILLING_LIMIT", "INSUFFICIENT_QUOTA"].includes(attemptError.code);
+          
+          return NextResponse.json({
+            page,
+            status: isPausable ? "paused" : "failed",
+            error: attemptError.message,
+            errorCode: attemptError.code,
+            errorType: "non_retryable",
+            pauseReason: isPausable ? attemptError.getUserMessage() : undefined,
+            actionHint: attemptError.getActionHint(),
+            attempts: attempt,
+            context: {
+              provider: attemptError.context.provider,
+              httpStatus: attemptError.context.httpStatus,
+              requestId: attemptError.context.requestId,
+            },
+          });
+        }
+        
+        // Regular retryable error
         const errorMsg = attemptError instanceof Error ? attemptError.message : "Generation error";
         console.error(`[generate-one] Page ${page}: Attempt ${attempt} failed: ${errorMsg}`);
         
@@ -338,6 +371,26 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
+    // Handle non-retryable errors at top level
+    if (isNonRetryableError(error)) {
+      const isPausable = ["BILLING_LIMIT", "INSUFFICIENT_QUOTA"].includes(error.code);
+      
+      return NextResponse.json({
+        page: 0,
+        status: isPausable ? "paused" : "failed",
+        error: error.message,
+        errorCode: error.code,
+        errorType: "non_retryable",
+        pauseReason: isPausable ? error.getUserMessage() : undefined,
+        actionHint: error.getActionHint(),
+        context: {
+          provider: error.context.provider,
+          httpStatus: error.context.httpStatus,
+          requestId: error.context.requestId,
+        },
+      });
+    }
+    
     const errorMsg = error instanceof Error ? error.message : "Generation failed";
     console.error("[generate-one] Error:", errorMsg);
     return NextResponse.json({

@@ -17,6 +17,11 @@
  */
 
 import OpenAI from "openai";
+import { 
+  classifyOpenAIError, 
+  isNonRetryableError,
+  NonRetryableGenerationError,
+} from "@/lib/errors/generationErrors";
 
 // Lazy initialization to avoid errors during build when API key is not set
 let _openai: OpenAI | null = null;
@@ -55,6 +60,11 @@ export interface GenerateImageResult {
   revisedPrompts?: string[]; // DALL-E 3 sometimes revises prompts
 }
 
+export interface GenerateImageContext {
+  pageIndex?: number;
+  batchId?: string;
+}
+
 /**
  * Check if OpenAI is configured
  */
@@ -69,11 +79,20 @@ export function isOpenAIImageGenConfigured(): boolean {
  * No hidden system prompts. No automatic style injection.
  * The prompt parameter is the source of truth.
  * 
+ * ERROR HANDLING:
+ * - Non-retryable errors (billing limit, invalid key) throw NonRetryableGenerationError
+ * - Retryable errors throw RetryableGenerationError
+ * - Caller should check error type and handle accordingly
+ * 
  * @param params.prompt - The EXACT prompt to send (no modifications)
  * @param params.n - Number of images (1-4, default 1)
  * @param params.size - Image size (default "1024x1536" for portrait coloring pages)
+ * @param context - Optional context for error tracking (pageIndex, batchId)
  */
-export async function generateImage(params: GenerateImageParams): Promise<GenerateImageResult> {
+export async function generateImage(
+  params: GenerateImageParams, 
+  context: GenerateImageContext = {}
+): Promise<GenerateImageResult> {
   const { 
     prompt, 
     n = 1, 
@@ -81,7 +100,10 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
   } = params;
 
   if (!isOpenAIImageGenConfigured()) {
-    throw new Error("OpenAI API key not configured. Set OPENAI_API_KEY in environment.");
+    throw new NonRetryableGenerationError("INVALID_API_KEY", {
+      provider: "openai",
+      originalMessage: "OpenAI API key not configured",
+    }, "OpenAI API key not configured. Set OPENAI_API_KEY in environment.");
   }
 
   if (!prompt || prompt.trim().length === 0) {
@@ -89,7 +111,7 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
   }
 
   console.log(`[openaiImageGen] Generating ${n} image(s) with model: ${IMAGE_MODEL}`);
-  console.log(`[openaiImageGen] Size: ${size}`);
+  console.log(`[openaiImageGen] Size: ${size}, Page: ${context.pageIndex || "N/A"}`);
   console.log(`[openaiImageGen] EXACT PROMPT (${prompt.length} chars): "${prompt.substring(0, 150)}..."`);
 
   const images: string[] = [];
@@ -132,17 +154,28 @@ export async function generateImage(params: GenerateImageParams): Promise<Genera
         }
       }
     } catch (error) {
-      console.error(`[openaiImageGen] Error generating image ${i + 1}:`, error);
+      // CLASSIFY THE ERROR - determines if retryable
+      const classifiedError = classifyOpenAIError(error, {
+        pageIndex: context.pageIndex,
+        batchId: context.batchId,
+      });
       
-      // Re-throw content policy errors
-      if (error instanceof Error && error.message.includes("content_policy")) {
-        throw new Error("Content policy violation. Please modify your prompt.");
+      // Log once for non-retryable errors (avoid spam)
+      if (isNonRetryableError(classifiedError)) {
+        console.error(`[openaiImageGen] NON-RETRYABLE ERROR: ${classifiedError.code}`, {
+          message: classifiedError.message,
+          context: classifiedError.context,
+        });
+        throw classifiedError; // Throw immediately - do not retry
       }
       
-      // For other errors, continue to next image if we're generating multiple
+      console.error(`[openaiImageGen] Retryable error on image ${i + 1}:`, classifiedError.message);
+      
+      // For retryable errors, throw if generating single image
       if (n === 1) {
-        throw error;
+        throw classifiedError;
       }
+      // For multiple images, continue to next
     }
   }
 
