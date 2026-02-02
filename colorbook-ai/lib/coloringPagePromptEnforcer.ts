@@ -24,13 +24,44 @@ export const US_LETTER_PRESET = {
   exportPixels: { width: 2550, height: 3300 }, // 300 DPI
   previewPixels: { width: 1275, height: 1650 }, // 150 DPI
   thumbPixels: { width: 255, height: 330 }, // 30 DPI
+  // Safe margins for KDP (0.25 inches at 300 DPI)
+  safeMarginPx: 75,
 };
 
 // Model size that's closest to US Letter ratio (0.7727)
 // 1024x1536 = 0.6666 ratio (too tall)
 // 1024x1024 = 1.0 ratio (square)
-// Best available: 1024x1536 and compose to fill
+// Best available: 1024x1536 and crop to fill
 export const BEST_LETTER_SIZE: ImageSize = "1024x1536";
+
+/**
+ * US LETTER FULL-PAGE composition constraint.
+ * This is the STRONGEST constraint for ensuring artwork fills the entire page.
+ * Added to EVERY prompt to prevent empty top/bottom margins.
+ */
+export const US_LETTER_FULL_PAGE_CONSTRAINT = `
+=== US LETTER FULL-PAGE (8.5x11) - CRITICAL ===
+FULL-PAGE composition: All major elements MUST extend close to ALL page edges.
+- NO empty top band - add sky/ceiling/clouds/wall art/tree branches at top
+- NO empty bottom band - add ground/floor/grass/path/props at bottom
+- Foreground + midground + background must fill the ENTIRE vertical space
+- Keep only 0.25 inch safe margins (KDP safe area)
+- Main subject should be LARGE and fill most of the frame
+- DO NOT center a small subject with big empty margins around it
+- Art must reach near the TOP edge and near the BOTTOM edge`;
+
+/**
+ * EMPTY BAND DETECTOR thresholds
+ * Used to reject images with too much empty space
+ */
+export const EMPTY_BAND_THRESHOLDS = {
+  // If top/bottom 8% of image is more than 92% white, consider it empty
+  emptyWhiteRatio: 0.92,
+  // Sample region as percentage of image height
+  sampleRegionPercent: 0.08,
+  // Minimum ink density required in top/bottom bands
+  minInkDensity: 0.05,
+};
 
 export function getOrientationFromSize(size: ImageSize): Orientation {
   if (size === "1536x1024") return "landscape";
@@ -327,15 +358,22 @@ const REQUIRED_BOTTOM_FILL_PHRASES = [
  * that must always be present, kept short for prompt length efficiency
  */
 const COMPRESSED_ESSENTIAL_CONSTRAINTS = `
-=== COLORING PAGE RULES ===
+=== COLORING PAGE RULES (MANDATORY) ===
 OUTLINES ONLY: Clean black lines on white. NO fills, NO gray, NO shading.
 Dark features (panda patches): OUTLINE shapes only, interior WHITE.
 Eyes: hollow circles with white centers.
 NO border, NO frame, NO crop marks.
-FULL PAGE: Subject fills 90-95% height. Ground reaches bottom edge.
-Bottom: floor texture + 2-4 foreground props. NO empty bottom strip.
-Subject in lower-middle area, not floating.
-AVOID: fills, shading, grayscale, borders, empty areas, floating subjects.`;
+
+=== US LETTER FULL-PAGE (8.5x11) - CRITICAL ===
+FULL-PAGE composition: Art MUST fill the ENTIRE page with balanced top and bottom.
+- NO empty top margin - add sky/ceiling/clouds/wall detail at top edge
+- NO empty bottom margin - add ground/floor/grass/path at bottom edge
+- Subject fills 90-95% of canvas height
+- Use foreground + midground + background to fill space vertically
+- Keep 0.25 inch safe margins only (KDP safe area)
+- Subject in lower-middle, ground texture reaching bottom edge
+- 2-4 foreground props at bottom. NO floating art.
+AVOID: fills, shading, grayscale, borders, empty bands, tiny centered subject.`;
 
 export function buildFinalColoringPrompt(
   userPrompt: string,

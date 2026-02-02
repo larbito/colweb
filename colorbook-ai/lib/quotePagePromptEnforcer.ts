@@ -272,14 +272,37 @@ export const TEXT_LEGIBILITY_RULES = `
 - Text occupies approximately 40-50% of the visual area.`;
 
 // ============================================================
-// FRAMING CONSTRAINTS
+// FRAMING CONSTRAINTS (US LETTER FULL-PAGE)
 // ============================================================
 
 export const QUOTE_FRAMING_CONSTRAINTS = `
-=== FRAMING (MANDATORY) ===
-- Full-page composition; artwork fills 92-97% of page height.
-- Minimal top/bottom margins (<= 3-5%).
-- Keep central text area clear and readable.`;
+=== US LETTER FULL-PAGE (8.5x11) - CRITICAL ===
+Full-page composition: Typography and decorations MUST fill the ENTIRE page.
+- NO empty top band - decorative elements must reach near top edge
+- NO empty bottom band - decorative elements must reach near bottom edge
+- Use full-page frame/border that extends close to all edges
+- Distribute ornaments at TOP and BOTTOM to prevent empty space
+- Text centered with strong decorative presence around edges
+- Keep only 0.25 inch safe margins (KDP safe area)
+- Elements fill 92-97% of page height vertically`;
+
+/**
+ * US LETTER FULL-PAGE constraint specifically for quote pages.
+ * Ensures decorative borders/elements fill the page edges.
+ */
+export const QUOTE_FULL_PAGE_CONSTRAINT = `
+=== FULL-PAGE QUOTE LAYOUT (CRITICAL) ===
+This is a US Letter (8.5x11) full-page quote design. The typography and decorations MUST fill the ENTIRE page.
+VERTICAL COVERAGE:
+- Decorative elements must reach near the TOP edge (stars, flourishes, border top)
+- Decorative elements must reach near the BOTTOM edge (border bottom, ornaments)
+- NO large empty bands at top or bottom
+BORDER/FRAME REQUIREMENTS:
+- Use a decorative frame/border that occupies the page edges
+- Corner ornaments at all four corners
+- Bottom decoration matching top decoration (balanced visual weight)
+SAFE MARGINS: Keep 0.25 inch margins only (KDP safe area)
+The final page should look like a professional coloring book page where the ENTIRE page has something to color.`;
 
 // ============================================================
 // DECORATION THEME DESCRIPTIONS
@@ -417,7 +440,14 @@ function buildTextOnlyPrompt(quote: string, typographyStyle: TypographyStyle): s
 
 Create a coloring page with ONLY typography. This is a TEXT-ONLY page.
 
-PAGE SIZE: 8.5 x 11 inches (US Letter), portrait orientation.
+PAGE SIZE: US Letter (8.5 x 11 inches), portrait orientation.
+
+=== US LETTER FULL-PAGE LAYOUT (CRITICAL) ===
+The text MUST fill the ENTIRE vertical space of the page:
+- Text should span 80-90% of the page HEIGHT
+- NO large empty bands at top or bottom
+- Letters should be LARGE and fill the frame
+- Keep only 0.25 inch margins (KDP safe area)
 
 WHAT TO DRAW (THE COMPLETE LIST):
 1. The quote text as large ${typoDesc}
@@ -429,10 +459,11 @@ QUOTE TO DISPLAY (exact text):
 TYPOGRAPHY REQUIREMENTS:
 - Letters are HOLLOW OUTLINES with WHITE/EMPTY interiors (for coloring)
 - Black outline strokes only, no fills
-- Make text LARGE - fill 80-90% of page height
+- Make text EXTRA LARGE - fill 80-90% of page HEIGHT
 - Center horizontally and vertically
 - Split into 2-4 lines if needed with comfortable spacing
 - Thick, bold letter outlines that are easy to color
+- NO tiny text floating in the middle - TEXT MUST BE BIG
 
 ART STYLE (MANDATORY):
 - Pure WHITE background - completely empty except for text
@@ -459,12 +490,12 @@ DO NOT ADD ANY OF THESE (if any appear, the image is WRONG):
 
 THE ENTIRE IMAGE MUST CONTAIN:
 ✓ White/empty background
-✓ Black outlined letters spelling the quote
+✓ Black outlined letters spelling the quote FILLING 80-90% of page height
 ✓ NOTHING ELSE
 
-This is a TYPOGRAPHY-ONLY coloring page. The visual interest comes from the letter shapes alone. Do NOT add decorations "to make it prettier" - that would make it WRONG.
+This is a TYPOGRAPHY-ONLY coloring page. The text must be LARGE enough to fill the page vertically.
 
-VALIDATION: If there is ANY mark on the page that is not part of a letter outline, the image fails and must be regenerated with stricter adherence to TEXT ONLY.`;
+VALIDATION: If text is small/floating with big empty margins, the image fails.`;
 }
 
 // ============================================================
@@ -600,6 +631,11 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
   parts.push("");
 
   // ============================================================
+  // US LETTER FULL-PAGE CONSTRAINT (CRITICAL)
+  // ============================================================
+  parts.push(QUOTE_FULL_PAGE_CONSTRAINT);
+
+  // ============================================================
   // STRICT NO-CHARACTER BLOCK (CRITICAL)
   // ============================================================
   parts.push(STRICT_NO_CHARACTERS_BLOCK);
@@ -611,6 +647,7 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
   parts.push(`*** FINAL CHECK: Use ONLY the allowed motifs. NO random animals/toys/characters. ***`);
   parts.push(`*** WHITE background, BLACK outlines only, NO fills ***`);
   parts.push(`*** THIS IS A QUOTE PAGE - TEXT + ABSTRACT DECORATIONS ONLY - NO ANIMALS OR MASCOTS ***`);
+  parts.push(`*** FULL PAGE: Decorations MUST reach near top AND bottom edges - NO empty bands ***`);
 
   return parts.join("\n");
 }

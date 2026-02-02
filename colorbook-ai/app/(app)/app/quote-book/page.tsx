@@ -45,6 +45,7 @@ import {
   Code,
   Info,
   AlertCircle,
+  Archive,
 } from "lucide-react";
 import {
   Dialog,
@@ -801,6 +802,68 @@ export default function QuoteBookPage() {
     toast.success(`Downloading ${donePages.length} images...`);
   };
 
+  // ZIP download state
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+
+  // ==================== Download ZIP ====================
+
+  const downloadZip = async () => {
+    const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
+    if (donePages.length === 0) {
+      toast.error("No images to download");
+      return;
+    }
+
+    setIsDownloadingZip(true);
+    toast.info("Creating ZIP file...");
+
+    try {
+      const response = await fetch("/api/export/zip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "quote-coloring-book",
+          pages: donePages.map(p => ({
+            pageIndex: p.page,
+            imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
+            title: p.title,
+            prompt: p.prompt,
+          })),
+          metadata: {
+            bookType: bookType,
+            pageSize: "US Letter (8.5x11)",
+            settings: {
+              decorationLevel,
+              typographyStyle,
+              density,
+            },
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to create ZIP");
+      }
+
+      // Download the ZIP
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "quote-coloring-book.zip";
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success(`Downloaded ZIP with ${donePages.length} pages!`);
+    } catch (error) {
+      console.error("ZIP download error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to download ZIP");
+    } finally {
+      setIsDownloadingZip(false);
+    }
+  };
+
   // ==================== Page Viewer ====================
 
   const openPageViewer = (pageNumber: number) => {
@@ -1268,10 +1331,15 @@ export default function QuoteBookPage() {
                         variant="outline"
                         size="sm"
                         className="rounded-xl"
-                        onClick={downloadAll}
+                        onClick={downloadZip}
+                        disabled={isDownloadingZip}
                       >
-                        <Download className="mr-2 h-4 w-4" />
-                        Download All
+                        {isDownloadingZip ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Archive className="mr-2 h-4 w-4" />
+                        )}
+                        {isDownloadingZip ? "Creating ZIP..." : "Download ZIP"}
                       </Button>
                       <Button
                         size="sm"

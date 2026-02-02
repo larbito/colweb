@@ -1050,7 +1050,7 @@ export default function CreateColoringBookPage() {
     toast.success(`Downloading ${donePages.length} images...`);
   };
 
-  // Download all as ZIP
+  // Download all as ZIP (organized structure with metadata)
   const downloadAsZip = async () => {
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
@@ -1066,33 +1066,56 @@ export default function CreateColoringBookPage() {
       
       console.log("[ZIP Export] Creating ZIP with", donePages.length, "pages");
       
-      const response = await fetch("/api/export/png-zip", {
+      // Collect extras (front matter pages)
+      const extras: { type: "title" | "copyright" | "belongs-to"; imageBase64: string }[] = [];
+      for (const fm of frontMatter) {
+        if (fm.enabled && fm.status === "done" && fm.imageBase64) {
+          extras.push({
+            type: fm.key === "belongsTo" ? "belongs-to" : fm.key,
+            imageBase64: fm.imageBase64,
+          });
+        }
+      }
+      
+      const zipResponse = await fetch("/api/export/zip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: bookTitle,
           pages: donePages.map(p => ({
-            pageNumber: p.page,
+            pageIndex: p.page,
             imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
+            title: p.title,
+            prompt: p.prompt,
           })),
+          extras,
+          metadata: {
+            bookType,
+            complexity,
+            pageSize: "US Letter (8.5x11)",
+            settings: {
+              pageCount,
+              orientation,
+            },
+          },
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+      if (!zipResponse.ok) {
+        const errorData = await zipResponse.json().catch(() => ({ error: `HTTP ${zipResponse.status}` }));
         console.error("[ZIP Export] Error:", errorData);
-        throw new Error(errorData.error || `Failed to create ZIP (${response.status})`);
+        throw new Error(errorData.error || `Failed to create ZIP (${zipResponse.status})`);
       }
 
       // Download ZIP blob
-      const blob = await response.blob();
+      const blob = await zipResponse.blob();
       
       if (blob.size === 0) {
         throw new Error("ZIP creation returned empty file");
       }
       
-      const pageCount = response.headers.get("X-Page-Count") || donePages.length;
-      console.log("[ZIP Export] ZIP created:", blob.size, "bytes,", pageCount, "pages");
+      const zipPageCount = zipResponse.headers.get("X-File-Count") || donePages.length;
+      console.log("[ZIP Export] ZIP created:", blob.size, "bytes,", zipPageCount, "files");
       
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -1101,7 +1124,7 @@ export default function CreateColoringBookPage() {
       link.click();
       URL.revokeObjectURL(url);
 
-      toast.success(`ZIP downloaded! (${(blob.size / 1024 / 1024).toFixed(1)} MB, ${pageCount} pages)`);
+      toast.success(`ZIP downloaded! (${(blob.size / 1024 / 1024).toFixed(1)} MB, ${zipPageCount} files)`);
     } catch (error) {
       console.error("[ZIP Export] Client error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to create ZIP");
@@ -2106,8 +2129,12 @@ export default function CreateColoringBookPage() {
                           <><Sparkles className="mr-2 h-4 w-4" /> Enhance All</>
                         )}
                       </Button>
-                      <Button variant="outline" onClick={downloadAll}>
-                        <Download className="mr-2 h-4 w-4" /> Download All
+                      <Button variant="outline" onClick={downloadAsZip} disabled={isDownloadingZip}>
+                        {isDownloadingZip ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating ZIP...</>
+                        ) : (
+                          <><Archive className="mr-2 h-4 w-4" /> Download ZIP</>
+                        )}
                       </Button>
                       <Button onClick={() => setCurrentStep(5)}>
                         <FileDown className="mr-2 h-4 w-4" /> Export PDF
