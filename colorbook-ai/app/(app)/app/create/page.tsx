@@ -64,21 +64,40 @@ import type {
 // ============================================================
 
 type BookType = "storybook" | "theme";
-type PageStatus = "pending" | "generating" | "done" | "failed";
+type PageStatus = "queued" | "pending" | "generating" | "done" | "failed";
 type EnhanceStatus = "none" | "enhancing" | "enhanced" | "failed";
 type ProcessingStatus = "none" | "processing" | "done" | "failed";
 type CreateStep = 0 | 1 | 2 | 3 | 4 | 5;
+
+// Validation result info for debugging
+interface ValidationDebug {
+  passed: boolean;
+  characterValid?: boolean;
+  outlineValid?: boolean;
+  coverageValid?: boolean;
+  bottomFillValid?: boolean;
+  characterIssue?: string;
+  outlineIssue?: string;
+  coverageIssue?: string;
+  bottomFillIssue?: string;
+}
 
 interface PageState extends PagePromptItem {
   status: PageStatus;
   imageBase64?: string;
   error?: string;
+  errorCode?: string;
   isEditing?: boolean;
   enhancedImageBase64?: string;
   enhanceStatus: EnhanceStatus;
   finalLetterBase64?: string;
   finalLetterStatus: ProcessingStatus;
   activeVersion: "original" | "enhanced" | "finalLetter";
+  // New: Job tracking fields
+  attempts: number;
+  lastAttemptAt?: number;
+  validation?: ValidationDebug;
+  warning?: string;
 }
 
 interface GeneratedIdea {
@@ -215,12 +234,17 @@ export default function CreateColoringBookPage() {
     return THEME_EXAMPLES.default;
   };
 
-  // Computed values
+  // Computed values - comprehensive status tracking
   const doneCount = pages.filter(p => p.status === "done").length;
-  const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed").length;
+  const failedCount = pages.filter(p => p.status === "failed").length;
+  const queuedCount = pages.filter(p => p.status === "queued").length;
+  const generatingCount = pages.filter(p => p.status === "generating").length;
+  const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed" || p.status === "queued").length;
+  const notDoneCount = pages.length - doneCount;
   const enhancedCount = pages.filter(p => p.enhanceStatus === "enhanced").length;
   const processedCount = pages.filter(p => p.finalLetterStatus === "done").length;
   const imagesWithData = pages.filter(p => p.imageBase64);
+  const pagesWithWarnings = pages.filter(p => p.warning || (p.validation && !p.validation.passed)).length;
 
   // ============================================================
   // KEYBOARD NAVIGATION FOR VIEWER
@@ -349,6 +373,7 @@ export default function CreateColoringBookPage() {
       enhanceStatus: "none" as EnhanceStatus,
       finalLetterStatus: "none" as ProcessingStatus,
       activeVersion: "original" as const,
+      attempts: 0,
     }));
     setPages(skeletonPages);
     
@@ -408,6 +433,7 @@ export default function CreateColoringBookPage() {
         enhanceStatus: "none" as EnhanceStatus,
         finalLetterStatus: "none" as ProcessingStatus,
         activeVersion: "original" as const,
+        attempts: 0,
       }));
 
       setPages(pageStates);
@@ -482,7 +508,7 @@ export default function CreateColoringBookPage() {
       return;
     }
 
-    const pagesToGenerate = pages.filter(p => p.status === "pending" || p.status === "failed");
+    const pagesToGenerate = pages.filter(p => p.status === "pending" || p.status === "failed" || p.status === "queued");
     if (pagesToGenerate.length === 0) {
       toast.info("All pages already generated!");
       return;
@@ -490,6 +516,14 @@ export default function CreateColoringBookPage() {
 
     setIsGenerating(true);
     setCurrentStep(3);
+    
+    // Mark all pages to generate as "queued" first
+    setPages(prev => prev.map(p => 
+      pagesToGenerate.some(pg => pg.page === p.page)
+        ? { ...p, status: "queued" as PageStatus }
+        : p
+    ));
+    
     setJobProgress({
       totalItems: pagesToGenerate.length,
       completedItems: 0,
@@ -500,9 +534,13 @@ export default function CreateColoringBookPage() {
     let successCount = 0;
     let failCount = 0;
 
+    // Process pages independently - continue even if one fails
     for (const pageItem of pagesToGenerate) {
+      // Mark current page as generating
       setPages(prev => prev.map(p =>
-        p.page === pageItem.page ? { ...p, status: "generating" as PageStatus } : p
+        p.page === pageItem.page 
+          ? { ...p, status: "generating" as PageStatus, lastAttemptAt: Date.now() } 
+          : p
       ));
 
       try {
@@ -517,43 +555,91 @@ export default function CreateColoringBookPage() {
             characterProfile: bookType === "storybook" ? characterIdentityProfile : undefined,
             validateOutline: true,
             validateCharacter: bookType === "storybook",
-            validateComposition: true, // New: check for empty bottom
+            validateComposition: true,
           }),
         });
 
         const data = await safeJsonParse(response);
 
         if (response.ok && data.status === "done" && data.imageBase64) {
+          // Extract validation debug info
+          const validation: ValidationDebug | undefined = data.validation ? {
+            passed: data.validation.passed,
+            characterValid: data.validation.character?.valid,
+            outlineValid: data.validation.outline?.valid,
+            coverageValid: data.validation.coverage?.valid,
+            bottomFillValid: data.validation.bottomFill?.valid,
+            characterIssue: data.validation.character?.valid === false 
+              ? `Expected ${characterIdentityProfile?.species}, got ${data.validation.character?.detectedSpecies}` 
+              : undefined,
+            outlineIssue: data.validation.outline?.valid === false 
+              ? `Black fills at: ${data.validation.outline?.fillLocations?.slice(0, 2).join(", ")}` 
+              : undefined,
+            coverageIssue: data.validation.coverage?.valid === false 
+              ? `Coverage: ${data.validation.coverage?.bboxHeightRatio}%, bottomInk: ${data.validation.coverage?.bottomInkRatio}%` 
+              : undefined,
+            bottomFillIssue: data.validation.bottomFill?.valid === false 
+              ? `Empty bottom: ${data.validation.bottomFill?.bottomCoveragePercent}%` 
+              : undefined,
+          } : undefined;
+          
           setPages(prev => prev.map(p =>
             p.page === pageItem.page
-              ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: data.warning }
+              ? { 
+                  ...p, 
+                  status: "done" as PageStatus, 
+                  imageBase64: data.imageBase64, 
+                  attempts: data.attempts || 1,
+                  warning: data.warning,
+                  validation,
+                  error: undefined, // Clear previous error
+                }
               : p
           ));
           successCount++;
         } else {
+          // Generation failed
           setPages(prev => prev.map(p =>
             p.page === pageItem.page
-              ? { ...p, status: "failed" as PageStatus, error: data.error || "Generation failed" }
+              ? { 
+                  ...p, 
+                  status: "failed" as PageStatus, 
+                  error: data.error || "Generation failed",
+                  errorCode: data.errorCode,
+                  attempts: (p.attempts || 0) + 1,
+                }
               : p
           ));
           failCount++;
         }
       } catch (error) {
+        // Network or other error - still continue with remaining pages
+        console.error(`[generateAllImages] Page ${pageItem.page} error:`, error);
         setPages(prev => prev.map(p =>
           p.page === pageItem.page
-            ? { ...p, status: "failed" as PageStatus, error: error instanceof Error ? error.message : "Generation failed" }
+            ? { 
+                ...p, 
+                status: "failed" as PageStatus, 
+                error: error instanceof Error ? error.message : "Network error",
+                errorCode: "NETWORK_ERROR",
+                attempts: (p.attempts || 0) + 1,
+              }
             : p
         ));
         failCount++;
       }
 
+      // Update progress
       setJobProgress(prev => ({
         ...prev,
         completedItems: successCount + failCount,
         failedCount: failCount,
-        estimatedSecondsRemaining: ((Date.now() - (prev.startedAt || Date.now())) / (successCount + failCount)) * (pagesToGenerate.length - successCount - failCount) / 1000,
+        estimatedSecondsRemaining: successCount + failCount > 0
+          ? ((Date.now() - (prev.startedAt || Date.now())) / (successCount + failCount)) * (pagesToGenerate.length - successCount - failCount) / 1000
+          : undefined,
       }));
 
+      // Brief delay between pages to avoid rate limiting
       await new Promise(r => setTimeout(r, 300));
     }
 
@@ -567,12 +653,14 @@ export default function CreateColoringBookPage() {
     }
   };
 
-  const generateSinglePage = async (pageNumber: number) => {
+  const generateSinglePage = async (pageNumber: number, reason?: string) => {
     const page = pages.find(p => p.page === pageNumber);
     if (!page) return;
 
     setPages(prev => prev.map(p =>
-      p.page === pageNumber ? { ...p, status: "generating" as PageStatus } : p
+      p.page === pageNumber 
+        ? { ...p, status: "generating" as PageStatus, lastAttemptAt: Date.now() } 
+        : p
     ));
 
     try {
@@ -581,7 +669,9 @@ export default function CreateColoringBookPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           page: page.page,
-          prompt: page.prompt,
+          prompt: reason 
+            ? `${page.prompt}\n\n[REGENERATION REASON: ${reason} - please fix this issue]`
+            : page.prompt,
           size: getImageSize(),
           isStorybookMode: bookType === "storybook",
           characterProfile: bookType === "storybook" ? characterIdentityProfile : undefined,
@@ -594,25 +684,171 @@ export default function CreateColoringBookPage() {
       const data = await safeJsonParse(response);
 
       if (response.ok && data.status === "done" && data.imageBase64) {
+        // Extract validation debug info
+        const validation: ValidationDebug | undefined = data.validation ? {
+          passed: data.validation.passed,
+          characterValid: data.validation.character?.valid,
+          outlineValid: data.validation.outline?.valid,
+          coverageValid: data.validation.coverage?.valid,
+          bottomFillValid: data.validation.bottomFill?.valid,
+        } : undefined;
+        
         setPages(prev => prev.map(p =>
           p.page === pageNumber
-            ? { ...p, status: "done" as PageStatus, imageBase64: data.imageBase64, error: data.warning }
+            ? { 
+                ...p, 
+                status: "done" as PageStatus, 
+                imageBase64: data.imageBase64,
+                attempts: data.attempts || 1,
+                warning: data.warning,
+                validation,
+                error: undefined,
+                // Reset processing status on regenerate
+                enhanceStatus: "none" as EnhanceStatus,
+                enhancedImageBase64: undefined,
+                finalLetterStatus: "none" as ProcessingStatus,
+                finalLetterBase64: undefined,
+                activeVersion: "original" as const,
+              }
             : p
         ));
         toast.success(`Page ${pageNumber} generated!`);
       } else {
         setPages(prev => prev.map(p =>
           p.page === pageNumber
-            ? { ...p, status: "failed" as PageStatus, error: data.error || "Generation failed" }
+            ? { 
+                ...p, 
+                status: "failed" as PageStatus, 
+                error: data.error || "Generation failed",
+                errorCode: data.errorCode,
+                attempts: (p.attempts || 0) + 1,
+              }
             : p
         ));
-        toast.error(`Page ${pageNumber} failed`);
+        toast.error(`Page ${pageNumber} failed: ${data.error || "Unknown error"}`);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Generation failed");
       setPages(prev => prev.map(p =>
-        p.page === pageNumber ? { ...p, status: "failed" as PageStatus } : p
+        p.page === pageNumber 
+          ? { 
+              ...p, 
+              status: "failed" as PageStatus,
+              error: error instanceof Error ? error.message : "Network error",
+              errorCode: "NETWORK_ERROR",
+              attempts: (p.attempts || 0) + 1,
+            } 
+          : p
       ));
+    }
+  };
+
+  // New: Regenerate only failed pages
+  const regenerateFailed = async () => {
+    const failedPages = pages.filter(p => p.status === "failed");
+    if (failedPages.length === 0) {
+      toast.info("No failed pages to regenerate");
+      return;
+    }
+    
+    setIsGenerating(true);
+    setJobProgress({
+      totalItems: failedPages.length,
+      completedItems: 0,
+      phase: "generating",
+      startedAt: Date.now(),
+    });
+    
+    // Mark all failed as queued
+    setPages(prev => prev.map(p =>
+      p.status === "failed" ? { ...p, status: "queued" as PageStatus } : p
+    ));
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const pageItem of failedPages) {
+    setPages(prev => prev.map(p =>
+        p.page === pageItem.page 
+          ? { ...p, status: "generating" as PageStatus, lastAttemptAt: Date.now() } 
+          : p
+    ));
+
+    try {
+        const response = await fetch("/api/batch/generate-one", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            page: pageItem.page,
+            prompt: pageItem.prompt,
+            size: getImageSize(),
+            isStorybookMode: bookType === "storybook",
+            characterProfile: bookType === "storybook" ? characterIdentityProfile : undefined,
+            validateOutline: true,
+            validateCharacter: bookType === "storybook",
+            validateComposition: true,
+          }),
+        });
+        
+        const data = await safeJsonParse(response);
+        
+        if (response.ok && data.status === "done" && data.imageBase64) {
+        setPages(prev => prev.map(p =>
+            p.page === pageItem.page
+              ? { 
+                  ...p, 
+                  status: "done" as PageStatus, 
+                  imageBase64: data.imageBase64,
+                  attempts: data.attempts || 1,
+                  warning: data.warning,
+                  error: undefined,
+                }
+            : p
+        ));
+          successCount++;
+      } else {
+        setPages(prev => prev.map(p =>
+            p.page === pageItem.page
+              ? { 
+                  ...p, 
+                  status: "failed" as PageStatus, 
+                  error: data.error || "Generation failed",
+                  attempts: (p.attempts || 0) + 1,
+                }
+              : p
+          ));
+          failCount++;
+      }
+    } catch (error) {
+      setPages(prev => prev.map(p =>
+          p.page === pageItem.page
+            ? { 
+                ...p, 
+                status: "failed" as PageStatus,
+                error: error instanceof Error ? error.message : "Network error",
+                attempts: (p.attempts || 0) + 1,
+              }
+            : p
+        ));
+        failCount++;
+      }
+      
+      setJobProgress(prev => ({
+        ...prev,
+        completedItems: successCount + failCount,
+        failedCount: failCount,
+      }));
+      
+      await new Promise(r => setTimeout(r, 300));
+    }
+    
+    setIsGenerating(false);
+    setJobProgress(prev => ({ ...prev, phase: "complete" }));
+    
+    if (failCount === 0) {
+      toast.success(`All ${successCount} failed pages regenerated successfully!`);
+    } else {
+      toast.info(`Regenerated ${successCount} pages, ${failCount} still failed.`);
     }
   };
 
@@ -1612,11 +1848,11 @@ export default function CreateColoringBookPage() {
                     className="flex-1"
                     size="lg"
                   >
-                    {generatingPrompts ? (
+                {generatingPrompts ? (
                       <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Waiting for prompts...</>
                     ) : isGenerating ? (
                       <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Images...</>
-                    ) : (
+                ) : (
                       <><Play className="mr-2 h-5 w-5" /> Generate {pendingCount} Images</>
                 )}
               </Button>
@@ -1640,16 +1876,59 @@ export default function CreateColoringBookPage() {
               }
             >
               <div className="space-y-4">
+                {/* Status Summary */}
+                <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-muted/50">
+                  <Badge variant="outline" className="text-sm">
+                    {doneCount} done
+                  </Badge>
+                  {queuedCount > 0 && (
+                    <Badge variant="secondary" className="text-sm">
+                      {queuedCount} queued
+                    </Badge>
+                  )}
+                  {generatingCount > 0 && (
+                    <Badge variant="secondary" className="text-sm animate-pulse">
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      {generatingCount} generating
+                    </Badge>
+                  )}
+                  {failedCount > 0 && (
+                    <Badge variant="destructive" className="text-sm">
+                      <AlertCircle className="mr-1 h-3 w-3" />
+                      {failedCount} failed
+                    </Badge>
+                  )}
+                  {pagesWithWarnings > 0 && (
+                    <Badge variant="outline" className="text-sm border-amber-500 text-amber-600">
+                      {pagesWithWarnings} with warnings
+                    </Badge>
+                  )}
+                </div>
+                
                 {/* Action Buttons */}
                 <div className="flex gap-2 flex-wrap">
-                  {pendingCount > 0 && (
+                  {/* Generate Remaining - for pending pages */}
+                  {(notDoneCount > 0 && !isGenerating) && (
                     <Button onClick={generateAllImages} disabled={isGenerating}>
-                    {isGenerating ? (
-                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                    ) : (
-                        <><Play className="mr-2 h-4 w-4" /> Generate {pendingCount} Remaining</>
-                    )}
+                      <Play className="mr-2 h-4 w-4" /> 
+                      Generate {notDoneCount} Remaining
+                    </Button>
+                  )}
+                  
+                  {/* Regenerate Failed - dedicated button */}
+                  {(failedCount > 0 && !isGenerating) && (
+                    <Button variant="outline" onClick={regenerateFailed} disabled={isGenerating}>
+                      <RotateCcw className="mr-2 h-4 w-4" /> 
+                      Regenerate {failedCount} Failed
                   </Button>
+                  )}
+                  
+                  {/* Generation in progress indicator */}
+                  {isGenerating && (
+                    <Button disabled>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 
+                      Generating... ({doneCount}/{pages.length})
+                    </Button>
                   )}
 
                   {doneCount > 0 && (
@@ -1687,33 +1966,65 @@ export default function CreateColoringBookPage() {
                     >
                       <div className="aspect-[3/4] bg-muted relative">
                         {page.imageBase64 ? (
-                          <img
-                            src={`data:image/png;base64,${
-                              page.activeVersion === "finalLetter" && page.finalLetterBase64
-                                ? page.finalLetterBase64
-                                : page.activeVersion === "enhanced" && page.enhancedImageBase64
-                                  ? page.enhancedImageBase64
-                                  : page.imageBase64
-                            }`}
-                            alt={`Page ${page.page}`}
-                            className="w-full h-full object-contain"
-                          />
-                        ) : page.status === "generating" ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                            <span className="text-xs text-muted-foreground">Generating...</span>
-                          </div>
-                        ) : page.status === "failed" ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
-                            <AlertCircle className="h-8 w-8 text-red-500" />
-                            <span className="text-xs text-red-500 text-center">{page.error || "Failed"}</span>
-                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); generateSinglePage(page.page); }}>
-                              Retry
+                          <>
+                            <img
+                              src={`data:image/png;base64,${
+                                page.activeVersion === "finalLetter" && page.finalLetterBase64
+                                  ? page.finalLetterBase64
+                                  : page.activeVersion === "enhanced" && page.enhancedImageBase64
+                                    ? page.enhancedImageBase64
+                                    : page.imageBase64
+                              }`}
+                              alt={`Page ${page.page}`}
+                              className="w-full h-full object-contain"
+                            />
+                            {/* Regenerate button on hover for done pages */}
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                              <Button 
+                                size="sm" 
+                                variant="secondary"
+                                onClick={(e) => { e.stopPropagation(); generateSinglePage(page.page); }}
+                              >
+                                <RefreshCw className="mr-1 h-3 w-3" /> Regenerate
                   </Button>
                 </div>
+                          </>
+                        ) : page.status === "queued" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
+                            <div className="w-8 h-8 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center">
+                              <span className="text-xs text-muted-foreground">{page.page}</span>
+                            </div>
+                            <span className="text-xs text-muted-foreground">Queued</span>
+                          </div>
+                        ) : page.status === "generating" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <span className="text-xs text-muted-foreground">Generating...</span>
+                            {page.attempts > 0 && (
+                              <span className="text-[10px] text-muted-foreground">Attempt {page.attempts + 1}</span>
+                            )}
+                          </div>
+                        ) : page.status === "failed" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
+                            <AlertCircle className="h-8 w-8 text-red-500" />
+                            <span className="text-xs text-red-500 font-medium">Failed</span>
+                            <span className="text-[10px] text-red-400 line-clamp-2">{page.error || "Unknown error"}</span>
+                            {page.attempts > 0 && (
+                              <span className="text-[10px] text-muted-foreground">Attempts: {page.attempts}</span>
+                            )}
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="mt-1"
+                              onClick={(e) => { e.stopPropagation(); generateSinglePage(page.page); }}
+                            >
+                              <RefreshCw className="mr-1 h-3 w-3" /> Retry
+                            </Button>
+                          </div>
                         ) : (
-                          <div className="flex flex-col items-center justify-center h-full gap-2">
+                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
                             <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
+                            <span className="text-xs text-muted-foreground">Pending</span>
                             <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); generateSinglePage(page.page); }}>
                               Generate
                             </Button>
@@ -1726,18 +2037,41 @@ export default function CreateColoringBookPage() {
                             <Sparkles className="mr-1 h-3 w-3" /> Enhanced
                           </Badge>
                         )}
+                        {/* Warning badge for validation issues */}
+                        {page.status === "done" && page.validation && !page.validation.passed && (
+                          <Badge className="absolute top-2 left-2 text-[10px]" variant="outline">
+                            <AlertCircle className="mr-1 h-3 w-3 text-amber-500" /> Warning
+                          </Badge>
+                        )}
                       </div>
 
                       <CardContent className="p-3 border-t">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium">Page {page.page}</span>
-                          {page.status === "done" && (
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          )}
+                          <div className="flex items-center gap-1">
+                            {page.status === "done" && (
+                              <CheckCircle2 className="h-4 w-4 text-green-500" />
+                            )}
+                            {page.status === "failed" && (
+                              <AlertCircle className="h-4 w-4 text-red-500" />
+                            )}
+                            {page.status === "queued" && (
+                              <span className="text-[10px] text-muted-foreground">Queued</span>
+                            )}
+                            {page.status === "generating" && (
+                              <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                            )}
+                          </div>
                         </div>
                         <p className="text-[10px] text-muted-foreground line-clamp-1 mt-1">
                           {page.title}
                         </p>
+                        {/* Show warning details on hover */}
+                        {page.warning && (
+                          <p className="text-[10px] text-amber-500 line-clamp-1 mt-1" title={page.warning}>
+                            ⚠ {page.warning}
+                          </p>
+                        )}
                       </CardContent>
                     </Card>
                   ))}
@@ -1832,19 +2166,53 @@ export default function CreateColoringBookPage() {
                 </div>
 
                 {/* Page Summary */}
-                <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/50">
-                  <Badge variant="outline" className="text-base px-4 py-2">
-                    {doneCount} coloring pages
-                  </Badge>
-                  {pdfSettings.includeTitlePage && (
-                    <Badge variant="secondary">+ Title page</Badge>
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/50">
+                    <Badge variant="outline" className="text-base px-4 py-2">
+                      {doneCount} coloring pages
+                    </Badge>
+                    {pdfSettings.includeTitlePage && (
+                      <Badge variant="secondary">+ Title page</Badge>
+                    )}
+                    {pdfSettings.includeCopyright && (
+                      <Badge variant="secondary">+ Copyright page</Badge>
+                    )}
+                    <span className="text-sm text-muted-foreground ml-auto">
+                      Format: US Letter (8.5" × 11")
+                    </span>
+                  </div>
+                  
+                  {/* Warnings about missing pages */}
+                  {failedCount > 0 && (
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+                      <AlertCircle className="h-5 w-5 text-red-500 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-red-700 dark:text-red-400">
+                          {failedCount} page{failedCount > 1 ? "s" : ""} failed to generate
+                        </p>
+                        <p className="text-xs text-red-600 dark:text-red-500">
+                          These pages will not be included in the export. Go back to regenerate them.
+                        </p>
+                      </div>
+                      <Button size="sm" variant="outline" onClick={() => setCurrentStep(3)}>
+                        <ArrowLeft className="mr-1 h-3 w-3" /> Fix Pages
+                      </Button>
+                    </div>
                   )}
-                  {pdfSettings.includeCopyright && (
-                    <Badge variant="secondary">+ Copyright page</Badge>
+                  
+                  {pagesWithWarnings > 0 && failedCount === 0 && (
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+                      <AlertCircle className="h-5 w-5 text-amber-500 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                          {pagesWithWarnings} page{pagesWithWarnings > 1 ? "s have" : " has"} quality warnings
+                        </p>
+                        <p className="text-xs text-amber-600 dark:text-amber-500">
+                          Images passed but may have minor issues. Consider regenerating for best results.
+                        </p>
+                      </div>
+                    </div>
                   )}
-                  <span className="text-sm text-muted-foreground ml-auto">
-                    Format: US Letter (8.5" × 11")
-                  </span>
                 </div>
 
                 {/* Page Preview Strip with Regenerate */}
