@@ -187,6 +187,7 @@ export default function QuoteBookPage() {
   const [quoteTone, setQuoteTone] = useState<ToneType>("motivational");
   const [quoteAudience, setQuoteAudience] = useState<AudienceType>("all");
   const [quoteCount, setQuoteCount] = useState(10);
+  const [customTheme, setCustomTheme] = useState(""); // Custom theme for AI generation
   
   // Anti-repetition: track all generated quotes
   const previousQuotesRef = useRef<string[]>([]);
@@ -256,10 +257,11 @@ export default function QuoteBookPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          topicMode: "any",
+          topicMode: customTheme.trim() ? "selected" : "any",
           tone: quoteTone,
           audience: quoteAudience,
           count: quoteCount,
+          theme: customTheme.trim() || undefined, // Pass custom theme if provided
           excludeQuotes: previousQuotesRef.current.slice(-50),
         }),
       });
@@ -805,6 +807,22 @@ export default function QuoteBookPage() {
                     <span>AI Quote Generator</span>
                   </div>
                   
+                  {/* Custom Theme Input */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Custom Theme (describe what kind of quotes you want)
+                    </label>
+                    <Input
+                      value={customTheme}
+                      onChange={(e) => setCustomTheme(e.target.value)}
+                      placeholder="e.g., quotes about ocean adventures, beach life and surfing... or leave empty for general quotes"
+                      className="h-10 rounded-xl"
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Enter a specific theme and the AI will generate quotes that match it
+                    </p>
+                  </div>
+
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Tone</label>

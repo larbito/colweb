@@ -282,10 +282,12 @@ export default function StyleClonePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          style: extractedStyle,
-          styleNotes,
-          theme: customTheme,
-          pageCount,
+          styleContract: styleContract, // Pass the full style contract
+          themePack: null, // No theme pack for now
+          userTheme: customTheme || styleContract?.extractedThemeGuess || styleNotes || undefined,
+          mode: "collection" as const, // or "series" for same character
+          pagesCount: pageCount,
+          complexity: styleContract?.recommendedComplexity || "medium",
         }),
       });
 
@@ -295,14 +297,16 @@ export default function StyleClonePage() {
         throw new Error(data.error || "Failed to generate ideas");
       }
 
-      setPageIdeas(data.pages.map((p: { description: string; prompt: string }, idx: number) => ({
-        id: `page-${idx + 1}`,
-        description: p.description,
-        prompt: p.prompt,
+      // Handle the response format from the prompts API
+      const prompts = data.prompts || [];
+      setPageIdeas(prompts.map((p: { pageIndex: number; title: string; scenePrompt: string }, idx: number) => ({
+        id: `page-${p.pageIndex || idx + 1}`,
+        description: p.title || `Scene ${idx + 1}`,
+        prompt: p.scenePrompt || "",
         status: "pending" as const,
       })));
       
-      toast.success(`Generated ${data.pages.length} page ideas!`);
+      toast.success(`Generated ${prompts.length} page ideas!`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate ideas");
     } finally {
@@ -425,6 +429,8 @@ export default function StyleClonePage() {
     const page = pageIdeas.find(p => p.id === pageId);
     if (!page || !extractedStyle) return;
 
+    const pageIndex = pageIdeas.indexOf(page) + 1;
+
     setPageIdeas(prev => prev.map(p => 
       p.id === pageId ? { ...p, status: "generating" } : p
     ));
@@ -434,9 +440,15 @@ export default function StyleClonePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: page.prompt || page.description,
-          style: extractedStyle,
-          pageNumber: pageIdeas.indexOf(page) + 1,
+          pageIndex: pageIndex,
+          scenePrompt: page.prompt || page.description,
+          styleContract: styleContract,
+          themePack: null,
+          complexity: styleContract?.recommendedComplexity || "medium",
+          lineThickness: styleContract?.recommendedLineThickness || "medium",
+          sizePreset: "8.5x11",
+          mode: "collection",
+          referenceImageBase64: referenceImage,
         }),
       });
 
@@ -445,7 +457,19 @@ export default function StyleClonePage() {
       if (response.ok && data.imageBase64) {
         setPageIdeas(prev => prev.map(p => 
           p.id === pageId 
-            ? { ...p, status: "done", imageBase64: data.imageBase64 }
+            ? { 
+                ...p, 
+                status: "done", 
+                imageBase64: data.imageBase64,
+                debug: {
+                  promptHash: data.debug?.promptHash,
+                  finalPromptPreview: data.debug?.finalPromptPreview,
+                  referenceIncluded: data.debug?.referenceIncluded,
+                  anchorIncluded: data.debug?.anchorIncluded,
+                  passedGates: data.passedGates,
+                  metrics: data.debug?.metrics,
+                },
+              }
             : p
         ));
         toast.success("Page regenerated!");
@@ -453,7 +477,7 @@ export default function StyleClonePage() {
         setPageIdeas(prev => prev.map(p => 
           p.id === pageId ? { ...p, status: "failed" } : p
         ));
-        toast.error("Failed to regenerate page");
+        toast.error(data.error || "Failed to regenerate page");
       }
     } catch {
       setPageIdeas(prev => prev.map(p => 
@@ -487,7 +511,7 @@ export default function StyleClonePage() {
                 <Button>
                   <FileDown className="mr-2 h-4 w-4" />
                   Export PDF
-                </Button>
+            </Button>
               )
             }
           />
@@ -505,64 +529,64 @@ export default function StyleClonePage() {
           {currentStep === 1 && (
             <div className="grid lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2">
-                <SectionCard
-                  title="Upload Reference Image"
-                  description="Provide a coloring page sample whose style you want to replicate"
-                  icon={Upload}
-                >
+            <SectionCard
+              title="Upload Reference Image"
+              description="Provide a coloring page sample whose style you want to replicate"
+              icon={Upload}
+            >
                   <div className="space-y-5">
-                    {!referenceImage ? (
+                {!referenceImage ? (
                       <label className="flex flex-col items-center justify-center w-full h-72 border-2 border-dashed border-border rounded-2xl cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-all">
                         <div className="flex flex-col items-center justify-center py-8">
                           <div className="p-5 rounded-2xl bg-muted mb-4">
                             <Upload className="h-10 w-10 text-muted-foreground" />
-                          </div>
-                          <p className="mb-2 text-base font-medium">
-                            Click to upload or drag and drop
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            PNG, JPG or WEBP (max 10MB)
-                          </p>
-                        </div>
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept="image/*"
-                          onChange={handleFileUpload}
-                          disabled={isUploading}
-                        />
-                      </label>
-                    ) : (
-                      <div className="relative">
-                        <div className="aspect-[3/4] max-w-sm mx-auto rounded-2xl overflow-hidden border bg-muted">
-                          <img
-                            src={`data:image/png;base64,${referenceImage}`}
-                            alt="Reference"
-                            className="w-full h-full object-contain"
-                          />
-                        </div>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="absolute top-3 right-3 rounded-xl"
-                          onClick={clearReference}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                        <p className="text-center text-sm text-muted-foreground mt-3">
-                          {referenceFileName}
-                        </p>
                       </div>
-                    )}
-
-                    {referenceImage && (
-                      <Button onClick={() => setCurrentStep(2)} className="w-full h-12 rounded-xl text-base" size="lg">
-                        Continue to Style Extraction
-                        <ArrowRight className="ml-2 h-5 w-5" />
-                      </Button>
-                    )}
+                          <p className="mb-2 text-base font-medium">
+                        Click to upload or drag and drop
+                      </p>
+                          <p className="text-sm text-muted-foreground">
+                        PNG, JPG or WEBP (max 10MB)
+                      </p>
+          </div>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={handleFileUpload}
+                      disabled={isUploading}
+                    />
+                  </label>
+                ) : (
+                  <div className="relative">
+                        <div className="aspect-[3/4] max-w-sm mx-auto rounded-2xl overflow-hidden border bg-muted">
+                      <img
+                        src={`data:image/png;base64,${referenceImage}`}
+                        alt="Reference"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                          className="absolute top-3 right-3 rounded-xl"
+                      onClick={clearReference}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                        <p className="text-center text-sm text-muted-foreground mt-3">
+                      {referenceFileName}
+                    </p>
                   </div>
-                </SectionCard>
+                )}
+
+                {referenceImage && (
+                      <Button onClick={() => setCurrentStep(2)} className="w-full h-12 rounded-xl text-base" size="lg">
+                    Continue to Style Extraction
+                        <ArrowRight className="ml-2 h-5 w-5" />
+                  </Button>
+                )}
+              </div>
+            </SectionCard>
               </div>
 
               {/* Tips Card */}
@@ -631,7 +655,7 @@ export default function StyleClonePage() {
                           <li>Composition and layout patterns</li>
                           <li>Unique artistic elements</li>
                         </ul>
-                        <Button
+                <Button
                           onClick={extractStyle} 
                           disabled={isExtracting}
                           className="w-full h-11 rounded-xl"
@@ -646,21 +670,21 @@ export default function StyleClonePage() {
                               <Wand2 className="mr-2 h-4 w-4" />
                               Extract Style
                             </>
-                          )}
-                        </Button>
+                  )}
+                </Button>
                       </>
                     ) : (
                       <div className="space-y-3">
                         <div className="flex items-center gap-2">
                           <CheckCircle2 className="h-6 w-6 text-green-500" />
                           <span className="font-semibold text-lg">Style Extracted Successfully</span>
-                        </div>
+              </div>
                         <p className="text-sm text-muted-foreground">
                           {extractedStyle.summary}
                         </p>
-                        <Button
+                      <Button
                           variant="outline" 
-                          size="sm"
+                        size="sm"
                           className="rounded-xl"
                           onClick={() => setShowStyleDetails(!showStyleDetails)}
                         >
@@ -670,7 +694,7 @@ export default function StyleClonePage() {
                           ) : (
                             <ChevronDown className="ml-2 h-4 w-4" />
                           )}
-                        </Button>
+                      </Button>
                       </div>
                     )}
                   </div>
@@ -682,44 +706,44 @@ export default function StyleClonePage() {
                     <CardContent className="p-5">
                       <h4 className="font-semibold text-sm mb-4">Extracted Style Profile</h4>
                       <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Art Style:</span>
-                          <span className="ml-2 font-medium">{extractedStyle.artStyle}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Line Weight:</span>
-                          <span className="ml-2 font-medium">{extractedStyle.lineWeight}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Detail Level:</span>
-                          <span className="ml-2 font-medium">{extractedStyle.detailLevel}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Composition:</span>
-                          <span className="ml-2 font-medium">{extractedStyle.composition}</span>
+                      <div>
+                        <span className="text-muted-foreground">Art Style:</span>
+                        <span className="ml-2 font-medium">{extractedStyle.artStyle}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Line Weight:</span>
+                        <span className="ml-2 font-medium">{extractedStyle.lineWeight}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Detail Level:</span>
+                        <span className="ml-2 font-medium">{extractedStyle.detailLevel}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Composition:</span>
+                        <span className="ml-2 font-medium">{extractedStyle.composition}</span>
+                      </div>
+                    </div>
+                    {extractedStyle.uniqueElements.length > 0 && (
+                        <div className="mt-4 pt-4 border-t">
+                        <span className="text-sm text-muted-foreground">Unique Elements:</span>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                          {extractedStyle.uniqueElements.map((el, i) => (
+                              <Badge key={i} variant="secondary" className="text-xs rounded-lg">
+                              {el}
+                            </Badge>
+                          ))}
                         </div>
                       </div>
-                      {extractedStyle.uniqueElements.length > 0 && (
-                        <div className="mt-4 pt-4 border-t">
-                          <span className="text-sm text-muted-foreground">Unique Elements:</span>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {extractedStyle.uniqueElements.map((el, i) => (
-                              <Badge key={i} variant="secondary" className="text-xs rounded-lg">
-                                {el}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                    )}
                     </CardContent>
                   </Card>
-                )}
+              )}
 
                 {/* Style notes */}
                 {extractedStyle && (
                   <>
                     <SubSection title="Additional Style Notes (Optional)">
-                      <Textarea
+              <Textarea
                         value={styleNotes}
                         onChange={(e) => setStyleNotes(e.target.value)}
                         placeholder="Add any specific style instructions or modifications..."
@@ -748,7 +772,7 @@ export default function StyleClonePage() {
                   <Button size="sm" className="rounded-xl" onClick={() => setCurrentStep(4)}>
                     <Play className="mr-2 h-4 w-4" />
                     Generate Pages
-                  </Button>
+                </Button>
                 )
               }
             >
@@ -758,54 +782,54 @@ export default function StyleClonePage() {
                   <CardContent className="p-5 space-y-4">
                     <div className="flex items-center gap-2.5 text-sm font-medium">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                        <Wand2 className="h-4 w-4 text-primary" />
+                    <Wand2 className="h-4 w-4 text-primary" />
                       </div>
                       <span>AI Page Generator</span>
-                    </div>
-                    
+                  </div>
+                  
                     <div className="grid grid-cols-2 gap-4">
-                      <div>
+                    <div>
                         <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Theme (optional)</label>
-                        <Input
-                          value={customTheme}
-                          onChange={(e) => setCustomTheme(e.target.value)}
-                          placeholder="e.g., Magical forest adventure"
+                      <Input
+                        value={customTheme}
+                        onChange={(e) => setCustomTheme(e.target.value)}
+                        placeholder="e.g., Magical forest adventure"
                           className="h-10 rounded-xl"
-                        />
-                      </div>
-                        <div>
+                      />
+                    </div>
+                    <div>
                         <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Number of Pages</label>
                         <div className="flex items-center gap-3">
-                          <Slider
-                            value={[pageCount]}
-                            onValueChange={([v]) => setPageCount(v)}
-                            min={5}
+                        <Slider
+                          value={[pageCount]}
+                          onValueChange={([v]) => setPageCount(v)}
+                          min={5}
                             max={80}
-                            step={1}
-                            className="flex-1"
-                          />
+                          step={1}
+                          className="flex-1"
+                        />
                           <span className="text-sm font-semibold w-8 text-right">{pageCount}</span>
-                        </div>
                       </div>
                     </div>
+                  </div>
 
-                    <Button
-                      onClick={generatePageIdeas}
-                      disabled={isGeneratingIdeas || !extractedStyle}
+                <Button
+                    onClick={generatePageIdeas}
+                    disabled={isGeneratingIdeas || !extractedStyle}
                       className="w-full h-11 rounded-xl"
-                    >
-                      {isGeneratingIdeas ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Generating Ideas...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="mr-2 h-4 w-4" />
-                          Generate {pageCount} Page Ideas
-                        </>
-                      )}
-                    </Button>
+                  >
+                    {isGeneratingIdeas ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Generating Ideas...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Generate {pageCount} Page Ideas
+                      </>
+                    )}
+                </Button>
                   </CardContent>
                 </Card>
 
@@ -817,8 +841,8 @@ export default function StyleClonePage() {
                       <Button variant="ghost" size="sm" className="rounded-xl" onClick={addCustomPage}>
                         <Plus className="mr-1.5 h-3.5 w-3.5" />
                         Add Page
-                      </Button>
-                    </div>
+                </Button>
+              </div>
 
                     <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
                       {pageIdeas.map((page, idx) => (
@@ -828,30 +852,30 @@ export default function StyleClonePage() {
                         >
                           <CardContent className="p-3 flex items-start gap-3">
                             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-semibold">
-                              {idx + 1}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <Input
-                                value={page.description}
-                                onChange={(e) => updatePageIdea(page.id, e.target.value)}
-                                placeholder="Describe this page..."
-                                className="border-0 p-0 h-auto text-sm focus-visible:ring-0 bg-transparent"
-                              />
-                            </div>
-                            <StatusBadge stage={page.status as any} />
-                            <Button
-                              variant="ghost"
-                              size="sm"
+                            {idx + 1}
+              </div>
+                          <div className="flex-1 min-w-0">
+                            <Input
+                              value={page.description}
+                              onChange={(e) => updatePageIdea(page.id, e.target.value)}
+                              placeholder="Describe this page..."
+                              className="border-0 p-0 h-auto text-sm focus-visible:ring-0 bg-transparent"
+                          />
+                        </div>
+                          <StatusBadge stage={page.status as any} />
+                          <Button
+                            variant="ghost"
+                            size="sm"
                               className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                              onClick={() => removePage(page.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            onClick={() => removePage(page.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                           </CardContent>
                         </Card>
                       ))}
-                    </div>
-                  </div>
+                        </div>
+                      </div>
                 ) : (
                   <div className="py-8">
                     <EmptyState
@@ -861,7 +885,7 @@ export default function StyleClonePage() {
                       actionLabel="Add Page Manually"
                       onAction={addCustomPage}
                     />
-                  </div>
+                </div>
                 )}
 
                 {/* Example ideas */}
@@ -870,25 +894,25 @@ export default function StyleClonePage() {
                     <CardContent className="p-5">
                       <div className="flex items-center gap-2.5 text-sm font-medium mb-3">
                         <Lightbulb className="h-4 w-4 text-amber-500" />
-                        Example page ideas
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {EXAMPLE_IDEAS.map((idea, i) => (
-                          <Button
-                            key={i}
-                            variant="outline"
-                            size="sm"
+                      Example page ideas
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {EXAMPLE_IDEAS.map((idea, i) => (
+                  <Button
+                          key={i}
+                    variant="outline"
+                          size="sm"
                             className="text-xs rounded-xl"
-                            onClick={() => setPageIdeas([
-                              ...pageIdeas,
-                              { id: `page-${Date.now()}`, description: idea, status: "pending" }
-                            ])}
-                          >
-                            <Plus className="mr-1 h-3 w-3" />
-                            {idea}
-                          </Button>
-                        ))}
-                      </div>
+                          onClick={() => setPageIdeas([
+                            ...pageIdeas,
+                            { id: `page-${Date.now()}`, description: idea, status: "pending" }
+                          ])}
+                        >
+                          <Plus className="mr-1 h-3 w-3" />
+                          {idea}
+                        </Button>
+                      ))}
+                    </div>
                     </CardContent>
                   </Card>
                 )}
@@ -899,7 +923,7 @@ export default function StyleClonePage() {
                     Generate {pageIdeas.length} Pages
                   </Button>
                 )}
-              </div>
+                </div>
             </SectionCard>
           )}
 
