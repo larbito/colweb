@@ -28,9 +28,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Users,
-  Home,
-  TreePine,
-  Shuffle,
   Lightbulb,
   Check,
   Copy,
@@ -47,6 +44,8 @@ import {
   ZoomIn,
   AlertCircle,
   CheckCircle2,
+  Archive,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -173,6 +172,13 @@ export default function CreateColoringBookPage() {
   // Processing
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+  const [zipProgress, setZipProgress] = useState(0);
+  
+  // PDF export state
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [regeneratingInExport, setRegeneratingInExport] = useState<number | null>(null);
+  const [pdfNeedsRefresh, setPdfNeedsRefresh] = useState(false);
 
   // Progress
   const [jobProgress, setJobProgress] = useState<JobProgress>({
@@ -789,6 +795,135 @@ export default function CreateColoringBookPage() {
     toast.success(`Downloading ${donePages.length} images...`);
   };
 
+  // Download all as ZIP
+  const downloadAsZip = async () => {
+    const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
+    if (donePages.length === 0) {
+      toast.error("No images to download");
+      return;
+    }
+
+    setIsDownloadingZip(true);
+    setZipProgress(0);
+    
+    try {
+      const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
+      
+      console.log("[ZIP Export] Creating ZIP with", donePages.length, "pages");
+      
+      const response = await fetch("/api/export/png-zip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: bookTitle,
+          pages: donePages.map(p => ({
+            pageNumber: p.page,
+            imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        console.error("[ZIP Export] Error:", errorData);
+        throw new Error(errorData.error || `Failed to create ZIP (${response.status})`);
+      }
+
+      // Download ZIP blob
+      const blob = await response.blob();
+      
+      if (blob.size === 0) {
+        throw new Error("ZIP creation returned empty file");
+      }
+      
+      const pageCount = response.headers.get("X-Page-Count") || donePages.length;
+      console.log("[ZIP Export] ZIP created:", blob.size, "bytes,", pageCount, "pages");
+      
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${bookTitle.replace(/[^a-zA-Z0-9]/g, "-")}.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success(`ZIP downloaded! (${(blob.size / 1024 / 1024).toFixed(1)} MB, ${pageCount} pages)`);
+    } catch (error) {
+      console.error("[ZIP Export] Client error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to create ZIP");
+    } finally {
+      setIsDownloadingZip(false);
+      setZipProgress(0);
+    }
+  };
+
+  // Regenerate a page from the Export step
+  const regeneratePageInExport = async (pageNumber: number) => {
+    const page = pages.find(p => p.page === pageNumber);
+    if (!page) return;
+
+    setRegeneratingInExport(pageNumber);
+    
+    // Mark PDF as needing refresh
+    setPdfNeedsRefresh(true);
+    if (pdfPreviewUrl) {
+      URL.revokeObjectURL(pdfPreviewUrl);
+      setPdfPreviewUrl(null);
+    }
+
+    try {
+      const response = await fetch("/api/batch/generate-one", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page: page.page,
+          prompt: page.prompt,
+          size: getImageSize(),
+          isStorybookMode: bookType === "storybook",
+          characterProfile: bookType === "storybook" ? characterIdentityProfile : undefined,
+          validateOutline: true,
+          validateCharacter: bookType === "storybook",
+          validateComposition: true,
+        }),
+      });
+
+      const data = await safeJsonParse(response);
+
+      if (response.ok && data.status === "done" && data.imageBase64) {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? { 
+                ...p, 
+                status: "done" as PageStatus, 
+                imageBase64: data.imageBase64, 
+                error: data.warning,
+                // Reset enhanced/processed versions since we have new base image
+                enhancedImageBase64: undefined,
+                enhanceStatus: "none" as EnhanceStatus,
+                finalLetterBase64: undefined,
+                finalLetterStatus: "none" as ProcessingStatus,
+                activeVersion: "original" as const,
+              }
+            : p
+        ));
+        toast.success(`Page ${pageNumber} regenerated!`);
+      } else {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? { ...p, status: "failed" as PageStatus, error: data.error || "Regeneration failed" }
+            : p
+        ));
+        toast.error(`Page ${pageNumber} regeneration failed`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Regeneration failed");
+      setPages(prev => prev.map(p =>
+        p.page === pageNumber ? { ...p, status: "failed" as PageStatus } : p
+      ));
+    } finally {
+      setRegeneratingInExport(null);
+    }
+  };
+
   // PDF Export settings state
   const [pdfSettings, setPdfSettings] = useState({
     includeTitlePage: true,
@@ -806,6 +941,8 @@ export default function CreateColoringBookPage() {
     }
 
     setIsExporting(true);
+    setPdfError(null);
+    setPdfNeedsRefresh(false);
     
     try {
       const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
@@ -838,14 +975,18 @@ export default function CreateColoringBookPage() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
         console.error("[PDF Export] Error response:", errorData);
-        throw new Error(errorData.error || errorData.errorMessage || `Failed to generate PDF (${response.status})`);
+        const errorMsg = errorData.error || errorData.errorMessage || `Failed to generate PDF (${response.status})`;
+        setPdfError(errorMsg);
+        throw new Error(errorMsg);
       }
 
       // Create blob URL for preview
       const blob = await response.blob();
       
       if (blob.size === 0) {
-        throw new Error("PDF generation returned empty file");
+        const emptyError = "PDF generation returned empty file";
+        setPdfError(emptyError);
+        throw new Error(emptyError);
       }
       
       console.log("[PDF Export] PDF generated:", blob.size, "bytes");
@@ -858,10 +999,13 @@ export default function CreateColoringBookPage() {
       }
       
       setPdfPreviewUrl(url);
+      setPdfError(null);
       toast.success(`PDF preview generated! (${(blob.size / 1024 / 1024).toFixed(1)} MB)`);
     } catch (error) {
       console.error("[PDF Export] Client error:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to generate PDF. Check console for details.");
+      const errorMsg = error instanceof Error ? error.message : "Failed to generate PDF";
+      setPdfError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsExporting(false);
     }
@@ -1676,31 +1820,95 @@ export default function CreateColoringBookPage() {
                   </span>
                 </div>
 
-                {/* Page Preview Strip */}
+                {/* Page Preview Strip with Regenerate */}
                 <div>
-                  <label className="text-sm font-medium mb-3 block">Page Preview</label>
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-sm font-medium">Page Preview</label>
+                    <span className="text-xs text-muted-foreground">Click page to view, hover for actions</span>
+                  </div>
                   <div className="flex gap-3 overflow-x-auto pb-3">
                     {pages.filter(p => p.imageBase64).map((page) => (
                       <div
                       key={page.page}
-                        className="shrink-0 cursor-pointer group"
-                        onClick={() => openViewer(page.page)}
+                        className="shrink-0 group relative"
                       >
-                        <div className="w-20 h-28 rounded-lg overflow-hidden border-2 border-transparent group-hover:border-primary transition-all">
+                        <div 
+                          className="w-20 h-28 rounded-lg overflow-hidden border-2 border-transparent group-hover:border-primary transition-all cursor-pointer"
+                          onClick={() => openViewer(page.page)}
+                        >
                           <img
                             src={`data:image/png;base64,${page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64}`}
                             alt={`Page ${page.page}`}
                             className="w-full h-full object-cover"
                           />
+                          {regeneratingInExport === page.page && (
+                            <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                              <Loader2 className="h-5 w-5 animate-spin" />
+                            </div>
+                          )}
                         </div>
                         <p className="text-xs text-center mt-1 text-muted-foreground">Page {page.page}</p>
+                        {/* Regenerate button on hover */}
+                        <button
+                          className="absolute -top-1 -right-1 h-6 w-6 rounded-full bg-background border shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            regeneratePageInExport(page.page);
+                          }}
+                          disabled={regeneratingInExport === page.page}
+                          title="Regenerate this page"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </button>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* PDF Preview */}
-                {pdfPreviewUrl && (
+                {/* PDF Preview or Error */}
+                {pdfError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800 p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="font-medium text-red-700 dark:text-red-400">PDF Generation Failed</p>
+                        <p className="text-sm text-red-600 dark:text-red-300 mt-1">{pdfError}</p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-3"
+                          onClick={generatePdfPreview}
+                          disabled={isExporting}
+                        >
+                          <RefreshCw className="mr-2 h-3 w-3" /> Try Again
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {pdfNeedsRefresh && pdfPreviewUrl && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4">
+                    <div className="flex items-center gap-3">
+                      <AlertCircle className="h-5 w-5 text-amber-500 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm text-amber-700 dark:text-amber-300">
+                          Pages have changed. Regenerate PDF preview to see updates.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={generatePdfPreview}
+                        disabled={isExporting}
+                      >
+                        <RefreshCw className="mr-2 h-3 w-3" /> Refresh
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
+                {pdfPreviewUrl && !pdfError && (
                   <div>
                     <label className="text-sm font-medium mb-3 block">PDF Preview</label>
                     <div className="border rounded-xl overflow-hidden bg-muted/30">
@@ -1765,26 +1973,43 @@ export default function CreateColoringBookPage() {
                 </div>
 
                 {/* Export Actions */}
-                <div className="flex gap-3 pt-4 border-t">
-                  <Button variant="outline" onClick={() => setCurrentStep(4)}>
-                    <ArrowLeft className="mr-2 h-4 w-4" /> Back to Review
-                  </Button>
-                  <Button variant="outline" onClick={downloadAll}>
-                    <Download className="mr-2 h-4 w-4" /> Download PNGs
-                  </Button>
-                  {!pdfPreviewUrl ? (
-                    <Button onClick={generatePdfPreview} disabled={isExporting} className="flex-1" size="lg">
-                      {isExporting ? (
-                        <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Preview...</>
+                <div className="flex flex-col gap-3 pt-4 border-t">
+                  <div className="flex gap-3 flex-wrap">
+                    <Button variant="outline" onClick={() => setCurrentStep(4)}>
+                      <ArrowLeft className="mr-2 h-4 w-4" /> Back to Review
+                    </Button>
+                    <Button variant="outline" onClick={downloadAll}>
+                      <Download className="mr-2 h-4 w-4" /> Download PNGs
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={downloadAsZip}
+                      disabled={isDownloadingZip}
+                    >
+                      {isDownloadingZip ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating ZIP...</>
                       ) : (
-                        <><Eye className="mr-2 h-5 w-5" /> Generate PDF Preview</>
+                        <><Archive className="mr-2 h-4 w-4" /> Download ZIP</>
                       )}
                     </Button>
-                  ) : (
-                    <Button onClick={downloadPdf} className="flex-1" size="lg">
-                      <FileDown className="mr-2 h-5 w-5" /> Download PDF ({doneCount} pages)
-                    </Button>
-                  )}
+                  </div>
+                  <div className="flex gap-3">
+                    {!pdfPreviewUrl || pdfNeedsRefresh ? (
+                      <Button onClick={generatePdfPreview} disabled={isExporting} className="flex-1" size="lg">
+                        {isExporting ? (
+                          <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Preview...</>
+                        ) : pdfNeedsRefresh ? (
+                          <><RefreshCw className="mr-2 h-5 w-5" /> Refresh PDF Preview</>
+                        ) : (
+                          <><Eye className="mr-2 h-5 w-5" /> Generate PDF Preview</>
+                        )}
+                      </Button>
+                    ) : (
+                      <Button onClick={downloadPdf} className="flex-1" size="lg">
+                        <FileDown className="mr-2 h-5 w-5" /> Download PDF ({doneCount} pages)
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             </SectionCard>

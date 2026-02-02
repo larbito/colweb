@@ -51,6 +51,7 @@ const requestSchema = z.object({
   // Validation options
   validateOutline: z.boolean().default(true),
   validateCharacter: z.boolean().default(true),
+  validateComposition: z.boolean().default(true), // NEW: check for empty bottom/coverage
 });
 
 /**
@@ -94,12 +95,14 @@ export async function POST(request: NextRequest) {
       characterProfile,
       validateOutline,
       validateCharacter,
+      validateComposition,
     } = parseResult.data;
     
     const totalAttempts = maxRetries + 1;
     const shouldValidateCharacter = isStorybookMode && validateCharacter && characterProfile;
+    const shouldValidateComposition = validateComposition;
 
-    console.log(`[generate-one] Page ${page}: Starting (storybook: ${isStorybookMode}, validate: ${shouldValidateCharacter})`);
+    console.log(`[generate-one] Page ${page}: Starting (storybook: ${isStorybookMode}, validateChar: ${shouldValidateCharacter}, validateComp: ${shouldValidateComposition})`);
 
     // Build base prompt with contracts
     let basePrompt = prompt;
@@ -170,11 +173,12 @@ export async function POST(request: NextRequest) {
         console.log(`[generate-one] Page ${page}: Image generated, starting validation`);
 
         // VALIDATION STEP
-        if (validateOutline || shouldValidateCharacter) {
+        if (validateOutline || shouldValidateCharacter || shouldValidateComposition) {
           const validationResult = await validateGeneratedImage(
             imageBase64,
             shouldValidateCharacter ? characterProfile as CharacterIdentityProfile : undefined,
-            !!shouldValidateCharacter
+            !!shouldValidateCharacter,
+            shouldValidateComposition // Pass composition validation flag
           );
           
           lastValidationResult = validationResult;
@@ -185,6 +189,12 @@ export async function POST(request: NextRequest) {
           }
           if (validationResult.characterValidation) {
             console.log(`[generate-one] Page ${page}: Character validation - valid: ${validationResult.characterValidation.valid}, species: ${validationResult.characterValidation.detectedSpecies}, matches: ${validationResult.characterValidation.matchesSpecies}`);
+          }
+          if (validationResult.coverageValidation) {
+            console.log(`[generate-one] Page ${page}: Coverage validation - valid: ${validationResult.coverageValidation.valid}, height: ${validationResult.coverageValidation.bboxHeightRatio}%, bottomInk: ${validationResult.coverageValidation.bottomInkRatio}%`);
+          }
+          if (validationResult.bottomFillValidation) {
+            console.log(`[generate-one] Page ${page}: Bottom fill - valid: ${validationResult.bottomFillValidation.valid}, empty: ${validationResult.bottomFillValidation.hasEmptyBottom}, coverage: ${validationResult.bottomFillValidation.bottomCoveragePercent}%`);
           }
 
           // If validation passed, return success
@@ -199,6 +209,8 @@ export async function POST(request: NextRequest) {
                 passed: true,
                 character: validationResult.characterValidation,
                 outline: validationResult.outlineValidation,
+                coverage: validationResult.coverageValidation,
+                bottomFill: validationResult.bottomFillValidation,
               },
             });
           }
@@ -225,6 +237,8 @@ export async function POST(request: NextRequest) {
                 passed: false,
                 character: validationResult.characterValidation,
                 outline: validationResult.outlineValidation,
+                coverage: validationResult.coverageValidation,
+                bottomFill: validationResult.bottomFillValidation,
               },
               warning: "Image may have quality issues (validation failed after retries)",
             });
@@ -273,6 +287,8 @@ export async function POST(request: NextRequest) {
           passed: false,
           character: lastValidationResult.characterValidation,
           outline: lastValidationResult.outlineValidation,
+          coverage: lastValidationResult.coverageValidation,
+          bottomFill: lastValidationResult.bottomFillValidation,
         } : undefined,
         warning: "Image may have quality issues",
       });

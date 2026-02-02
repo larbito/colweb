@@ -367,10 +367,10 @@ export async function validateImageQuality(
   complexity: Complexity
 ): Promise<QualityGateResult> {
   const startTime = Date.now();
-
+  
   try {
     const sharp = await import("sharp").catch(() => null);
-
+    
     if (!sharp) {
       // Sharp not available - pass with warning
       return {
@@ -408,7 +408,7 @@ export async function validateImageQuality(
       const r = originalData[i];
       const g = originalData[i + 1] || r;
       const b = originalData[i + 2] || r;
-
+      
       const maxDiff = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
       if (maxDiff > 30) {
         colorPixels++;
@@ -612,5 +612,58 @@ export function getRetryPromptAdjustments(failureReason: string, attempt: number
     adjustments.push("COMPOSITION: Zoom in on subject. Subject should fill 70-80% of frame height. Less empty space.");
   }
 
+  // NEW: Bottom blank / empty bottom detection
+  if (failureReason.includes("Bottom") || failureReason.includes("bottom") || failureReason.includes("empty")) {
+    if (attempt === 1) {
+      adjustments.push(`CRITICAL BOTTOM FIX: The bottom 15% of the page MUST contain content.
+- Add a visible ground plane (grass, floor tiles, carpet, path, dirt, water edge)
+- Place 3-5 foreground objects near the bottom edge (flowers, pebbles, toys, leaves, rocks)
+- The floor/ground texture must extend to the bottom margin
+- NO floating subject with empty space below`);
+    } else {
+      adjustments.push(`CRITICAL: ZOOM IN 20% and ADD LARGE FOREGROUND ELEMENT.
+- Move the camera/view CLOSER to the subject
+- Add a LARGE ground element that touches the bottom edge (rug, pathway, grass patch)
+- Fill bottom 20% with floor texture and 4+ small props
+- Subject must be in lower portion of frame, NOT centered vertically
+- The bottom edge MUST have visible lines/content, not white space`);
+    }
+  }
+
   return adjustments.join("\n");
+}
+
+/**
+ * Check if an image has bottom coverage issues
+ * Returns true if the bottom is too empty
+ */
+export function hasBottomCoverageIssue(bottomBlankRatio: number): boolean {
+  return bottomBlankRatio > MAX_BOTTOM_BLANK_RATIO;
+}
+
+/**
+ * Get a specific reinforcement block for bottom coverage issues
+ */
+export function getBottomCoverageReinforcement(attempt: number): string {
+  if (attempt === 1) {
+    return `
+=== BOTTOM FILL FIX (ATTEMPT ${attempt}) ===
+The previous image had too much empty space at the bottom.
+REQUIRED FIXES:
+1. Add ground plane that reaches bottom edge (floor, grass, path, rug, tiles)
+2. Place 3+ foreground objects near bottom margin
+3. Subject should be in lower-middle of frame
+4. No floating subject with white space below`;
+  }
+  
+  return `
+=== CRITICAL BOTTOM FILL FIX (ATTEMPT ${attempt}) ===
+The bottom is STILL too empty. This MUST be fixed.
+MANDATORY CHANGES:
+1. ZOOM IN 20% - get closer to the subject
+2. ADD LARGE FLOOR ELEMENT that extends across full width at bottom
+3. Place 5+ foreground props touching the bottom edge
+4. Fill bottom 20% with texture (wood grain, grass blades, tile pattern, carpet weave)
+5. Move subject DOWN in the frame - center should be in lower third
+6. NO SKY or ceiling in view - maximize ground coverage`;
 }
