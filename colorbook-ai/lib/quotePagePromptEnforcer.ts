@@ -355,12 +355,46 @@ export const QUOTE_NEGATIVE_PROMPTS = [
   "shadows",
   "watermark",
   "signature",
+  // CRITICAL: No characters, animals, mascots
   "animals",
   "characters",
   "people",
   "toys",
   "random objects",
+  "panda",
+  "bear",
+  "cat",
+  "dog",
+  "bunny",
+  "rabbit",
+  "fox",
+  "lion",
+  "elephant",
+  "bird",
+  "owl",
+  "unicorn",
+  "dinosaur",
+  "mascot",
+  "cartoon character",
+  "face",
+  "human figure",
 ];
+
+// ============================================================
+// STRICT NO-CHARACTER BLOCK (APPENDED TO ALL QUOTE PROMPTS)
+// ============================================================
+
+export const STRICT_NO_CHARACTERS_BLOCK = `
+=== ABSOLUTE PROHIBITION: NO CHARACTERS ===
+This is a TEXT/QUOTE page. DO NOT include any of these:
+❌ Animals (NO panda, bear, cat, dog, bunny, fox, lion, bird, owl, etc.)
+❌ People or human figures
+❌ Cartoon characters or mascots
+❌ Faces of any kind
+❌ Creatures or living beings
+
+ONLY ALLOWED: Typography text + abstract decorations (stars, hearts, flowers, swirls, geometric shapes).
+If ANY animal/character/mascot appears, the image is INVALID and will be rejected.`;
 
 // ============================================================
 // TEXT-ONLY PROMPT (HARD OVERRIDE - SEPARATE TEMPLATE)
@@ -566,11 +600,17 @@ export function buildQuotePagePrompt(config: QuotePageConfig): string {
   parts.push("");
 
   // ============================================================
+  // STRICT NO-CHARACTER BLOCK (CRITICAL)
+  // ============================================================
+  parts.push(STRICT_NO_CHARACTERS_BLOCK);
+
+  // ============================================================
   // FINAL REINFORCEMENT
   // ============================================================
   // Note: text_only has early return above, so this only applies to decorated modes
   parts.push(`*** FINAL CHECK: Use ONLY the allowed motifs. NO random animals/toys/characters. ***`);
   parts.push(`*** WHITE background, BLACK outlines only, NO fills ***`);
+  parts.push(`*** THIS IS A QUOTE PAGE - TEXT + ABSTRACT DECORATIONS ONLY - NO ANIMALS OR MASCOTS ***`);
 
   return parts.join("\n");
 }

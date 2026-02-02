@@ -43,9 +43,8 @@ import {
   Palette,
   Settings2,
   Code,
-  X,
   Info,
-  Tag,
+  AlertCircle,
 } from "lucide-react";
 import {
   Dialog,
@@ -54,8 +53,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { ImagePreviewModal } from "@/components/app/image-preview-modal";
 import { ExportPDFModal } from "@/components/app/export-pdf-modal";
+import { QuotePageViewer } from "@/components/app/quote-page-viewer";
 import { 
   type JobProgress,
   type PageStage,
@@ -74,9 +73,7 @@ type DecorationTheme = "floral" | "stars" | "mandala" | "hearts" | "nature" | "g
 type TypographyStyle = "bubble" | "script" | "block" | "mixed";
 type DecorationDensity = "low" | "medium" | "high";
 type BookType = "different_quotes" | "same_quote_variations";
-type ToneType = "cute" | "bold" | "calm" | "funny" | "motivational" | "romantic" | "faith" | "sports" | "kids" | "inspirational";
 type AudienceType = "kids" | "teens" | "adults" | "all";
-
 type QuoteTopic = "ambition" | "self_love" | "confidence" | "family" | "friendship" | "love" | "gratitude" | "calm" | "sports" | "study" | "health" | "humor" | "faith" | "travel" | "creativity" | "nature_wonder" | "general";
 
 interface PageState {
@@ -162,20 +159,6 @@ const THEME_ICONS: Record<DecorationTheme, React.ReactNode> = {
   mixed: <Layers className="h-4 w-4" />,
 };
 
-// Tone options
-const TONE_OPTIONS: { value: ToneType; label: string }[] = [
-  { value: "motivational", label: "Motivational" },
-  { value: "inspirational", label: "Inspirational" },
-  { value: "cute", label: "Cute" },
-  { value: "bold", label: "Bold" },
-  { value: "calm", label: "Calm" },
-  { value: "funny", label: "Funny" },
-  { value: "romantic", label: "Romantic" },
-  { value: "faith", label: "Faith" },
-  { value: "sports", label: "Sports" },
-  { value: "kids", label: "Kids" },
-];
-
 export default function QuoteBookPage() {
   // ==================== State ====================
   
@@ -183,11 +166,10 @@ export default function QuoteBookPage() {
   const [quotesText, setQuotesText] = useState("");
   const [generatingQuotes, setGeneratingQuotes] = useState(false);
   
-  // Quote generation settings
-  const [quoteTone, setQuoteTone] = useState<ToneType>("motivational");
+  // Quote generation settings - SIMPLIFIED: Only user prompt
+  const [userQuotePrompt, setUserQuotePrompt] = useState(""); // Main user input for quote theme
   const [quoteAudience, setQuoteAudience] = useState<AudienceType>("all");
   const [quoteCount, setQuoteCount] = useState(10);
-  const [customTheme, setCustomTheme] = useState(""); // Custom theme for AI generation
   
   // Anti-repetition: track all generated quotes
   const previousQuotesRef = useRef<string[]>([]);
@@ -210,6 +192,7 @@ export default function QuoteBookPage() {
 
   // Enhancement (deferred - not auto-run)
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [currentEnhancingPage, setCurrentEnhancingPage] = useState<number | null>(null);
   
   // Processing
   const [isProcessing, setIsProcessing] = useState(false);
@@ -227,8 +210,9 @@ export default function QuoteBookPage() {
     processDurations: [],
   });
 
-  // Preview
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  // Page Viewer Modal
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
 
   // Export PDF modal
   const [showExportModal, setShowExportModal] = useState(false);
@@ -250,6 +234,11 @@ export default function QuoteBookPage() {
   // ==================== Step 1: Quote Generation ====================
 
   const generateQuotes = async () => {
+    if (!userQuotePrompt.trim()) {
+      toast.error("Please describe what kind of quotes you want");
+      return;
+    }
+
     setGeneratingQuotes(true);
     
     try {
@@ -257,11 +246,10 @@ export default function QuoteBookPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          topicMode: customTheme.trim() ? "selected" : "any",
-          tone: quoteTone,
+          topicMode: "custom",
           audience: quoteAudience,
           count: quoteCount,
-          theme: customTheme.trim() || undefined, // Pass custom theme if provided
+          customPrompt: userQuotePrompt.trim(), // User's description of what quotes they want
           excludeQuotes: previousQuotesRef.current.slice(-50),
         }),
       });
@@ -451,6 +439,7 @@ export default function QuoteBookPage() {
               prompt: pageItem.prompt,
               size: "1024x1536",
               validateOutline: true,
+              isQuotePage: true, // Signal this is a quote page - NO CHARACTERS
             }),
           });
 
@@ -527,6 +516,7 @@ export default function QuoteBookPage() {
           prompt: page.prompt,
           size: "1024x1536",
           validateOutline: true,
+          isQuotePage: true, // Signal this is a quote page - NO CHARACTERS
         }),
       });
 
@@ -557,7 +547,56 @@ export default function QuoteBookPage() {
     }
   };
 
-  // ==================== Enhancement (Deferred) ====================
+  // ==================== Enhancement (Per-Page + All) ====================
+
+  const enhanceSinglePage = async (pageNumber: number) => {
+    const page = pages.find(p => p.page === pageNumber);
+    if (!page || !page.imageBase64 || page.enhanceStatus === "enhanced") return;
+
+    setCurrentEnhancingPage(pageNumber);
+    setPages(prev => prev.map(p =>
+      p.page === pageNumber ? { ...p, enhanceStatus: "enhancing" as EnhanceStatus } : p
+    ));
+
+    try {
+      const response = await fetch("/api/image/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: page.imageBase64,
+          scale: 2,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.enhancedImageBase64) {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? {
+                ...p,
+                enhancedImageBase64: data.enhancedImageBase64,
+                enhanceStatus: "enhanced" as EnhanceStatus,
+                activeVersion: "enhanced" as const,
+              }
+            : p
+        ));
+        toast.success(`Page ${pageNumber} enhanced!`);
+      } else {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+        ));
+        toast.error(`Failed to enhance page ${pageNumber}`);
+      }
+    } catch {
+      setPages(prev => prev.map(p =>
+        p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+      ));
+      toast.error(`Failed to enhance page ${pageNumber}`);
+    } finally {
+      setCurrentEnhancingPage(null);
+    }
+  };
 
   const enhanceAllPages = async () => {
     const pagesToEnhance = pages.filter(
@@ -730,6 +769,18 @@ export default function QuoteBookPage() {
 
   // ==================== Download ====================
 
+  const downloadSinglePage = (pageNumber: number) => {
+    const page = pages.find(p => p.page === pageNumber);
+    if (!page || !page.imageBase64) return;
+
+    const imageData = page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64;
+    const link = document.createElement("a");
+    link.href = `data:image/png;base64,${imageData}`;
+    link.download = `quote-page-${page.page}.png`;
+    link.click();
+    toast.success(`Downloaded page ${pageNumber}`);
+  };
+
   const downloadAll = () => {
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
@@ -748,6 +799,16 @@ export default function QuoteBookPage() {
     });
 
     toast.success(`Downloading ${donePages.length} images...`);
+  };
+
+  // ==================== Page Viewer ====================
+
+  const openPageViewer = (pageNumber: number) => {
+    const index = pages.findIndex(p => p.page === pageNumber);
+    if (index !== -1) {
+      setViewerIndex(index);
+      setViewerOpen(true);
+    }
   };
 
   // ==================== Render Helpers ====================
@@ -787,17 +848,17 @@ export default function QuoteBookPage() {
             }
           />
 
-          {/* Step 1: Quote Input */}
+          {/* Step 1: Quote Input - SIMPLIFIED */}
           <SectionCard
             title="Step 1: Your Quotes"
-            description="Generate fresh quotes with AI or enter your own"
+            description="Describe what kind of quotes you want, or enter your own"
             icon={Quote}
             badge={quotesText.split("\n").filter(q => q.trim().length > 0).length > 0 
               ? `${quotesText.split("\n").filter(q => q.trim().length > 0).length} quotes` 
               : undefined}
           >
             <div className="space-y-5">
-              {/* AI Quote Generator */}
+              {/* AI Quote Generator - SIMPLIFIED: Only user prompt */}
               <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
                 <CardContent className="p-5 space-y-4">
                   <div className="flex items-center gap-2 text-sm font-medium">
@@ -807,35 +868,29 @@ export default function QuoteBookPage() {
                     <span>AI Quote Generator</span>
                   </div>
                   
-                  {/* Custom Theme Input */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Custom Theme (describe what kind of quotes you want)
+                  {/* Single User Prompt Input */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      What kind of quotes do you want?
                     </label>
-                    <Input
-                      value={customTheme}
-                      onChange={(e) => setCustomTheme(e.target.value)}
-                      placeholder="e.g., quotes about ocean adventures, beach life and surfing... or leave empty for general quotes"
-                      className="h-10 rounded-xl"
+                    <Textarea
+                      value={userQuotePrompt}
+                      onChange={(e) => setUserQuotePrompt(e.target.value)}
+                      placeholder="Examples:
+• confidence and discipline quotes for gym motivation
+• love quotes for couples
+• Islamic reminders and wisdom
+• gratitude and nature appreciation
+• funny quotes for kids about animals"
+                      className="min-h-[100px] rounded-xl"
                     />
-                    <p className="text-[10px] text-muted-foreground">
-                      Enter a specific theme and the AI will generate quotes that match it
+                    <p className="text-xs text-muted-foreground">
+                      Be specific! The AI will generate unique quotes matching your description.
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">Tone</label>
-                      <select
-                        value={quoteTone}
-                        onChange={(e) => setQuoteTone(e.target.value as ToneType)}
-                        className="w-full h-10 rounded-xl border border-input bg-background px-3 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
-                      >
-                        {TONE_OPTIONS.map(opt => (
-                          <option key={opt.value} value={opt.value}>{opt.label}</option>
-                        ))}
-                      </select>
-                    </div>
+                  {/* Simple settings row */}
+                  <div className="grid grid-cols-3 gap-3">
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Audience</label>
                       <select
@@ -863,7 +918,7 @@ export default function QuoteBookPage() {
                     <div className="flex items-end">
                       <Button
                         onClick={generateQuotes}
-                        disabled={generatingQuotes}
+                        disabled={generatingQuotes || !userQuotePrompt.trim()}
                         className="w-full h-10 rounded-xl"
                       >
                         {generatingQuotes ? (
@@ -873,6 +928,15 @@ export default function QuoteBookPage() {
                         )}
                         {generatingQuotes ? "Generating..." : "Generate"}
                       </Button>
+                    </div>
+                  </div>
+
+                  {/* Important notice about text-only pages */}
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                    <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+                    <div className="text-xs text-blue-700 dark:text-blue-300">
+                      <strong>Quote pages are TEXT-ONLY</strong> — they contain beautiful typography with optional decorative elements (stars, hearts, borders). 
+                      No animals, characters, or mascots will appear.
                     </div>
                   </div>
                 </CardContent>
@@ -1184,7 +1248,7 @@ export default function QuoteBookPage() {
                         ) : (
                           <Sparkles className="mr-2 h-4 w-4" />
                         )}
-                        {isEnhancing ? "Enhancing..." : `Enhance (${enhancedCount}/${doneCount})`}
+                        {isEnhancing ? "Enhancing..." : `Enhance All (${enhancedCount}/${doneCount})`}
                       </Button>
                       <Button
                         variant="outline"
@@ -1221,62 +1285,73 @@ export default function QuoteBookPage() {
                   </Card>
                 )}
 
-                {/* Pages Grid */}
+                {/* Pages Grid - WHITE PAPER BACKGROUND */}
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {pages.map((page) => (
                     <Card
                       key={page.page}
                       className="group overflow-hidden border-border/50 hover:shadow-lg transition-all duration-200"
                     >
-                      {/* Image Preview */}
-                      <div className="aspect-[3/4] bg-muted relative">
-                        {page.imageBase64 ? (
-                          <>
-                            <img
-                              src={`data:image/png;base64,${page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64}`}
-                              alt={`Page ${page.page}`}
-                              className="w-full h-full object-contain cursor-pointer"
-                              onClick={() => setPreviewImage(`data:image/png;base64,${page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64}`)}
-                            />
-                            <div className="absolute top-2 left-2 flex flex-col gap-1">
-                              {page.enhanceStatus === "enhanced" && (
-                                <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/90">
-                                  <Sparkles className="h-2.5 w-2.5 mr-1" />
-                                  HD
-                                </Badge>
-                              )}
-                              {page.finalLetterStatus === "done" && (
-                                <Badge className="text-[10px] px-1.5 py-0 bg-green-500">
-                                  <CheckCircle2 className="h-2.5 w-2.5 mr-1" />
-                                  Print
-                                </Badge>
-                              )}
+                      {/* Image Preview - WHITE PAPER CONTAINER */}
+                      <div 
+                        className="aspect-[3/4] relative cursor-pointer"
+                        onClick={() => page.status === "done" && openPageViewer(page.page)}
+                      >
+                        {/* White paper background container */}
+                        <div className="absolute inset-2 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                          {page.imageBase64 ? (
+                            <>
+                              <img
+                                src={`data:image/png;base64,${page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64}`}
+                                alt={`Page ${page.page}`}
+                                className="w-full h-full object-contain bg-white"
+                              />
+                              {/* Badges */}
+                              <div className="absolute top-1 left-1 flex flex-col gap-1">
+                                {page.enhanceStatus === "enhanced" && (
+                                  <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/90">
+                                    <Sparkles className="h-2.5 w-2.5 mr-1" />
+                                    HD
+                                  </Badge>
+                                )}
+                                {page.finalLetterStatus === "done" && (
+                                  <Badge className="text-[10px] px-1.5 py-0 bg-green-500">
+                                    <CheckCircle2 className="h-2.5 w-2.5 mr-1" />
+                                    Print
+                                  </Badge>
+                                )}
+                              </div>
+                              {/* Hover overlay */}
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                <Eye className="h-6 w-6 text-white drop-shadow-lg" />
+                              </div>
+                            </>
+                          ) : page.status === "generating" ? (
+                            <div className="flex flex-col items-center justify-center h-full gap-2 bg-gray-50">
+                              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                              <span className="text-xs text-muted-foreground">Generating...</span>
                             </div>
-                          </>
-                        ) : page.status === "generating" ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                            <span className="text-xs text-muted-foreground">Generating...</span>
-                            <StatusBadge stage="generating" />
-                          </div>
-                        ) : page.enhanceStatus === "enhancing" ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2">
-                            <Sparkles className="h-8 w-8 animate-pulse text-purple-500" />
-                            <span className="text-xs text-muted-foreground">Enhancing...</span>
-                            <StatusBadge stage="enhancing" />
-                          </div>
-                        ) : page.finalLetterStatus === "processing" ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2">
-                            <PanelTop className="h-8 w-8 animate-pulse text-orange-500" />
-                            <span className="text-xs text-muted-foreground">Processing...</span>
-                            <StatusBadge stage="processing" />
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                            <Quote className="h-10 w-10 opacity-20" />
-                            <StatusBadge stage="queued" />
-                          </div>
-                        )}
+                          ) : page.enhanceStatus === "enhancing" ? (
+                            <div className="flex flex-col items-center justify-center h-full gap-2 bg-gray-50">
+                              <Sparkles className="h-8 w-8 animate-pulse text-purple-500" />
+                              <span className="text-xs text-muted-foreground">Enhancing...</span>
+                            </div>
+                          ) : page.finalLetterStatus === "processing" ? (
+                            <div className="flex flex-col items-center justify-center h-full gap-2 bg-gray-50">
+                              <PanelTop className="h-8 w-8 animate-pulse text-orange-500" />
+                              <span className="text-xs text-muted-foreground">Processing...</span>
+                            </div>
+                          ) : page.status === "failed" ? (
+                            <div className="flex flex-col items-center justify-center h-full gap-2 bg-red-50">
+                              <AlertCircle className="h-8 w-8 text-destructive" />
+                              <span className="text-xs text-destructive">Failed</span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-gray-50">
+                              <Quote className="h-10 w-10 opacity-20" />
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* Page Info */}
@@ -1296,7 +1371,7 @@ export default function QuoteBookPage() {
                           {page.quote}
                         </p>
                         
-                        {/* Actions */}
+                        {/* Actions - Per-page Enhance/Regenerate/Download */}
                         <div className="flex gap-1 mt-2">
                           {page.status === "done" && (
                             <>
@@ -1304,8 +1379,8 @@ export default function QuoteBookPage() {
                                 variant="ghost"
                                 size="sm"
                                 className="flex-1 h-7 text-xs"
-                                onClick={() => setPreviewImage(`data:image/png;base64,${page.imageBase64}`)}
-                                title="View image"
+                                onClick={() => openPageViewer(page.page)}
+                                title="View"
                               >
                                 <Eye className="h-3 w-3" />
                               </Button>
@@ -1313,7 +1388,22 @@ export default function QuoteBookPage() {
                                 variant="ghost"
                                 size="sm"
                                 className="flex-1 h-7 text-xs"
+                                onClick={() => enhanceSinglePage(page.page)}
+                                disabled={page.enhanceStatus === "enhanced" || page.enhanceStatus === "enhancing"}
+                                title="Enhance"
+                              >
+                                {page.enhanceStatus === "enhancing" ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Sparkles className={cn("h-3 w-3", page.enhanceStatus === "enhanced" && "text-purple-500")} />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="flex-1 h-7 text-xs"
                                 onClick={() => generateSinglePage(page.page)}
+                                disabled={isGenerating && currentGeneratingPage === page.page}
                                 title="Regenerate"
                               >
                                 <RefreshCw className="h-3 w-3" />
@@ -1322,10 +1412,10 @@ export default function QuoteBookPage() {
                                 variant="ghost"
                                 size="sm"
                                 className="flex-1 h-7 text-xs"
-                                onClick={() => setViewPromptPage(page)}
-                                title="View prompt"
+                                onClick={() => downloadSinglePage(page.page)}
+                                title="Download"
                               >
-                                <Code className="h-3 w-3" />
+                                <Download className="h-3 w-3" />
                               </Button>
                             </>
                           )}
@@ -1363,16 +1453,23 @@ export default function QuoteBookPage() {
         </div>
       </PageContainer>
 
-      {/* Preview Modal */}
-      {previewImage && (
-        <ImagePreviewModal
-          isOpen={!!previewImage}
-          onClose={() => setPreviewImage(null)}
-          imageUrl={previewImage}
-          title="Quote Page Preview"
-          pageNumber={1}
-        />
-      )}
+      {/* Page Viewer Modal with Next/Prev */}
+      <QuotePageViewer
+        isOpen={viewerOpen}
+        onClose={() => setViewerOpen(false)}
+        pages={pages}
+        currentIndex={viewerIndex}
+        onNavigate={setViewerIndex}
+        onRegenerate={generateSinglePage}
+        onEnhance={enhanceSinglePage}
+        onDownload={downloadSinglePage}
+        onViewPrompt={(pageNumber) => {
+          const page = pages.find(p => p.page === pageNumber);
+          if (page) setViewPromptPage(page);
+        }}
+        isRegenerating={isGenerating && currentGeneratingPage === pages[viewerIndex]?.page}
+        isEnhancing={currentEnhancingPage === pages[viewerIndex]?.page}
+      />
 
       {/* Export PDF Modal */}
       <ExportPDFModal
@@ -1449,32 +1546,6 @@ export default function QuoteBookPage() {
                         <span className="font-medium">{viewPromptPage.appliedSettings.density}</span>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Topic & Motifs */}
-              {(viewPromptPage.topic || viewPromptPage.motifPack) && (
-                <Card className="border-border/50">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
-                      <Tag className="h-4 w-4" />
-                      Topic & Motifs (Auto-detected)
-                    </div>
-                    {viewPromptPage.topic && (
-                      <div className="text-xs mb-2">
-                        <span className="text-muted-foreground">Topic:</span>{" "}
-                        <Badge variant="secondary" className="text-xs">
-                          {viewPromptPage.topic.replace("_", " ")}
-                        </Badge>
-                      </div>
-                    )}
-                    {viewPromptPage.motifPack && viewPromptPage.motifPack.length > 0 && (
-                      <div className="text-xs">
-                        <span className="text-muted-foreground">Allowed Motifs:</span>{" "}
-                        <span className="font-medium">{viewPromptPage.motifPack.slice(0, 8).join(", ")}</span>
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
               )}
