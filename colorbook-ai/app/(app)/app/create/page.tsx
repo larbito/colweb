@@ -188,6 +188,19 @@ export default function CreateColoringBookPage() {
   // Settings
   const [pageCount, setPageCount] = useState(10);
   const [orientation, setOrientation] = useState<"portrait" | "landscape" | "square">("portrait");
+  
+  // Complexity level affects prompt generation, validation thresholds, and final art style
+  type ComplexityLevel = "kids" | "simple" | "medium" | "detailed" | "ultra";
+  const [complexity, setComplexity] = useState<ComplexityLevel>("medium");
+  
+  const COMPLEXITY_OPTIONS: { value: ComplexityLevel; label: string; description: string; ageRange: string }[] = [
+    { value: "kids", label: "Very Simple", description: "Big shapes, few details, thick outlines", ageRange: "Ages 3-6" },
+    { value: "simple", label: "Simple", description: "Clear shapes, moderate detail", ageRange: "Ages 6-9" },
+    { value: "medium", label: "Medium", description: "Balanced complexity, good for most", ageRange: "Ages 9-12" },
+    { value: "detailed", label: "Detailed", description: "Many details, intricate patterns", ageRange: "Teens+" },
+    { value: "ultra", label: "Ultra Detailed", description: "Maximum complexity, stress-relief style", ageRange: "Adults" },
+  ];
+  
   const [storyConfig, setStoryConfig] = useState<StoryConfig>({
     title: "",
     outline: "",
@@ -569,6 +582,7 @@ export default function CreateColoringBookPage() {
             validateOutline: true,
             validateCharacter: bookType === "storybook",
             validateComposition: true,
+            complexity, // Pass complexity level for validation thresholds
           }),
         });
 
@@ -691,6 +705,7 @@ export default function CreateColoringBookPage() {
           validateOutline: true,
           validateCharacter: bookType === "storybook",
           validateComposition: true,
+          complexity,
         }),
       });
 
@@ -800,6 +815,7 @@ export default function CreateColoringBookPage() {
             validateOutline: true,
             validateCharacter: bookType === "storybook",
             validateComposition: true,
+            complexity,
           }),
         });
         
@@ -1122,6 +1138,7 @@ export default function CreateColoringBookPage() {
           validateOutline: true,
           validateCharacter: bookType === "storybook",
           validateComposition: true,
+          complexity,
         }),
       });
 
@@ -1698,6 +1715,32 @@ export default function CreateColoringBookPage() {
                   <OptionChip label="Landscape" selected={orientation === "landscape"} onClick={() => setOrientation("landscape")} />
                   <OptionChip label="Square" selected={orientation === "square"} onClick={() => setOrientation("square")} />
                 </ChipGroup>
+              </SubSection>
+
+              {/* Design Complexity */}
+              <SubSection title="Design Complexity">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-5 gap-2">
+                    {COMPLEXITY_OPTIONS.map((option) => (
+                <button
+                        key={option.value}
+                        onClick={() => setComplexity(option.value)}
+                        className={cn(
+                          "flex flex-col items-center p-2 rounded-lg border text-center transition-all",
+                          complexity === option.value 
+                            ? "border-primary bg-primary/10 ring-2 ring-primary" 
+                            : "border-border hover:border-muted-foreground/50"
+                        )}
+                      >
+                        <span className="text-xs font-medium">{option.label}</span>
+                        <span className="text-[10px] text-muted-foreground">{option.ageRange}</span>
+                </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {COMPLEXITY_OPTIONS.find(o => o.value === complexity)?.description}
+                  </p>
+                </div>
               </SubSection>
 
                       {/* Age Group */}

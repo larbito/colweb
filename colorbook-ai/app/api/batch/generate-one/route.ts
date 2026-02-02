@@ -12,7 +12,7 @@ import {
   buildOutlineOnlyContract,
   buildCharacterRetryReinforcement,
 } from "@/lib/characterIdentity";
-import { validateGeneratedImage } from "@/lib/services/imageValidator";
+import { validateGeneratedImage, type ComplexityLevel } from "@/lib/services/imageValidator";
 
 /**
  * Route segment config - single image generation with validation retries
@@ -51,7 +51,9 @@ const requestSchema = z.object({
   // Validation options
   validateOutline: z.boolean().default(true),
   validateCharacter: z.boolean().default(true),
-  validateComposition: z.boolean().default(true), // NEW: check for empty bottom/coverage
+  validateComposition: z.boolean().default(true), // check for empty bottom/coverage
+  // Complexity level affects validation thresholds and prompt
+  complexity: z.enum(["kids", "simple", "medium", "detailed", "ultra"]).default("medium"),
 });
 
 /**
@@ -96,13 +98,14 @@ export async function POST(request: NextRequest) {
       validateOutline,
       validateCharacter,
       validateComposition,
+      complexity,
     } = parseResult.data;
     
     const totalAttempts = maxRetries + 1;
     const shouldValidateCharacter = isStorybookMode && validateCharacter && characterProfile;
     const shouldValidateComposition = validateComposition;
 
-    console.log(`[generate-one] Page ${page}: Starting (storybook: ${isStorybookMode}, validateChar: ${shouldValidateCharacter}, validateComp: ${shouldValidateComposition})`);
+    console.log(`[generate-one] Page ${page}: Starting (storybook: ${isStorybookMode}, complexity: ${complexity}, validateChar: ${shouldValidateCharacter}, validateComp: ${shouldValidateComposition})`);
 
     // Build base prompt with contracts
     let basePrompt = prompt;
@@ -178,7 +181,8 @@ export async function POST(request: NextRequest) {
             imageBase64,
             shouldValidateCharacter ? characterProfile as CharacterIdentityProfile : undefined,
             !!shouldValidateCharacter,
-            shouldValidateComposition // Pass composition validation flag
+            shouldValidateComposition, // Pass composition validation flag
+            complexity as ComplexityLevel // Pass complexity level for thresholds
           );
           
           lastValidationResult = validationResult;
