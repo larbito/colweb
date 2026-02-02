@@ -13,6 +13,7 @@ import {
   NO_BORDER_CONSTRAINTS,
   FILL_CANVAS_CONSTRAINTS,
   FOREGROUND_BOTTOM_FILL_CONSTRAINTS,
+  PAGE_COVERAGE_CONTRACT,
   LANDSCAPE_EXTRA_CONSTRAINTS,
   PORTRAIT_EXTRA_CONSTRAINTS,
   SQUARE_EXTRA_CONSTRAINTS,
@@ -21,31 +22,31 @@ import {
 } from "@/lib/coloringPagePromptEnforcer";
 import {
   type CharacterIdentityProfile,
-  buildCharacterIdentityContract,
-  buildOutlineOnlyContract,
 } from "@/lib/characterIdentity";
+import {
+  detectThemeRequirements,
+  FORBIDDEN_FILLERS,
+  FULL_PAGE_COMPOSITION_CONTRACT,
+  buildCharacterBible,
+  type CharacterSpec,
+  type CreativeBrief,
+  type PlannedScene,
+} from "@/lib/creativeBrief";
 
 /**
  * Route segment config - extend timeout for prompt generation
  */
-export const maxDuration = 60; // 60 seconds
+export const maxDuration = 90; // 90 seconds for larger page counts
 
 /**
  * POST /api/batch/prompts
  * 
- * Generates N page prompts for batch image generation.
+ * NEW PIPELINE:
+ * 1. Understand the user's idea (CreativeBrief)
+ * 2. Plan unique scenes (ScenePlan)
+ * 3. Generate prompts from scenes with ALL constraints
  * 
- * STORYBOOK MODE: 
- * - Same character across all pages (character consistency LOCKED)
- * - Different scenes with real story progression
- * - Uses Story Plan step to ensure variety
- * 
- * THEME MODE: Same style, varied scenes and characters
- * 
- * ALL prompts enforce:
- * - Outline-only (no filled black areas)
- * - No border/frame
- * - Fill the canvas (90-95%)
+ * NO GENERIC TEMPLATES - every scene derives from the user's actual idea.
  */
 export async function POST(request: NextRequest) {
   if (!isOpenAIConfigured()) {
@@ -76,57 +77,76 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let pagesData: { pages: Array<{ page: number; title: string; sceneDescription: string; location: string; action: string }> };
+    console.log(`[batch/prompts] Starting ${mode} mode with ${count} pages`);
+    console.log(`[batch/prompts] Base prompt: ${basePrompt?.slice(0, 200)}...`);
 
-    if (mode === "storybook") {
-      pagesData = await generateStorybookPages(count, story, styleProfile, characterProfile!, sceneInventory);
-    } else {
-      pagesData = await generateThemePages(count, story, styleProfile, sceneInventory, basePrompt);
-    }
+    // Step 1: Create Creative Brief from user's idea
+    const creativeBrief = await buildCreativeBrief({
+      ideaText: basePrompt || story?.outline || story?.title || "",
+      bookType: mode,
+      targetAge: story?.targetAge,
+      settingConstraint: story?.settingConstraint,
+      characterProfile,
+      styleProfile,
+    });
+    
+    console.log(`[batch/prompts] Creative brief theme: ${creativeBrief.themeTitle}`);
+    console.log(`[batch/prompts] Must include: ${creativeBrief.mustInclude.slice(0, 5).join(", ")}`);
 
-    // Build character consistency block for storybook mode (CRITICAL)
+    // Step 2: Plan unique scenes based on the creative brief
+    const scenePlan = await planScenes(creativeBrief, count, mode);
+    
+    console.log(`[batch/prompts] Planned ${scenePlan.scenes.length} scenes, diversity: ${scenePlan.diversityScore}`);
+
+    // Build character consistency block for storybook mode
     const characterConsistencyBlock = mode === "storybook" && characterProfile
       ? buildCharacterConsistencyBlock(characterProfile)
       : undefined;
 
-    // Extract CHARACTER IDENTITY PROFILE for storybook mode (for vision validation)
+    // Build Character Bible for storybook
+    let characterBible: string | undefined;
+    if (mode === "storybook" && creativeBrief.mainCharacter) {
+      characterBible = buildCharacterBible(creativeBrief.mainCharacter);
+    }
+
+    // Extract CHARACTER IDENTITY PROFILE for vision validation
     let characterIdentityProfile: CharacterIdentityProfile | undefined;
     if (mode === "storybook" && characterProfile) {
       characterIdentityProfile = await extractCharacterIdentityProfile(characterProfile, basePrompt);
-      console.log(`[batch/prompts] Created character identity profile for: ${characterIdentityProfile.species}`);
+      console.log(`[batch/prompts] Created character identity profile: ${characterIdentityProfile.species}`);
     }
 
-    // Convert scene descriptions to full prompts with ALL constraints
+    // Step 3: Convert scenes to full prompts with ALL constraints
     const imageSize = (size || "1024x1536") as ImageSize;
-    const pages: PagePromptItem[] = pagesData.pages.map((page) => {
+    const pages: PagePromptItem[] = scenePlan.scenes.map((scene) => {
       const fullPrompt = buildFullPagePrompt({
-        sceneDescription: page.sceneDescription,
+        scene,
+        creativeBrief,
         styleProfile,
         characterProfile: mode === "storybook" ? characterProfile : undefined,
         characterConsistencyBlock,
+        characterBible,
         size: imageSize,
       });
 
       return {
-        page: page.page,
-        title: page.title,
+        page: scene.pageNumber,
+        title: scene.title,
         prompt: fullPrompt,
-        sceneDescription: page.sceneDescription,
+        sceneDescription: `${scene.action} in ${scene.location} with ${scene.props.slice(0, 4).join(", ")}`,
       };
     });
 
     // Validate scene diversity for storybook mode
     if (mode === "storybook") {
-      validateStorybookDiversity(pagesData.pages);
+      validateSceneDiversity(scenePlan.scenes);
     }
 
-    // Extended response with character identity profile
-    const result = {
+    const result: BatchPromptsResponse & { characterIdentityProfile?: CharacterIdentityProfile } = {
       pages,
       mode,
       characterConsistencyBlock,
-      // NEW: Character Identity Profile for vision-based validation
-      characterIdentityProfile: characterIdentityProfile || undefined,
+      characterIdentityProfile,
     };
 
     console.log(`[batch/prompts] Generated ${pages.length} prompts in ${mode} mode`);
@@ -142,15 +162,356 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * Extract a detailed CHARACTER IDENTITY PROFILE from the character profile and base prompt.
- * This profile is used for vision-based validation to ensure character consistency.
- */
+// ============================================================
+// STEP 1: BUILD CREATIVE BRIEF
+// ============================================================
+
+async function buildCreativeBrief(params: {
+  ideaText: string;
+  bookType: "storybook" | "theme";
+  targetAge?: string;
+  settingConstraint?: string;
+  characterProfile?: CharacterProfile;
+  styleProfile: StyleProfile;
+}): Promise<CreativeBrief> {
+  const { ideaText, bookType, targetAge, settingConstraint, characterProfile, styleProfile } = params;
+  
+  // Detect special themes first
+  const themeReqs = detectThemeRequirements(ideaText);
+  
+  const prompt = `You are creating a creative brief for a ${bookType === "storybook" ? "STORYBOOK (same character on every page)" : "THEME COLLECTION (varied subjects)"} coloring book.
+
+USER'S IDEA: "${ideaText}"
+
+${themeReqs.isSpecialTheme ? `
+DETECTED THEME: ${themeReqs.themeName}
+REQUIRED MOTIFS (must appear in EVERY scene): ${themeReqs.requiredMotifs.join(", ")}
+FORBIDDEN CONTENT: ${themeReqs.forbiddenContent.join(", ")}
+` : ""}
+
+TARGET AGE: ${targetAge || "all-ages"}
+SETTING: ${settingConstraint || "mixed"}
+
+CRITICAL RULES:
+1. NEVER add generic templates (bedroom, kitchen, school, bathroom) unless user explicitly asked
+2. Every element must connect to "${ideaText}"
+3. ${themeReqs.isSpecialTheme ? `Every scene must include ${themeReqs.themeName} motifs` : "Scenes must match the user's actual theme"}
+4. Avoid generic filler: ${FORBIDDEN_FILLERS.slice(0, 8).join(", ")}
+${bookType === "storybook" ? `
+5. Create ONE main character with strict consistency rules
+6. Character must have "alwaysInclude" traits (e.g., "both arms visible")
+7. List what "neverChange" - traits that stay identical
+` : `
+5. Define varied subjects that fit the theme
+6. No forced main character - variety is key
+`}
+
+Return ONLY valid JSON matching this structure:
+{
+  "themeTitle": "specific title based on idea",
+  "themeDescription": "2-3 sentences describing the theme",
+  "targetAudience": "${targetAge || "all-ages"}",
+  "mood": "cheerful/adventurous/cozy/magical/etc",
+  "visualStyleHints": ["hint1", "hint2", "hint3"],
+  "lineThickness": "thin/medium/thick",
+  "complexity": "simple/medium/detailed",
+  "settingWorld": "describe the world/setting derived from the idea",
+  "primaryLocations": ["5-10 specific locations that fit THIS theme - NOT generic bedrooms/kitchens"],
+  "timeOfDayOptions": ["morning", "afternoon", "evening"],
+  ${bookType === "storybook" ? `
+  "mainCharacter": {
+    "name": "optional name",
+    "species": "specific type (e.g., 'baby unicorn' not just 'unicorn')",
+    "visualTraits": ["trait1", "trait2", "trait3", "trait4", "trait5"],
+    "outfit": "description or null",
+    "accessories": ["accessory1", "accessory2"],
+    "proportions": "chibi with large head / realistic / etc",
+    "alwaysInclude": ["both arms/hands visible", "horn on head", "fluffy tail", "etc"],
+    "neverChange": ["face shape", "eye style", "body proportions", "horn shape", "etc"]
+  },
+  "supportingCast": [{"type": "type", "role": "role"}],
+  ` : `
+  "mainCharacter": null,
+  `}
+  "mustInclude": ${JSON.stringify(themeReqs.requiredMotifs.length > 0 ? themeReqs.requiredMotifs : ["items that MUST appear based on the idea"])},
+  "mustAvoid": ${JSON.stringify([...themeReqs.forbiddenContent, ...FORBIDDEN_FILLERS.slice(0, 5)])},
+  "forbiddenFillers": ${JSON.stringify(FORBIDDEN_FILLERS.slice(0, 10))},
+  "varietyPlan": {
+    "sceneTypes": ["action scene", "quiet moment", "discovery", "celebration", "nature scene"],
+    "actionsPool": ["10-15 specific actions that fit THIS theme"],
+    "propsPool": ["15-25 theme-appropriate props - NOT generic toys/balls/rocks"],
+    "compositionStyles": ["close-up face", "medium shot with background", "wide scene", "looking up at", "looking down at"]
+  },
+  "isHolidayTheme": ${themeReqs.isSpecialTheme},
+  "holidayName": ${themeReqs.isSpecialTheme ? `"${themeReqs.themeName}"` : "null"},
+  "holidayMotifs": ${JSON.stringify(themeReqs.requiredMotifs.length > 0 ? themeReqs.requiredMotifs : null)}
+}`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: 2000,
+    temperature: 0.7,
+  });
+
+  let responseText = response.choices[0]?.message?.content?.trim() || "";
+  responseText = responseText
+    .replace(/^```json\n?/i, "")
+    .replace(/^```\n?/i, "")
+    .replace(/\n?```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(responseText);
+    
+    // Validate and enhance
+    const brief: CreativeBrief = {
+      themeTitle: parsed.themeTitle || ideaText,
+      themeDescription: parsed.themeDescription || "",
+      targetAudience: parsed.targetAudience || "all-ages",
+      mood: parsed.mood || "cheerful",
+      visualStyleHints: parsed.visualStyleHints || [],
+      lineThickness: parsed.lineThickness || "medium",
+      complexity: parsed.complexity || "medium",
+      settingWorld: parsed.settingWorld || ideaText,
+      primaryLocations: parsed.primaryLocations || [],
+      timeOfDayOptions: parsed.timeOfDayOptions || ["morning", "afternoon"],
+      mainCharacter: parsed.mainCharacter || undefined,
+      supportingCast: parsed.supportingCast || [],
+      mustInclude: parsed.mustInclude || themeReqs.requiredMotifs,
+      mustAvoid: parsed.mustAvoid || themeReqs.forbiddenContent,
+      forbiddenFillers: parsed.forbiddenFillers || FORBIDDEN_FILLERS,
+      varietyPlan: {
+        sceneTypes: parsed.varietyPlan?.sceneTypes || [],
+        actionsPool: parsed.varietyPlan?.actionsPool || [],
+        propsPool: parsed.varietyPlan?.propsPool || [],
+        compositionStyles: parsed.varietyPlan?.compositionStyles || ["close-up", "medium shot", "wide scene"],
+      },
+      isHolidayTheme: parsed.isHolidayTheme || themeReqs.isSpecialTheme,
+      holidayName: parsed.holidayName || themeReqs.themeName,
+      holidayMotifs: parsed.holidayMotifs || themeReqs.requiredMotifs,
+    };
+    
+    return brief;
+  } catch (e) {
+    console.error("[batch/prompts] Failed to parse creative brief:", responseText.slice(0, 500));
+    throw new Error("Failed to create creative brief");
+  }
+}
+
+// ============================================================
+// STEP 2: PLAN UNIQUE SCENES
+// ============================================================
+
+async function planScenes(
+  brief: CreativeBrief,
+  pageCount: number,
+  mode: "storybook" | "theme"
+): Promise<{ scenes: PlannedScene[]; usedLocations: string[]; usedProps: string[]; diversityScore: number }> {
+  
+  const prompt = `You are planning ${pageCount} UNIQUE coloring book scenes.
+
+CREATIVE BRIEF:
+- Theme: ${brief.themeTitle}
+- Setting World: ${brief.settingWorld}
+- Mood: ${brief.mood}
+- Available Locations: ${brief.primaryLocations.join(", ")}
+- Available Actions: ${brief.varietyPlan.actionsPool.join(", ")}
+- Props Pool: ${brief.varietyPlan.propsPool.join(", ")}
+- Composition Styles: ${brief.varietyPlan.compositionStyles.join(", ")}
+
+${brief.isHolidayTheme ? `
+HOLIDAY THEME: ${brief.holidayName}
+REQUIRED MOTIFS (include 2-4 in EVERY scene): ${brief.holidayMotifs?.join(", ")}
+` : ""}
+
+${mode === "storybook" && brief.mainCharacter ? `
+MAIN CHARACTER (same on every page):
+- Species: ${brief.mainCharacter.species}
+- Traits: ${brief.mainCharacter.visualTraits.join(", ")}
+- Always Include: ${brief.mainCharacter.alwaysInclude.join(", ")}
+Only change the character's pose/action/expression - NOT their design.
+` : ""}
+
+MUST INCLUDE across all pages: ${brief.mustInclude.join(", ")}
+MUST AVOID: ${brief.mustAvoid.join(", ")}
+FORBIDDEN FILLERS: ${brief.forbiddenFillers.join(", ")}
+
+CRITICAL RULES:
+1. Every scene must clearly relate to "${brief.themeTitle}"
+2. NO generic templates (bedroom/kitchen/school) unless the theme IS daily routine
+3. Use each location at most 2 times across ${pageCount} pages
+4. Each scene needs 4-8 SPECIFIC props (named and positioned)
+5. Each scene must have at least 2 props not used in the previous 2 pages
+6. Vary composition: alternate close-up, medium, wide
+${brief.isHolidayTheme ? `7. EVERY scene MUST include ${brief.holidayName} motifs (hearts, pumpkins, etc.)` : ""}
+
+Return ONLY valid JSON:
+{
+  "scenes": [
+    {
+      "pageNumber": 1,
+      "title": "Short Title",
+      "location": "specific location from the list",
+      "action": "specific action",
+      "props": ["prop1 (position)", "prop2 (position)", "prop3", "prop4", "prop5"],
+      "composition": "close-up / medium shot / wide scene",
+      "timeOfDay": "morning/afternoon/evening",
+      "mood": "scene mood",
+      "themeMotifs": ["motif1", "motif2"]${mode === "storybook" ? `,
+      "characterAction": "what the character is doing",
+      "characterExpression": "happy/curious/excited/peaceful"` : ""}
+    }
+  ]
+}
+
+Generate exactly ${pageCount} scenes with UNIQUE locations, actions, and props.`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: Math.min(4000, 100 + pageCount * 150), // Scale tokens with page count
+    temperature: 0.8,
+  });
+
+  let responseText = response.choices[0]?.message?.content?.trim() || "";
+  responseText = responseText
+    .replace(/^```json\n?/i, "")
+    .replace(/^```\n?/i, "")
+    .replace(/\n?```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(responseText);
+    const scenes: PlannedScene[] = parsed.scenes || [];
+    
+    // Calculate diversity metrics
+    const usedLocations = [...new Set(scenes.map(s => s.location))];
+    const allProps = scenes.flatMap(s => s.props || []);
+    const usedProps = [...new Set(allProps)];
+    
+    // Diversity score: unique locations + unique props ratio
+    const locationDiversity = usedLocations.length / Math.min(scenes.length, 10);
+    const propDiversity = usedProps.length / (allProps.length || 1);
+    const diversityScore = Math.round((locationDiversity * 50 + propDiversity * 50));
+    
+    console.log(`[batch/prompts] Diversity: ${usedLocations.length} locations, ${usedProps.length} unique props`);
+    
+    return { scenes, usedLocations, usedProps, diversityScore };
+  } catch (e) {
+    console.error("[batch/prompts] Failed to parse scene plan:", responseText.slice(0, 500));
+    throw new Error("Failed to plan scenes");
+  }
+}
+
+// ============================================================
+// STEP 3: BUILD FULL PAGE PROMPT
+// ============================================================
+
+function buildFullPagePrompt(params: {
+  scene: PlannedScene;
+  creativeBrief: CreativeBrief;
+  styleProfile: StyleProfile;
+  characterProfile?: CharacterProfile;
+  characterConsistencyBlock?: string;
+  characterBible?: string;
+  size?: ImageSize;
+}): string {
+  const { scene, creativeBrief, styleProfile, characterProfile, characterConsistencyBlock, characterBible, size = "1024x1536" } = params;
+
+  const parts: string[] = [];
+
+  // Title line
+  parts.push("Create a kids coloring book page in clean black-and-white OUTLINE line art (no filled areas, no grayscale).");
+
+  // Scene description with specific props
+  const propsText = scene.props.slice(0, 6).join(", ");
+  parts.push(`
+Scene:
+${scene.title} - ${scene.action} in ${scene.location}.
+Props: ${propsText}.
+Composition: ${scene.composition} view.
+${scene.mood ? `Mood: ${scene.mood}.` : ""}
+${creativeBrief.isHolidayTheme && scene.themeMotifs?.length ? `Include ${creativeBrief.holidayName} motifs: ${scene.themeMotifs.join(", ")}.` : ""}`);
+
+  // Character Bible for storybook mode (MORE IMPORTANT than basic consistency block)
+  if (characterBible) {
+    parts.push(characterBible);
+  } else if (characterConsistencyBlock && characterProfile) {
+    parts.push(characterConsistencyBlock);
+  }
+
+  // Background section
+  parts.push(`
+Background:
+${styleProfile.environmentStyle}. ${scene.location} with ${creativeBrief.settingWorld} aesthetic.
+Background elements extend toward edges. No large empty areas.`);
+
+  // Composition section with FULL PAGE CONTRACT
+  parts.push(`
+Composition:
+${styleProfile.compositionRules}. ${scene.composition} framing.
+Subject fills 90-95% of frame. Position main subject in lower-middle area.`);
+
+  // Add the FULL PAGE COMPOSITION CONTRACT (CRITICAL)
+  parts.push(FULL_PAGE_COMPOSITION_CONTRACT);
+
+  // Line style section
+  parts.push(`
+Line style:
+${styleProfile.lineStyle}. Clean OUTLINES ONLY suitable for coloring. No filled areas.`);
+
+  // Floor/ground section - STRONGER
+  parts.push(`
+Floor/ground:
+Visible ground plane that extends to the bottom edge. Include floor texture (${scene.location.includes("garden") || scene.location.includes("outdoor") ? "grass, path, flowers" : "tiles, wood, rug, carpet"}) reaching near bottom margin.
+Add 2-4 foreground props near bottom: ${scene.props.slice(-3).join(", ")}.`);
+
+  // Output constraints
+  parts.push(`
+Output:
+Printable coloring page with crisp black OUTLINES ONLY on pure white.
+NO text, NO watermark. All shapes closed OUTLINES.
+Artwork fills 90-95% of canvas with minimal margins.`);
+
+  // Standard constraints
+  parts.push(NO_BORDER_CONSTRAINTS);
+  parts.push(FILL_CANVAS_CONSTRAINTS);
+  parts.push(FOREGROUND_BOTTOM_FILL_CONSTRAINTS);
+  parts.push(PAGE_COVERAGE_CONTRACT);
+
+  // Orientation-specific
+  if (size === "1536x1024") {
+    parts.push(LANDSCAPE_EXTRA_CONSTRAINTS);
+  } else if (size === "1024x1536") {
+    parts.push(PORTRAIT_EXTRA_CONSTRAINTS);
+  } else {
+    parts.push(SQUARE_EXTRA_CONSTRAINTS);
+  }
+
+  // OUTLINE-ONLY constraints (most important)
+  parts.push(OUTLINE_ONLY_CONSTRAINTS);
+
+  // Avoid list - include creative brief forbidden items
+  const avoidList = [
+    ...creativeBrief.mustAvoid.slice(0, 5),
+    ...creativeBrief.forbiddenFillers.slice(0, 5),
+    ...styleProfile.mustAvoid.slice(0, 3),
+    ...NEGATIVE_PROMPT_LIST.slice(0, 10)
+  ];
+  parts.push(`\nAVOID: ${[...new Set(avoidList)].join(", ")}.`);
+
+  return parts.join("\n");
+}
+
+// ============================================================
+// CHARACTER IDENTITY PROFILE EXTRACTION
+// ============================================================
+
 async function extractCharacterIdentityProfile(
   characterProfile: CharacterProfile,
   basePrompt?: string
 ): Promise<CharacterIdentityProfile> {
-  // Build a prompt to extract detailed character identity
   const extractionPrompt = `Extract a STRICT character identity profile from this character description.
 
 CHARACTER INFO:
@@ -164,24 +525,22 @@ ${characterProfile.clothing ? `- Clothing: ${characterProfile.clothing}` : ""}
 
 ${basePrompt ? `ADDITIONAL CONTEXT:\n${basePrompt.slice(0, 500)}` : ""}
 
-Return ONLY valid JSON with these EXACT fields:
+Return ONLY valid JSON:
 {
-  "species": "exact species (e.g., 'baby unicorn', 'little panda', 'young dragon')",
-  "faceShape": "face shape description",
-  "eyeStyle": "eye style description",
-  "noseStyle": "nose style description", 
-  "mouthStyle": "mouth style description",
-  "earStyle": "ear style description",
-  "hornStyle": "horn description or null if no horn",
-  "hairTuft": "hair/tuft description or null",
-  "proportions": "body proportions (e.g., 'chibi with large head')",
-  "bodyShape": "body shape description",
-  "tailStyle": "tail description or null",
-  "wingStyle": "wing description or null",
-  "markings": "markings description - MUST say 'NO filled black areas, all markings as OUTLINE shapes only'"
-}
-
-Be SPECIFIC. This profile will be used to validate generated images.`;
+  "species": "exact species",
+  "faceShape": "face shape",
+  "eyeStyle": "eye style",
+  "noseStyle": "nose style",
+  "mouthStyle": "mouth style",
+  "earStyle": "ear style",
+  "hornStyle": "horn or null",
+  "hairTuft": "hair or null",
+  "proportions": "proportions",
+  "bodyShape": "body shape",
+  "tailStyle": "tail or null",
+  "wingStyle": "wings or null",
+  "markings": "NO filled black areas - outlines only"
+}`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -200,7 +559,6 @@ Be SPECIFIC. This profile will be used to validate generated images.`;
 
     const extracted = JSON.parse(responseText);
 
-    // Build the identity profile with strict defaults
     return {
       characterId: `char_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
       species: extracted.species || characterProfile.species,
@@ -215,7 +573,7 @@ Be SPECIFIC. This profile will be used to validate generated images.`;
       bodyShape: extracted.bodyShape || "soft, rounded body",
       tailStyle: extracted.tailStyle || undefined,
       wingStyle: extracted.wingStyle || undefined,
-      markings: "NO filled black areas - all markings must be OUTLINE shapes only, interior WHITE",
+      markings: "NO filled black areas - all markings must be OUTLINE shapes only",
       defaultOutfit: characterProfile.clothing,
       doNotChange: [
         "species",
@@ -224,14 +582,11 @@ Be SPECIFIC. This profile will be used to validate generated images.`;
         "ear shape",
         "head-to-body ratio",
         "distinctive features",
-        "markings style (outlines only)",
       ],
-      name: undefined,
     };
   } catch (error) {
     console.error("[batch/prompts] Failed to extract character identity:", error);
     
-    // Return a basic profile as fallback
     return {
       characterId: `char_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
       species: characterProfile.species,
@@ -242,456 +597,40 @@ Be SPECIFIC. This profile will be used to validate generated images.`;
       earStyle: "matching species typical ears",
       proportions: characterProfile.proportions,
       bodyShape: "soft, rounded body",
-      markings: "NO filled black areas - all markings must be OUTLINE shapes only, interior WHITE",
+      markings: "NO filled black areas - outlines only",
       doNotChange: ["species", "face shape", "eye style", "proportions"],
     };
   }
 }
 
-/**
- * STORYBOOK MODE: Generate pages with Story Plan for real progression and variety
- */
-async function generateStorybookPages(
-  count: number,
-  story: { title?: string; outline?: string; targetAge?: string; sceneVariety?: string; settingConstraint?: string } | undefined,
-  styleProfile: StyleProfile,
-  characterProfile: CharacterProfile,
-  sceneInventory?: string[]
-): Promise<{ pages: Array<{ page: number; title: string; sceneDescription: string; location: string; action: string }> }> {
-  
-  // Diverse location pool
-  const indoorLocations = ["bedroom", "living room", "kitchen", "bathroom", "playroom", "classroom", "library", "supermarket", "bakery", "restaurant", "hospital", "toy store", "pet shop", "museum", "art studio"];
-  const outdoorLocations = ["park", "garden", "beach", "forest", "playground", "zoo", "farm", "camping site", "mountain trail", "flower meadow", "pond", "neighborhood street", "soccer field", "picnic area", "carnival"];
-  
-  let locationPool: string[];
-  if (story?.settingConstraint === "indoors") {
-    locationPool = indoorLocations;
-  } else if (story?.settingConstraint === "outdoors") {
-    locationPool = outdoorLocations;
-  } else {
-    locationPool = [...indoorLocations, ...outdoorLocations];
-  }
+// ============================================================
+// DIVERSITY VALIDATION
+// ============================================================
 
-  const minDistinctLocations = Math.min(4, Math.ceil(count / 2));
-  const selectedLocations = locationPool.slice(0, Math.max(minDistinctLocations, count));
-
-  // Build EXTREMELY detailed character description for consistency
-  const characterDescription = `
-=== CHARACTER PROFILE (LOCKED - DO NOT MODIFY) ===
-
-IDENTITY:
-- Species/Type: ${characterProfile.species}
-- Key Visual Features: ${characterProfile.keyFeatures.join(", ")}
-- Body Proportions: ${characterProfile.proportions}
-- Face Design: ${characterProfile.faceStyle}
-${characterProfile.headDetails ? `- Head Details: ${characterProfile.headDetails}` : ""}
-${characterProfile.bodyDetails ? `- Body Details: ${characterProfile.bodyDetails}` : ""}
-${characterProfile.clothing ? `- Outfit/Accessories: ${characterProfile.clothing}` : ""}
-
-CONSISTENCY RULES (CRITICAL):
-1. Same face shape and size on EVERY page
-2. Same eye style (shape, size, placement) on EVERY page
-3. Same ear shape and position on EVERY page
-4. Same body-to-head ratio on EVERY page
-5. Same distinctive features (horn shape, wing style, tail, spots, etc.)
-6. Same line thickness and detail level
-7. ONLY change: POSE, ACTION, EXPRESSION - NOT the character design
-
-WARNING: Do NOT redesign the character between pages. Do NOT alter proportions.
-The character must be INSTANTLY RECOGNIZABLE as the SAME individual on all pages.`;
-
-  const storyPlanPrompt = `You are creating a STORYBOOK with ${count} pages.
-
-${characterDescription}
-
-${story?.title ? `STORY TITLE: "${story.title}"` : ""}
-${story?.outline ? `STORY OUTLINE: ${story.outline}` : ""}
-
-=== SCENE DIVERSITY RULES (CRITICAL) ===
-1. NEVER repeat the same location more than 2 pages in a row
-2. Use at least ${minDistinctLocations} DIFFERENT locations across ${count} pages
-3. Each page MUST have a UNIQUE activity/action (no repeated activities)
-4. Each page MUST have at least 3 props DIFFERENT from the previous page
-5. Vary camera framing: alternate between close-up, medium, and wide shots
-6. Vary time of day if applicable (morning, afternoon, evening)
-7. Vary the character's emotional state (happy, curious, excited, peaceful)
-
-AVAILABLE LOCATIONS (MUST USE ${minDistinctLocations}+ OF THESE): ${selectedLocations.join(", ")}
-${sceneInventory?.length ? `AVAILABLE PROPS: ${sceneInventory.join(", ")}` : ""}
-
-=== STORY STRUCTURE ===
-- Page 1: Introduction - establish character and initial setting
-- Pages 2-${Math.max(2, Math.floor(count * 0.4))}: Rising action - DIFFERENT locations, new challenges
-- Pages ${Math.floor(count * 0.4) + 1}-${Math.floor(count * 0.8)}: Main adventure - variety of activities
-- Pages ${Math.floor(count * 0.8) + 1}-${count}: Resolution - wrap up story
-
-Generate exactly ${count} pages. Return ONLY valid JSON:
-{
-  "pages": [
-    {
-      "page": 1,
-      "title": "Short Title",
-      "location": "specific location from list above",
-      "action": "unique activity",
-      "sceneDescription": "Detailed scene (80-120 words): The [character type] [specific action] in [specific location]. 4-6 named props with positions. Camera framing (close-up/medium/wide). Do NOT describe character features - only pose/action."
-    }
-  ]
-}
-
-=== SCENE DESCRIPTION RULES ===
-- Do NOT redesign or re-describe character features in any description
-- ONLY describe WHAT the character is DOING and WHERE
-- Reference "the ${characterProfile.species}" without listing physical features
-- Focus on: location details, action, props, background elements, framing
-- Include specific prop names and positions (e.g., "a red ball on the left")
-- Each description must be visually distinct from all others`;
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "user", content: storyPlanPrompt },
-    ],
-    max_tokens: 4000,
-    temperature: 0.8,
-  });
-
-  let responseText = response.choices[0]?.message?.content?.trim() || "";
-
-  responseText = responseText
-    .replace(/^```json\n?/i, "")
-    .replace(/^```\n?/i, "")
-    .replace(/\n?```$/i, "")
-    .trim();
-
-  try {
-    return JSON.parse(responseText);
-  } catch {
-    console.error("[batch/prompts] Failed to parse storybook response:", responseText.slice(0, 500));
-    throw new Error("Failed to generate storybook prompts - invalid response format");
-  }
-}
-
-/**
- * THEME ROUTER: Detect special themes and return required motifs
- */
-function detectThemeMotifs(themeText: string): { isSpecialTheme: boolean; themeName: string; requiredMotifs: string[]; forbiddenMotifs: string[]; examples: string[] } {
-  const lowerTheme = themeText.toLowerCase();
-  
-  // Valentine's Day
-  if (lowerTheme.includes("valentine") || lowerTheme.includes("love") || lowerTheme.includes("romantic")) {
-    return {
-      isSpecialTheme: true,
-      themeName: "Valentine's Day",
-      requiredMotifs: ["hearts", "love birds", "roses", "cupid", "chocolates", "love letters", "balloons", "ribbons", "gifts", "flowers", "butterflies"],
-      forbiddenMotifs: ["scary", "spooky", "monster", "ghost", "witch", "random fairy", "unrelated fantasy"],
-      examples: [
-        "Animals exchanging Valentine cards with hearts around them",
-        "Cute creatures having a Valentine picnic with roses and heart-shaped treats",
-        "Friends making Valentine crafts with hearts and ribbons",
-        "Love birds in a garden full of hearts and flowers",
-        "Cupid spreading love with bows and arrows among hearts",
-      ],
-    };
-  }
-  
-  // Halloween
-  if (lowerTheme.includes("halloween") || lowerTheme.includes("spooky") || lowerTheme.includes("trick or treat")) {
-    return {
-      isSpecialTheme: true,
-      themeName: "Halloween",
-      requiredMotifs: ["pumpkins", "jack-o-lanterns", "ghosts", "bats", "spiders", "witches", "costumes", "candy", "haunted house", "black cats", "moons"],
-      forbiddenMotifs: ["hearts", "love", "romantic", "christmas", "santa"],
-      examples: [
-        "Friendly ghosts having a Halloween party",
-        "Kids in costumes trick-or-treating",
-        "Cute witch brewing a magical potion",
-        "Jack-o-lanterns in a pumpkin patch",
-        "Animals in Halloween costumes collecting candy",
-      ],
-    };
-  }
-  
-  // Christmas
-  if (lowerTheme.includes("christmas") || lowerTheme.includes("santa") || lowerTheme.includes("holiday") || lowerTheme.includes("winter wonderland")) {
-    return {
-      isSpecialTheme: true,
-      themeName: "Christmas",
-      requiredMotifs: ["christmas trees", "presents", "stockings", "snowflakes", "santa", "reindeer", "ornaments", "candy canes", "snowmen", "stars", "bells"],
-      forbiddenMotifs: ["hearts", "romantic", "halloween", "pumpkins", "spooky"],
-      examples: [
-        "Decorating a Christmas tree with ornaments and stars",
-        "Santa's workshop with elves making toys",
-        "Reindeer in a snowy winter scene",
-        "Kids opening Christmas presents",
-        "Snowman family with scarves and hats",
-      ],
-    };
-  }
-  
-  // Easter
-  if (lowerTheme.includes("easter") || lowerTheme.includes("bunny") || lowerTheme.includes("egg hunt")) {
-    return {
-      isSpecialTheme: true,
-      themeName: "Easter",
-      requiredMotifs: ["easter eggs", "bunnies", "baskets", "chicks", "flowers", "spring", "grass", "carrots", "ribbons", "tulips"],
-      forbiddenMotifs: ["halloween", "christmas", "scary", "winter"],
-      examples: [
-        "Bunnies decorating Easter eggs",
-        "Easter egg hunt in a spring garden",
-        "Chicks hatching from colorful eggs",
-        "Bunny with a basket full of eggs",
-        "Spring flowers with hidden Easter eggs",
-      ],
-    };
-  }
-  
-  // Ramadan/Eid
-  if (lowerTheme.includes("ramadan") || lowerTheme.includes("eid")) {
-    return {
-      isSpecialTheme: true,
-      themeName: "Ramadan/Eid",
-      requiredMotifs: ["crescent moon", "stars", "lanterns", "mosque", "family gathering", "dates", "prayer", "decorations", "gifts", "celebration"],
-      forbiddenMotifs: ["christmas", "halloween", "easter", "santa"],
-      examples: [
-        "Family gathering for iftar dinner",
-        "Crescent moon and stars over a mosque",
-        "Colorful lanterns lighting up the night",
-        "Kids receiving Eid gifts and sweets",
-        "Decorating the home with lanterns and stars",
-      ],
-    };
-  }
-  
-  // Default - no special theme
-  return {
-    isSpecialTheme: false,
-    themeName: "General",
-    requiredMotifs: [],
-    forbiddenMotifs: [],
-    examples: [],
-  };
-}
-
-/**
- * THEME MODE: Generate diverse themed pages
- */
-async function generateThemePages(
-  count: number,
-  story: { title?: string; outline?: string; targetAge?: string; sceneVariety?: string; settingConstraint?: string } | undefined,
-  styleProfile: StyleProfile,
-  sceneInventory?: string[],
-  basePrompt?: string
-): Promise<{ pages: Array<{ page: number; title: string; sceneDescription: string; location: string; action: string }> }> {
-  
-  const ageGuide: Record<string, string> = {
-    "3-6": "Very simple scenes, 2-3 large props, single activity per page",
-    "6-9": "Moderate complexity, 4-6 props, clear focal point",
-    "9-12": "More detail allowed, 6-8 props, can include backgrounds",
-    "all-ages": "Balanced complexity suitable for all ages",
-  };
-
-  const varietyGuide: Record<string, string> = {
-    low: "Keep scenes related but with different subjects",
-    medium: "Good variety in subjects and settings",
-    high: "High variety - each scene completely different",
-  };
-
-  // Detect theme and get required motifs
-  const themeText = `${story?.title || ""} ${story?.outline || ""} ${basePrompt || ""}`;
-  const themeInfo = detectThemeMotifs(themeText);
-  
-  // Build theme-specific instructions
-  let themeInstructions = "";
-  if (themeInfo.isSpecialTheme) {
-    themeInstructions = `
-=== ${themeInfo.themeName.toUpperCase()} THEME REQUIREMENTS (CRITICAL) ===
-This is a ${themeInfo.themeName} coloring book. EVERY page MUST include at least 2-3 of these motifs:
-${themeInfo.requiredMotifs.join(", ")}
-
-DO NOT include: ${themeInfo.forbiddenMotifs.join(", ")}
-
-Example scenes for ${themeInfo.themeName}:
-${themeInfo.examples.map((e, i) => `${i + 1}. ${e}`).join("\n")}
-
-CRITICAL: Do NOT generate random unrelated scenes. Every page must clearly be a ${themeInfo.themeName} scene.
-`;
-  }
-
-  const themePrompt = `Generate ${count} DIVERSE coloring book page descriptions.
-
-${themeInstructions}
-
-STYLE RULES:
-- Line style: ${styleProfile.lineStyle}
-- Composition: ${styleProfile.compositionRules}
-- Environment: ${styleProfile.environmentStyle}
-
-TARGET AUDIENCE: ${ageGuide[story?.targetAge || "all-ages"]}
-SCENE VARIETY: ${varietyGuide[story?.sceneVariety || "medium"]}
-SETTING: ${story?.settingConstraint === "indoors" ? "Indoor scenes only" : story?.settingConstraint === "outdoors" ? "Outdoor scenes only" : "Mix of indoor and outdoor"}
-
-${story?.title ? `THEME: "${story.title}"` : ""}
-${sceneInventory?.length ? `AVAILABLE PROPS: ${sceneInventory.join(", ")}` : ""}
-${basePrompt ? `STYLE REFERENCE: "${basePrompt.slice(0, 300)}..."` : ""}
-
-=== COMPOSITION RULES (MANDATORY) ===
-- Subject fills 70-85% of page HEIGHT (no tiny character with empty space)
-- Foreground elements MUST touch the bottom margin
-- NO big empty bottom area - fill with relevant props
-- Camera framing: slightly zoomed-in
-- 10% safe margins on all sides
-
-Generate exactly ${count} pages with:
-- Different subjects or characters
-- Unique activities
-- Varied settings
-- 4-8 specific props
-${themeInfo.isSpecialTheme ? `- MUST include ${themeInfo.themeName} motifs in EVERY scene` : ""}
-
-Return ONLY valid JSON:
-{
-  "pages": [
-    {
-      "page": 1,
-      "title": "Title",
-      "location": "location",
-      "action": "activity",
-      "sceneDescription": "Detailed description (80-120 words) including subject, action, props, background, and framing. ${themeInfo.isSpecialTheme ? `Include ${themeInfo.themeName} motifs.` : ""}"
-    }
-  ]
-}`;
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "user", content: themePrompt },
-    ],
-    max_tokens: 4000,
-    temperature: 0.7,
-  });
-
-  let responseText = response.choices[0]?.message?.content?.trim() || "";
-
-  responseText = responseText
-    .replace(/^```json\n?/i, "")
-    .replace(/^```\n?/i, "")
-    .replace(/\n?```$/i, "")
-    .trim();
-
-  try {
-    return JSON.parse(responseText);
-  } catch {
-    console.error("[batch/prompts] Failed to parse theme response:", responseText.slice(0, 500));
-    throw new Error("Failed to generate theme prompts - invalid response format");
-  }
-}
-
-/**
- * Validate that storybook pages have proper diversity
- */
-function validateStorybookDiversity(
-  pages: Array<{ page: number; title: string; sceneDescription: string; location: string; action: string }>
-): void {
-  for (let i = 2; i < pages.length; i++) {
-    const loc1 = pages[i - 2]?.location?.toLowerCase() || "";
-    const loc2 = pages[i - 1]?.location?.toLowerCase() || "";
-    const loc3 = pages[i]?.location?.toLowerCase() || "";
+function validateSceneDiversity(scenes: PlannedScene[]): void {
+  // Check for location repetition
+  for (let i = 2; i < scenes.length; i++) {
+    const loc1 = scenes[i - 2]?.location?.toLowerCase() || "";
+    const loc2 = scenes[i - 1]?.location?.toLowerCase() || "";
+    const loc3 = scenes[i]?.location?.toLowerCase() || "";
     
     if (loc1 && loc1 === loc2 && loc2 === loc3) {
       console.warn(`[batch/prompts] Warning: Location "${loc1}" repeated 3+ times at pages ${i - 1}, ${i}, ${i + 1}`);
     }
   }
 
-  const uniqueLocations = new Set(pages.map(p => p.location?.toLowerCase()).filter(Boolean));
-  const minExpected = Math.min(4, Math.ceil(pages.length / 2));
+  const uniqueLocations = new Set(scenes.map(s => s.location?.toLowerCase()).filter(Boolean));
+  const minExpected = Math.min(4, Math.ceil(scenes.length / 2));
   
   if (uniqueLocations.size < minExpected) {
-    console.warn(`[batch/prompts] Warning: Only ${uniqueLocations.size} unique locations for ${pages.length} pages`);
+    console.warn(`[batch/prompts] Warning: Only ${uniqueLocations.size} unique locations for ${scenes.length} pages`);
   }
 
-  console.log(`[batch/prompts] Diversity: ${uniqueLocations.size} unique locations across ${pages.length} pages`);
-}
-
-/**
- * Build the full prompt for a single page with ALL constraints
- * 
- * Includes:
- * - Scene description
- * - Character consistency (storybook mode)
- * - Background/environment
- * - Composition (fill frame)
- * - Floor/ground (STRONGER - extends to bottom)
- * - NO BORDER constraints
- * - FILL CANVAS constraints (90-95%)
- * - FOREGROUND / BOTTOM FILL constraints (NO empty bottom)
- * - Orientation-specific layout
- * - OUTLINE-ONLY constraints
- */
-function buildFullPagePrompt(params: {
-  sceneDescription: string;
-  styleProfile: StyleProfile;
-  characterProfile?: CharacterProfile;
-  characterConsistencyBlock?: string;
-  size?: ImageSize;
-}): string {
-  const { sceneDescription, styleProfile, characterProfile, characterConsistencyBlock, size = "1024x1536" } = params;
-
-  const parts: string[] = [];
-
-  // Title line
-  parts.push("Create a kids coloring book page in clean black-and-white OUTLINE line art (no filled areas, no grayscale).");
-
-  // Scene section
-  parts.push(`\nScene:\n${sceneDescription}`);
-
-  // Character consistency block (CRITICAL for storybook mode)
-  if (characterConsistencyBlock && characterProfile) {
-    parts.push(characterConsistencyBlock);
+  // Check for action repetition
+  const uniqueActions = new Set(scenes.map(s => s.action?.toLowerCase()).filter(Boolean));
+  if (uniqueActions.size < scenes.length * 0.6) {
+    console.warn(`[batch/prompts] Warning: Only ${uniqueActions.size} unique actions for ${scenes.length} pages`);
   }
 
-  // Background section
-  parts.push(`\nBackground:\n${styleProfile.environmentStyle}. Simple background elements relevant to the scene, extending toward edges.`);
-
-  // Composition section (STRONGER - emphasize filling the frame and lower positioning)
-  parts.push(`\nComposition:\n${styleProfile.compositionRules}. Subject fills 90-95% of the frame. Position main subject in lower-middle area (not floating at top). Scene extends to all edges.`);
-
-  // Line style section
-  parts.push(`\nLine style:\n${styleProfile.lineStyle}. Clean, smooth OUTLINES ONLY suitable for coloring. No filled areas.`);
-
-  // Floor/ground section (STRONGER - must reach bottom edge)
-  parts.push(`\nFloor/ground:
-Visible ground plane that extends to the bottom edge of the canvas. Include floor texture (tiles, wood, grass, path, rug) that reaches near the bottom margin. Add 2-4 small foreground props near the bottom (toys, flowers, pebbles, leaves, etc.) to fill any remaining space.`);
-
-  // Output constraints
-  parts.push(`\nOutput:
-Printable coloring page with crisp black OUTLINES ONLY on pure white background.
-NO text, NO watermark, NO signature.
-All shapes must be closed OUTLINES ready for coloring.
-Artwork fills 90-95% of the canvas with minimal margins.`);
-
-  // NO BORDER constraints (MANDATORY)
-  parts.push(NO_BORDER_CONSTRAINTS);
-
-  // FILL CANVAS constraints (MANDATORY)
-  parts.push(FILL_CANVAS_CONSTRAINTS);
-
-  // FOREGROUND / BOTTOM FILL constraints (NEW - prevents empty bottom)
-  parts.push(FOREGROUND_BOTTOM_FILL_CONSTRAINTS);
-
-  // Add orientation-specific framing
-  if (size === "1536x1024") {
-    parts.push(LANDSCAPE_EXTRA_CONSTRAINTS);
-  } else if (size === "1024x1536") {
-    parts.push(PORTRAIT_EXTRA_CONSTRAINTS);
-  } else {
-    parts.push(SQUARE_EXTRA_CONSTRAINTS);
-  }
-
-  // OUTLINE-ONLY constraints (MANDATORY - most important)
-  parts.push(OUTLINE_ONLY_CONSTRAINTS);
-
-  // Avoid list (includes new empty space items)
-  parts.push(`\nAVOID: ${[...styleProfile.mustAvoid.slice(0, 5), ...NEGATIVE_PROMPT_LIST.slice(0, 15)].join(", ")}.`);
-
-  return parts.join("\n");
+  console.log(`[batch/prompts] Diversity check: ${uniqueLocations.size} locations, ${uniqueActions.size} actions`);
 }

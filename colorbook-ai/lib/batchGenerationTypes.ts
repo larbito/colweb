@@ -89,7 +89,7 @@ export type StoryConfig = z.infer<typeof storyConfigSchema>;
 
 export const batchPromptsRequestSchema = z.object({
   mode: z.enum(["storybook", "theme"]),
-  count: z.number().int().min(1).max(30),
+  count: z.number().int().min(1).max(80),
   story: storyConfigSchema.optional(),
   styleProfile: styleProfileSchema,
   characterProfile: characterProfileSchema.optional(),

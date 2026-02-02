@@ -326,69 +326,51 @@ export default function CreateColoringBookPage() {
   };
 
   // ============================================================
-  // STEP 2: PROMPTS GENERATION
+  // STEP 2: PROMPTS GENERATION (DIRECT FROM IDEA - NO SEPARATE IMPROVE STEP)
   // ============================================================
 
-  const improvePrompt = async () => {
-    if (!userIdea.trim() || !bookType) {
+  const generatePagePrompts = async (ideaToUse?: string) => {
+    const idea = ideaToUse || userIdea;
+    if (!idea.trim() || !bookType) {
       toast.error("Please enter an idea first");
-      return;
-    }
-
-    setImprovingPrompt(true);
-    try {
-      const response = await fetch("/api/prompt/improve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          idea: userIdea,
-          mode: bookType,
-          age: storyConfig.targetAge,
-          characterHint: generatedIdea?.mainCharacter,
-        }),
-      });
-
-      const data = await safeJsonParse(response);
-      if (!response.ok) throw new Error(data.error || "Failed to improve prompt");
-
-      setImprovedPrompt(data.prompt);
-      setIsPromptImproved(true);
-      setPages([]);
-      toast.success("Prompt improved!");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to improve prompt");
-    } finally {
-      setImprovingPrompt(false);
-    }
-  };
-
-  const generatePagePrompts = async () => {
-    if (!isPromptImproved || !improvedPrompt.trim() || !bookType) {
-      toast.error("Please improve your prompt first");
       return;
     }
 
     setGeneratingPrompts(true);
     setCurrentStep(2);
     
+    // Create skeleton cards immediately for better UX
+    const skeletonPages: PageState[] = Array.from({ length: pageCount }, (_, i) => ({
+      page: i + 1,
+      title: `Page ${i + 1}`,
+      prompt: "",
+      sceneDescription: "",
+      status: "pending" as PageStatus,
+      enhanceStatus: "none" as EnhanceStatus,
+      finalLetterStatus: "none" as ProcessingStatus,
+      activeVersion: "original" as const,
+    }));
+    setPages(skeletonPages);
+    
     try {
       const styleProfile: StyleProfile = {
         lineStyle: "Clean, smooth black outlines suitable for coloring",
-        compositionRules: "Subject fills 70-85% of page height, foreground touches bottom margin, no empty bottom space",
-        environmentStyle: "Simple backgrounds appropriate to the scene",
+        compositionRules: "Subject fills 90-95% of page height, foreground touches bottom margin, no empty bottom space, full page composition",
+        environmentStyle: "Theme-appropriate backgrounds that match the user's idea",
         colorScheme: "black and white line art",
-        mustAvoid: ["solid black fills", "filled shapes", "shading", "grayscale", "gradients", "border", "frame", "empty bottom area"],
+        mustAvoid: ["solid black fills", "filled shapes", "shading", "grayscale", "gradients", "border", "frame", "empty bottom area", "generic bedroom/kitchen/school templates", "random rocks", "toy car clutter"],
       };
 
       let characterProfile: CharacterProfile | undefined;
       if (bookType === "storybook") {
+        // Extract character hint from the idea
         characterProfile = {
-          species: "main character from the prompt",
-          keyFeatures: ["as described in the base prompt"],
-          proportions: "as described in the base prompt",
-          faceStyle: "as described in the base prompt",
+          species: "main character as described in the idea",
+          keyFeatures: ["to be determined from idea"],
+          proportions: "chibi with large head, cute proportions",
+          faceStyle: "friendly, expressive face suitable for children",
           poseVibe: "varies by scene",
-          doNotChange: ["character design", "proportions", "face style"],
+          doNotChange: ["character design", "proportions", "face style", "species", "distinctive features"],
         };
       }
 
@@ -398,10 +380,14 @@ export default function CreateColoringBookPage() {
         body: JSON.stringify({
           mode: bookType,
           count: pageCount,
-          story: storyConfig,
+          story: {
+            ...storyConfig,
+            title: generatedIdea?.title || storyConfig.title,
+            outline: idea,
+          },
           styleProfile,
           characterProfile,
-          basePrompt: improvedPrompt,
+          basePrompt: idea, // Use user's idea directly
           size: getImageSize(),
         }),
       });
@@ -425,9 +411,13 @@ export default function CreateColoringBookPage() {
       }));
 
       setPages(pageStates);
-      toast.success(`Generated ${pageStates.length} prompts! Review and edit them below.`);
+      setImprovedPrompt(idea); // Store the idea as the "improved prompt" for reference
+      setIsPromptImproved(true);
+      toast.success(`Generated ${pageStates.length} unique prompts from your idea!`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate prompts");
+      // Clear skeleton cards on error
+      setPages([]);
     } finally {
       setGeneratingPrompts(false);
     }
@@ -1390,32 +1380,33 @@ export default function CreateColoringBookPage() {
                   )}
                 </div>
 
-                {/* Continue Button */}
+                {/* Continue Button - Direct prompt generation from idea */}
                 <div className="flex gap-3">
                   <Button variant="outline" onClick={() => setCurrentStep(0)}>
                     <ArrowLeft className="mr-2 h-4 w-4" /> Back
                   </Button>
                   <Button 
-                    onClick={async () => {
-                      if (!userIdea.trim()) {
-                        toast.error("Please enter an idea first");
-                        return;
-                      }
-                      await improvePrompt();
-                      if (isPromptImproved) {
-                        await generatePagePrompts();
-                      }
-                    }}
-                    disabled={!userIdea.trim() || improvingPrompt || generatingPrompts}
+                    onClick={() => generatePagePrompts()}
+                    disabled={!userIdea.trim() || generatingPrompts}
                     className="flex-1"
                     size="lg"
                   >
-                    {improvingPrompt || generatingPrompts ? (
-                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processing...</>
+                    {generatingPrompts ? (
+                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating {pageCount} Prompts...</>
                     ) : (
                       <><Sparkles className="mr-2 h-5 w-5" /> Generate {pageCount} Page Prompts</>
                     )}
                   </Button>
+                </div>
+
+                {/* Info about prompt generation */}
+                <div className="rounded-lg border border-dashed border-border p-3 bg-muted/30">
+                  <p className="text-xs text-muted-foreground">
+                    <strong>How it works:</strong> We'll analyze your idea and create {pageCount} unique scene prompts 
+                    that match your {bookType === "storybook" ? "character and story" : "theme"}. 
+                    {bookType === "storybook" ? " Your character will stay consistent across all pages." : " Each scene will be unique while maintaining your theme."} 
+                    No generic templates – every prompt is tailored to your idea.
+                  </p>
                 </div>
               </div>
             </SectionCard>
@@ -1424,27 +1415,53 @@ export default function CreateColoringBookPage() {
           {/* ==================== STEP 2: PROMPTS REVIEW ==================== */}
           {currentStep === 2 && pages.length > 0 && (
             <SectionCard
-              title="Review Page Prompts"
-              description="Edit any prompt before generating images. Click on a prompt to edit it."
+              title={generatingPrompts ? "Generating Prompts..." : "Review Page Prompts"}
+              description={generatingPrompts 
+                ? `Creating ${pageCount} unique scenes from your idea. This may take a moment...`
+                : "Edit any prompt before generating images. Click on a prompt to edit it."}
               icon={FileText}
               iconColor="text-blue-500"
               iconBg="bg-blue-500/10"
               headerActions={
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">{pages.length} prompts</Badge>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={generatePagePrompts}
-                    disabled={generatingPrompts}
-                  >
-                    <RefreshCw className={cn("mr-2 h-4 w-4", generatingPrompts && "animate-spin")} />
-                    Regenerate All
-                  </Button>
+                  {generatingPrompts ? (
+                    <Badge variant="secondary" className="animate-pulse">
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      Generating...
+                    </Badge>
+                  ) : (
+                    <>
+                      <Badge variant="outline">{pages.length} prompts</Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => generatePagePrompts()}
+                        disabled={generatingPrompts}
+                      >
+                        <RefreshCw className={cn("mr-2 h-4 w-4", generatingPrompts && "animate-spin")} />
+                        Regenerate All
+                      </Button>
+                    </>
+                  )}
                 </div>
               }
             >
               <div className="space-y-4">
+                {/* Progress indicator during generation */}
+                {generatingPrompts && (
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+                    <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                        Analyzing your idea and planning unique scenes...
+                      </p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400">
+                        Creating {pageCount} theme-appropriate prompts with varied locations, actions, and props
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
                 {/* Prompt Cards Grid */}
                 <div className="grid gap-3">
                   {pages.map((page) => (
@@ -1454,7 +1471,8 @@ export default function CreateColoringBookPage() {
                       className={cn(
                         "transition-all",
                         page.isEditing && "ring-2 ring-primary",
-                        page.status === "done" && "border-green-500/30 bg-green-50/30 dark:bg-green-950/10"
+                        page.status === "done" && "border-green-500/30 bg-green-50/30 dark:bg-green-950/10",
+                        !page.prompt && generatingPrompts && "animate-pulse"
                       )}
                     >
                       <CardContent className="p-4">
@@ -1497,7 +1515,14 @@ export default function CreateColoringBookPage() {
                               </div>
                             </div>
 
-                            {page.isEditing ? (
+                            {/* Skeleton loading state */}
+                            {!page.prompt && generatingPrompts ? (
+                              <div className="space-y-2">
+                                <div className="h-4 bg-muted rounded animate-pulse w-full" />
+                                <div className="h-4 bg-muted rounded animate-pulse w-3/4" />
+                                <div className="h-4 bg-muted rounded animate-pulse w-1/2" />
+                              </div>
+                            ) : page.isEditing ? (
                               <div className="space-y-2">
                                 <Textarea
                                   value={page.prompt}
@@ -1518,14 +1543,14 @@ export default function CreateColoringBookPage() {
                             ) : (
                               <p 
                                 className="text-sm text-muted-foreground line-clamp-3 cursor-pointer hover:text-foreground"
-                                onClick={() => toggleEditPage(page.page)}
+                                onClick={() => page.prompt && toggleEditPage(page.page)}
                               >
-                                {page.prompt}
+                                {page.prompt || "Generating prompt..."}
                               </p>
                             )}
 
-                            {/* Actions */}
-                            {!page.isEditing && (
+                            {/* Actions - only show when prompt is ready */}
+                            {!page.isEditing && page.prompt && !generatingPrompts && (
                               <div className="flex items-center gap-2 mt-3">
                                 <Button
                                   size="sm"
@@ -1583,11 +1608,13 @@ export default function CreateColoringBookPage() {
                   </Button>
                   <Button 
                     onClick={generateAllImages}
-                    disabled={isGenerating || pages.length === 0}
+                    disabled={isGenerating || pages.length === 0 || generatingPrompts || !pages.some(p => p.prompt)}
                     className="flex-1"
                     size="lg"
                   >
-                    {isGenerating ? (
+                    {generatingPrompts ? (
+                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Waiting for prompts...</>
+                    ) : isGenerating ? (
                       <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Images...</>
                     ) : (
                       <><Play className="mr-2 h-5 w-5" /> Generate {pendingCount} Images</>
