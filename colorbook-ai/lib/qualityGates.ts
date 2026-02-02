@@ -22,6 +22,8 @@ export interface QualityGateResult {
     largestBlobRatio?: number;
     tinyBlobCount?: number;
     subjectBoundsRatio?: number;
+    bottomBlankRatio?: number; // NEW: bottom 12% white ratio
+    hasFaceFillIssue?: boolean; // NEW: suspected face fill
   };
   debug: {
     totalPixels: number;
@@ -32,12 +34,14 @@ export interface QualityGateResult {
       totalBlobs: number;
       largeBlobs: number;
       suspectedEyeFills: boolean;
+      faceBlobsDetected?: number; // NEW: blobs in face region
     };
     compositionAnalysis?: {
       subjectHeight: number;
       canvasHeight: number;
       topMargin: number;
       bottomMargin: number;
+      bottomBlankRatio?: number; // NEW
     };
   };
   correctedImageBuffer?: Buffer;
@@ -69,6 +73,18 @@ export const MIN_SUBJECT_COVERAGE = 0.60; // Subject should fill at least 60% of
  * Maximum allowed tiny blobs (noise/texture detection)
  */
 export const MAX_TINY_BLOB_COUNT = 500; // Too many tiny blobs = stippling/texture
+
+/**
+ * Maximum bottom blank ratio
+ * Detects empty bottom strip (the "red area" problem)
+ */
+export const MAX_BOTTOM_BLANK_RATIO = 0.92; // Bottom 12% should have at least 8% ink
+
+/**
+ * Face fill detection threshold
+ * Prevents solid black eyes/face patches
+ */
+export const MAX_FACE_BLOB_RATIO = 0.012; // 1.2% max for any blob in upper-middle region
 
 /**
  * Convert image to pure black and white with better adaptive thresholding
@@ -196,12 +212,13 @@ async function analyzeComposition(imageBuffer: Buffer): Promise<{
   subjectHeightRatio: number;
   topMarginRatio: number;
   bottomMarginRatio: number;
+  bottomBlankRatio: number;
   passed: boolean;
 }> {
   try {
     const sharp = await import("sharp").catch(() => null);
     if (!sharp) {
-      return { subjectHeightRatio: 0.7, topMarginRatio: 0.05, bottomMarginRatio: 0.05, passed: true };
+      return { subjectHeightRatio: 0.7, topMarginRatio: 0.05, bottomMarginRatio: 0.05, bottomBlankRatio: 0, passed: true };
     }
 
     const { data, info } = await sharp.default(imageBuffer)
@@ -229,13 +246,116 @@ async function analyzeComposition(imageBuffer: Buffer): Promise<{
     const topMarginRatio = topY / height;
     const bottomMarginRatio = (height - bottomY) / height;
 
-    // Subject should fill at least 60% of height
-    const passed = subjectHeightRatio >= MIN_SUBJECT_COVERAGE;
+    // NEW: Analyze bottom 12% for blank ratio
+    const bottomRegionStart = Math.floor(height * 0.88);
+    let bottomRegionWhitePixels = 0;
+    let bottomRegionTotalPixels = 0;
 
-    return { subjectHeightRatio, topMarginRatio, bottomMarginRatio, passed };
+    for (let y = bottomRegionStart; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        bottomRegionTotalPixels++;
+        if (data[y * width + x] >= 128) {
+          bottomRegionWhitePixels++;
+        }
+      }
+    }
+
+    const bottomBlankRatio = bottomRegionTotalPixels > 0 
+      ? bottomRegionWhitePixels / bottomRegionTotalPixels 
+      : 0;
+
+    // Subject should fill at least 60% of height AND bottom should have content
+    const passed = subjectHeightRatio >= MIN_SUBJECT_COVERAGE && bottomBlankRatio <= MAX_BOTTOM_BLANK_RATIO;
+
+    return { subjectHeightRatio, topMarginRatio, bottomMarginRatio, bottomBlankRatio, passed };
   } catch (error) {
     console.error("Composition analysis error:", error);
-    return { subjectHeightRatio: 0.7, topMarginRatio: 0.05, bottomMarginRatio: 0.05, passed: true };
+    return { subjectHeightRatio: 0.7, topMarginRatio: 0.05, bottomMarginRatio: 0.05, bottomBlankRatio: 0, passed: true };
+  }
+}
+
+/**
+ * Detect large blobs in the upper-middle region (face area)
+ * Helps identify solid black eyes or face fills
+ */
+async function detectFaceFills(imageBuffer: Buffer): Promise<{
+  faceBlobsDetected: number;
+  largestFaceBlobRatio: number;
+  hasFaceFillIssue: boolean;
+}> {
+  try {
+    const sharp = await import("sharp").catch(() => null);
+    if (!sharp) {
+      return { faceBlobsDetected: 0, largestFaceBlobRatio: 0, hasFaceFillIssue: false };
+    }
+
+    const { data, info } = await sharp.default(imageBuffer)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const width = info.width;
+    const height = info.height;
+    const totalPixels = width * height;
+
+    // Define face region: upper-middle 30-60% of height
+    const faceRegionTop = Math.floor(height * 0.30);
+    const faceRegionBottom = Math.floor(height * 0.60);
+
+    // Simple blob detection in face region
+    const visited = new Uint8Array(totalPixels);
+    const faceBlobSizes: number[] = [];
+
+    function floodFill(startX: number, startY: number): number {
+      if (startY < faceRegionTop || startY >= faceRegionBottom) return 0;
+      
+      const stack: [number, number][] = [[startX, startY]];
+      let size = 0;
+
+      while (stack.length > 0 && size < 5000) { // Limit to prevent runaway
+        const [x, y] = stack.pop()!;
+        const idx = y * width + x;
+
+        if (x < 0 || x >= width || y < faceRegionTop || y >= faceRegionBottom) continue;
+        if (visited[idx]) continue;
+        if (data[idx] > 128) continue;
+
+        visited[idx] = 1;
+        size++;
+
+        stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+      }
+
+      return size;
+    }
+
+    // Find blobs in face region
+    for (let y = faceRegionTop; y < faceRegionBottom; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x;
+        if (!visited[idx] && data[idx] < 128) {
+          const blobSize = floodFill(x, y);
+          if (blobSize > 50) { // Only count significant blobs
+            faceBlobSizes.push(blobSize);
+          }
+        }
+      }
+    }
+
+    const largestFaceBlob = Math.max(0, ...faceBlobSizes);
+    const largestFaceBlobRatio = largestFaceBlob / totalPixels;
+    
+    // If we have 2+ medium-large blobs in face region, likely eyes
+    const mediumFaceBlobs = faceBlobSizes.filter(s => s >= 100 && s <= totalPixels * 0.02);
+    const hasFaceFillIssue = mediumFaceBlobs.length >= 2 || largestFaceBlobRatio > MAX_FACE_BLOB_RATIO;
+
+    return {
+      faceBlobsDetected: faceBlobSizes.length,
+      largestFaceBlobRatio,
+      hasFaceFillIssue,
+    };
+  } catch (error) {
+    console.error("Face fill detection error:", error);
+    return { faceBlobsDetected: 0, largestFaceBlobRatio: 0, hasFaceFillIssue: false };
   }
 }
 
@@ -330,8 +450,11 @@ export async function validateImageQuality(
     // Blob analysis for large fill detection
     const blobAnalysis = await analyzeBlobsWithSharp(correctedBuffer);
 
-    // Composition analysis
+    // Composition analysis (includes bottom blank ratio)
     const composition = await analyzeComposition(correctedBuffer);
+
+    // Face fill detection
+    const faceFillAnalysis = await detectFaceFills(correctedBuffer);
 
     const processingTimeMs = Date.now() - startTime;
 
@@ -344,6 +467,8 @@ export async function validateImageQuality(
       largestBlobRatio: blobAnalysis.largestBlobRatio,
       tinyBlobCount: blobAnalysis.tinyBlobCount,
       subjectBoundsRatio: composition.subjectHeightRatio,
+      bottomBlankRatio: composition.bottomBlankRatio, // NEW
+      hasFaceFillIssue: faceFillAnalysis.hasFaceFillIssue, // NEW
     };
 
     const debug = {
@@ -355,12 +480,14 @@ export async function validateImageQuality(
         totalBlobs: blobAnalysis.totalBlobs,
         largeBlobs: blobAnalysis.tinyBlobCount,
         suspectedEyeFills: blobAnalysis.suspectedEyeFills,
+        faceBlobsDetected: faceFillAnalysis.faceBlobsDetected, // NEW
       },
       compositionAnalysis: {
         subjectHeight: Math.round(composition.subjectHeightRatio * info.height),
         canvasHeight: info.height,
         topMargin: Math.round(composition.topMarginRatio * info.height),
         bottomMargin: Math.round(composition.bottomMarginRatio * info.height),
+        bottomBlankRatio: composition.bottomBlankRatio, // NEW
       },
     };
 
@@ -382,17 +509,28 @@ export async function validateImageQuality(
       failures.push("Suspected solid black eye fills detected");
     }
 
-    // Check 4: Texture/stippling detection
+    // Check 4: Face fill detection (NEW)
+    if (faceFillAnalysis.hasFaceFillIssue) {
+      failures.push(`Face fill issue: ${faceFillAnalysis.faceBlobsDetected} blobs in face region, largest ${(faceFillAnalysis.largestFaceBlobRatio * 100).toFixed(2)}%`);
+    }
+
+    // Check 5: Texture/stippling detection
     if (blobAnalysis.tinyBlobCount > MAX_TINY_BLOB_COUNT) {
       failures.push(`Too many tiny blobs (${blobAnalysis.tinyBlobCount}) - possible texture/stippling`);
     }
 
-    // Check 5: Composition - subject should fill page
+    // Check 6: Composition - subject should fill page
     if (!composition.passed) {
       failures.push(`Subject only fills ${(composition.subjectHeightRatio * 100).toFixed(0)}% of height (min ${MIN_SUBJECT_COVERAGE * 100}%)`);
     }
 
+    // Check 7: Bottom blank ratio (NEW - critical for "empty bottom" issue)
+    if (composition.bottomBlankRatio > MAX_BOTTOM_BLANK_RATIO) {
+      failures.push(`Bottom is ${(composition.bottomBlankRatio * 100).toFixed(0)}% empty (max ${(MAX_BOTTOM_BLANK_RATIO * 100).toFixed(0)}%)`);
+    }
+
     if (failures.length > 0) {
+      console.log(`[qualityGates] FAILED: ${failures.join("; ")}`);
       return {
         passed: false,
         failureReason: failures.join("; "),
@@ -402,6 +540,7 @@ export async function validateImageQuality(
       };
     }
 
+    console.log(`[qualityGates] PASSED all quality checks`);
     return {
       passed: true,
       metrics,
