@@ -5,38 +5,79 @@
  * All prompts include mandatory no-fill constraints from coloringPagePromptEnforcer.
  */
 
-import type { GenerationSpec, Complexity, LineThickness } from "./generationSpec";
+import type { GenerationSpec, LineThickness } from "./generationSpec";
 import type { CharacterLock } from "./schemas";
 import { NEGATIVE_PROMPT_LIST } from "./coloringPagePromptEnforcer";
 
 /**
- * Complexity descriptions for prompt injection
+ * Extended complexity type that includes all UI options
+ * Maps to the 5 complexity levels in the UI
  */
-const COMPLEXITY_RULES: Record<Complexity, string> = {
+export type ExtendedComplexity = "kids" | "simple" | "medium" | "detailed" | "ultra";
+
+/**
+ * Complexity descriptions for prompt injection
+ * Supports all 5 complexity levels from the UI
+ */
+const COMPLEXITY_RULES: Record<ExtendedComplexity, string> = {
+  kids: `
+COMPLEXITY (VERY SIMPLE - Ages 3-6):
+- ONE main subject only - large and centered
+- MAXIMUM 2-3 very simple props (a flower, a heart, a star)
+- NO background elements or very minimal
+- VERY LARGE open areas for easy coloring with crayons
+- BIG BOLD shapes with thick outlines (6-8pt equivalent)
+- Simple rounded shapes only - no intricate details
+- Perfect for toddlers and preschoolers`,
+
   simple: `
-COMPLEXITY (SIMPLE):
+COMPLEXITY (SIMPLE - Ages 6-9):
 - ONE main subject only (the character)
 - 2-4 simple props maximum (e.g., a flower, a ball, a star)
 - Very simple or NO background elements
 - Large open areas for easy coloring
-- Suitable for ages 3-6`,
+- Thick outlines (4-5pt equivalent)
+- Suitable for young children`,
   
   medium: `
-COMPLEXITY (MEDIUM):
+COMPLEXITY (MEDIUM - Ages 9-12):
 - 1-2 subjects (main character + optional companion)
 - 4-8 props and background elements
 - Light background with simple shapes
-- Moderate detail level
-- Suitable for ages 6-12`,
+- Moderate detail level with medium outlines
+- Suitable for older children`,
   
   detailed: `
-COMPLEXITY (DETAILED):
+COMPLEXITY (DETAILED - Teens+):
 - 1-2 main subjects with more detail
 - 8-12 props and background elements
 - More intricate patterns in clothing/accessories
+- Detailed backgrounds with multiple elements
+- Thinner outlines (2-3pt equivalent)
 - Still NO shading or gradients - only outlines
 - Suitable for older children and adults`,
+
+  ultra: `
+COMPLEXITY (ULTRA DETAILED - Adults):
+- Complex scenes with high detail density
+- 12-20+ props and intricate background elements
+- Very detailed patterns, textures, and decorative elements
+- Fine line work with thin outlines (1-2pt equivalent)
+- Mandala-like complexity and stress-relief style
+- Intricate designs suitable for adult coloring
+- Still NO shading or gradients - only outlines`,
 };
+
+/**
+ * Map GenerationSpec Complexity to ExtendedComplexity
+ */
+function mapToExtendedComplexity(complexity: string): ExtendedComplexity {
+  if (complexity in COMPLEXITY_RULES) {
+    return complexity as ExtendedComplexity;
+  }
+  // Default fallback
+  return "medium";
+}
 
 /**
  * Line thickness descriptions for prompt injection
@@ -114,8 +155,9 @@ export function buildPrompt(params: {
   sceneDescription: string;
   characterLock?: CharacterLock | null;
   spec: GenerationSpec;
+  complexity?: ExtendedComplexity; // Optional override for extended complexity
 }): string {
-  const { sceneDescription, characterLock, spec } = params;
+  const { sceneDescription, characterLock, spec, complexity } = params;
   
   const parts: string[] = [];
   
@@ -135,11 +177,18 @@ CHARACTER REFERENCE (MUST MATCH EXACTLY):
 The character MUST look IDENTICAL to the reference sheet - same face shape, same proportions, same features, same outfit. Do not alter ANY visual aspect of the character.`);
   }
   
-  // Complexity rules
-  parts.push(COMPLEXITY_RULES[spec.complexity]);
+  // Complexity rules - use extended complexity if provided, otherwise map from spec
+  const extendedComplexity = complexity || mapToExtendedComplexity(spec.complexity);
+  parts.push(COMPLEXITY_RULES[extendedComplexity]);
   
-  // Line thickness rules  
-  parts.push(LINE_THICKNESS_RULES[spec.lineThickness]);
+  // Line thickness rules - adjust based on complexity for better results
+  let lineThickness = spec.lineThickness;
+  if (extendedComplexity === "kids") {
+    lineThickness = "bold"; // Force bold lines for kids
+  } else if (extendedComplexity === "ultra") {
+    lineThickness = "thin"; // Force thin lines for ultra detailed
+  }
+  parts.push(LINE_THICKNESS_RULES[lineThickness]);
   
   // Always append KDP print-safe suffix
   parts.push(KDP_PRINT_SAFE_SUFFIX);

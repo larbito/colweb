@@ -6,11 +6,12 @@ import { buildPrompt, buildStricterSuffix } from "@/lib/promptBuilder";
 import { hasRequiredConstraints } from "@/lib/coloringPagePromptEnforcer";
 import type { GenerationSpec } from "@/lib/generationSpec";
 
-// Accept GenerationSpec
+// Accept GenerationSpec with extended complexity
 const generationSpecSchema = z.object({
   trimSize: z.string(),
   pixelSize: z.string(),
-  complexity: z.enum(["simple", "medium", "detailed"]),
+  // Support all 5 complexity levels from UI
+  complexity: z.enum(["kids", "simple", "medium", "detailed", "ultra"]),
   lineThickness: z.enum(["thin", "medium", "bold"]),
   pageCount: z.number().int().min(1).max(80),
   includeBlankBetween: z.boolean(),
@@ -59,10 +60,12 @@ export async function POST(request: NextRequest) {
     const { prompt, characterLock, spec } = parseResult.data;
 
     // Build the full prompt with all rules injected
+    // Pass complexity directly to support extended complexity levels (kids, ultra)
     let fullPrompt = buildPrompt({
       sceneDescription: prompt,
       characterLock,
       spec: spec as GenerationSpec,
+      complexity: spec.complexity as "kids" | "simple" | "medium" | "detailed" | "ultra",
     });
 
     // Runtime assertion: verify prompt has required no-fill constraints

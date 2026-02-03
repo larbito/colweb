@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { mode, count, story, styleProfile, characterProfile, sceneInventory, basePrompt, size } = parseResult.data;
+    const { mode, count, story, styleProfile, characterProfile, sceneInventory, basePrompt, size, complexity } = parseResult.data;
 
     // Validate storybook mode requires character profile
     if (mode === "storybook" && !characterProfile) {
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`[batch/prompts] Starting ${mode} mode with ${count} pages`);
+    console.log(`[batch/prompts] Starting ${mode} mode with ${count} pages, complexity: ${complexity}`);
     console.log(`[batch/prompts] Base prompt: ${basePrompt?.slice(0, 200)}...`);
 
     // Step 1: Create Creative Brief from user's idea
@@ -88,6 +88,7 @@ export async function POST(request: NextRequest) {
       settingConstraint: story?.settingConstraint,
       characterProfile,
       styleProfile,
+      complexity, // Pass complexity for appropriate detail level
     });
     
     console.log(`[batch/prompts] Creative brief theme: ${creativeBrief.themeTitle}`);
@@ -127,6 +128,7 @@ export async function POST(request: NextRequest) {
         characterConsistencyBlock,
         characterBible,
         size: imageSize,
+        complexity, // Pass complexity for detail level instructions
       });
 
       return {
@@ -166,6 +168,17 @@ export async function POST(request: NextRequest) {
 // STEP 1: BUILD CREATIVE BRIEF
 // ============================================================
 
+type ComplexityLevel = "kids" | "simple" | "medium" | "detailed" | "ultra";
+
+// Map complexity to age-appropriate detail levels
+const COMPLEXITY_TO_DETAIL: Record<ComplexityLevel, { propsRange: string; backgroundLevel: string; lineThickness: string }> = {
+  kids: { propsRange: "1-2 very simple", backgroundLevel: "none or minimal", lineThickness: "very thick (6-8pt)" },
+  simple: { propsRange: "2-4 simple", backgroundLevel: "very simple", lineThickness: "thick (4-5pt)" },
+  medium: { propsRange: "4-8", backgroundLevel: "moderate", lineThickness: "medium (3-4pt)" },
+  detailed: { propsRange: "8-12", backgroundLevel: "detailed", lineThickness: "medium-thin (2-3pt)" },
+  ultra: { propsRange: "12-20+", backgroundLevel: "very detailed with patterns", lineThickness: "thin (1-2pt)" },
+};
+
 async function buildCreativeBrief(params: {
   ideaText: string;
   bookType: "storybook" | "theme";
@@ -173,8 +186,11 @@ async function buildCreativeBrief(params: {
   settingConstraint?: string;
   characterProfile?: CharacterProfile;
   styleProfile: StyleProfile;
+  complexity?: ComplexityLevel;
 }): Promise<CreativeBrief> {
-  const { ideaText, bookType, targetAge, settingConstraint, characterProfile, styleProfile } = params;
+  const { ideaText, bookType, targetAge, settingConstraint, characterProfile, styleProfile, complexity = "medium" } = params;
+  
+  const detailLevel = COMPLEXITY_TO_DETAIL[complexity];
   
   // Detect special themes first
   const themeReqs = detectThemeRequirements(ideaText);
@@ -189,7 +205,13 @@ REQUIRED MOTIFS (must appear in EVERY scene): ${themeReqs.requiredMotifs.join(",
 FORBIDDEN CONTENT: ${themeReqs.forbiddenContent.join(", ")}
 ` : ""}
 
-TARGET AGE: ${targetAge || "all-ages"}
+COMPLEXITY LEVEL: ${complexity.toUpperCase()}
+- Props per scene: ${detailLevel.propsRange}
+- Background detail: ${detailLevel.backgroundLevel}
+- Line thickness: ${detailLevel.lineThickness}
+${complexity === "kids" ? "IMPORTANT: Keep designs VERY SIMPLE for toddlers - big shapes, few details, lots of white space for easy coloring with crayons" : ""}
+${complexity === "ultra" ? "IMPORTANT: Create intricate, detailed designs suitable for adult stress-relief coloring - complex patterns, many elements" : ""}
+
 SETTING: ${settingConstraint || "mixed"}
 
 CRITICAL RULES:
@@ -408,6 +430,53 @@ Generate exactly ${pageCount} scenes with UNIQUE locations, actions, and props.`
 // STEP 3: BUILD FULL PAGE PROMPT
 // ============================================================
 
+// Complexity-specific prompt instructions
+const COMPLEXITY_INSTRUCTIONS: Record<ComplexityLevel, string> = {
+  kids: `
+=== COMPLEXITY: VERY SIMPLE (Ages 3-6) ===
+- ONE main subject, very large and centered
+- MAXIMUM 2-3 very simple props
+- NO background details or very minimal
+- VERY BIG shapes with THICK outlines (6-8pt)
+- Simple rounded shapes only
+- LOTS of white space for easy coloring with crayons
+- Perfect for toddlers and preschoolers`,
+
+  simple: `
+=== COMPLEXITY: SIMPLE (Ages 6-9) ===
+- ONE main subject
+- 2-4 simple props maximum
+- Very simple or no background
+- Large open areas for easy coloring
+- Thick outlines (4-5pt)
+- Suitable for young children`,
+
+  medium: `
+=== COMPLEXITY: MEDIUM (Ages 9-12) ===
+- 1-2 subjects
+- 4-8 props and background elements
+- Light background with simple shapes
+- Moderate detail level
+- Medium outlines (3-4pt)`,
+
+  detailed: `
+=== COMPLEXITY: DETAILED (Teens+) ===
+- 1-2 main subjects with more detail
+- 8-12 props and background elements
+- More intricate patterns in clothing/accessories
+- Detailed backgrounds
+- Medium-thin outlines (2-3pt)`,
+
+  ultra: `
+=== COMPLEXITY: ULTRA DETAILED (Adults) ===
+- Complex scenes with HIGH detail density
+- 12-20+ props and intricate backgrounds
+- Very detailed patterns and decorative elements
+- Fine line work with thin outlines (1-2pt)
+- Mandala-like complexity for stress-relief coloring
+- Intricate designs suitable for adult coloring`,
+};
+
 function buildFullPagePrompt(params: {
   scene: PlannedScene;
   creativeBrief: CreativeBrief;
@@ -416,13 +485,21 @@ function buildFullPagePrompt(params: {
   characterConsistencyBlock?: string;
   characterBible?: string;
   size?: ImageSize;
+  complexity?: ComplexityLevel;
 }): string {
-  const { scene, creativeBrief, styleProfile, characterProfile, characterConsistencyBlock, characterBible, size = "1024x1536" } = params;
+  const { scene, creativeBrief, styleProfile, characterProfile, characterConsistencyBlock, characterBible, size = "1024x1536", complexity = "medium" } = params;
 
   const parts: string[] = [];
 
-  // Title line
-  parts.push("Create a kids coloring book page in clean black-and-white OUTLINE line art (no filled areas, no grayscale).");
+  // Title line with complexity context
+  const audienceContext = complexity === "kids" ? "for toddlers (ages 3-6)" : 
+                          complexity === "simple" ? "for young children (ages 6-9)" :
+                          complexity === "ultra" ? "for adults (stress-relief style)" :
+                          complexity === "detailed" ? "for teens and adults" : "";
+  parts.push(`Create a ${audienceContext ? audienceContext + " " : ""}coloring book page in clean black-and-white OUTLINE line art (no filled areas, no grayscale).`);
+
+  // Add complexity-specific instructions
+  parts.push(COMPLEXITY_INSTRUCTIONS[complexity]);
 
   // Scene description with specific props
   const propsText = scene.props.slice(0, 6).join(", ");

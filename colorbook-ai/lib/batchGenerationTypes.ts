@@ -96,6 +96,8 @@ export const batchPromptsRequestSchema = z.object({
   sceneInventory: sceneInventorySchema.optional(),
   basePrompt: z.string().optional().describe("Original prompt from reference image analysis"),
   size: z.enum(["1024x1024", "1024x1536", "1536x1024"]).default("1024x1536").describe("Image size/orientation"),
+  // Complexity level from UI - affects prompt generation and detail level
+  complexity: z.enum(["kids", "simple", "medium", "detailed", "ultra"]).default("medium").describe("Design complexity level"),
 });
 
 export type BatchPromptsRequest = z.infer<typeof batchPromptsRequestSchema>;

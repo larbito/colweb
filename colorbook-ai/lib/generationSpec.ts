@@ -3,8 +3,25 @@
  * Used across all prompt generation and image generation endpoints
  */
 
+// Base complexity for GenerationSpec (API schema)
 export type Complexity = "simple" | "medium" | "detailed";
+// Extended complexity that includes all UI options
+export type ExtendedComplexity = "kids" | "simple" | "medium" | "detailed" | "ultra";
 export type LineThickness = "thin" | "medium" | "bold";
+
+/**
+ * Map extended complexity to base complexity for API compatibility
+ */
+export function mapExtendedToBaseComplexity(extended: ExtendedComplexity): Complexity {
+  switch (extended) {
+    case "kids":
+      return "simple";
+    case "ultra":
+      return "detailed";
+    default:
+      return extended;
+  }
+}
 
 export interface GenerationSpec {
   /** Trim size label, e.g. "8.5x11" */

@@ -454,6 +454,7 @@ export default function CreateColoringBookPage() {
           characterProfile,
           basePrompt: idea, // Use user's idea directly
           size: getImageSize(),
+          complexity, // Pass complexity level for appropriate detail
         }),
       });
 
@@ -1860,21 +1861,6 @@ export default function CreateColoringBookPage() {
                   </p>
                 </div>
               </SubSection>
-
-                      {/* Age Group */}
-                    <SubSection title="Target Age Group">
-                      <ChipGroup>
-                        {(["3-6", "6-9", "9-12", "all-ages"] as const).map((age) => (
-                          <OptionChip
-                            key={age}
-                            label={age === "all-ages" ? "All Ages" : `Ages ${age}`}
-                            selected={storyConfig.targetAge === age}
-                            onClick={() => setStoryConfig({ ...storyConfig, targetAge: age })}
-                            icon={Users}
-                          />
-                        ))}
-                      </ChipGroup>
-                    </SubSection>
                     </div>
                   )}
                 </div>
