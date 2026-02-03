@@ -95,7 +95,7 @@ export const batchPromptsRequestSchema = z.object({
   characterProfile: characterProfileSchema.optional(),
   sceneInventory: sceneInventorySchema.optional(),
   basePrompt: z.string().optional().describe("Original prompt from reference image analysis"),
-  size: z.enum(["1024x1024", "1024x1536", "1536x1024"]).default("1024x1536").describe("Image size/orientation"),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024", "1024x1536", "1536x1024"]).default("1024x1792").describe("Image size/orientation"),
   // Complexity level from UI - affects prompt generation and detail level
   complexity: z.enum(["kids", "simple", "medium", "detailed", "ultra"]).default("medium").describe("Design complexity level"),
 });
@@ -130,7 +130,7 @@ export const batchGenerateRequestSchema = z.object({
     page: z.number().int().min(1),
     prompt: z.string(),
   })),
-  size: z.enum(["1024x1024", "1024x1536", "1536x1024"]).default("1024x1536"),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024", "1024x1536", "1536x1024"]).default("1024x1792"),
   concurrency: z.number().int().min(1).max(3).default(1),
 });
 

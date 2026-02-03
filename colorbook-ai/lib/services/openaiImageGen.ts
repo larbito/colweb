@@ -42,12 +42,12 @@ const openai = new Proxy({} as OpenAI, {
   },
 });
 
-// Allowed sizes for GPT Image 1.5
-// Supported: 1024x1024, 1024x1536, 1536x1024, auto
-export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
+// Allowed sizes for DALL-E 3
+// Supported: 1024x1024, 1024x1792, 1792x1024
+export type ImageSize = "1024x1024" | "1024x1792" | "1792x1024";
 
-// Image model to use
-const IMAGE_MODEL = "gpt-image-1.5";
+// Image model to use - DALL-E 3 for best quality coloring pages
+const IMAGE_MODEL = "dall-e-3";
 
 export interface GenerateImageParams {
   prompt: string;
@@ -73,20 +73,28 @@ export function isOpenAIImageGenConfigured(): boolean {
 }
 
 /**
- * Generate images using OpenAI GPT Image 1.5
+ * COLORING PAGE PREFIX - ensures white background output
+ * This is CRITICAL for proper coloring page generation
+ */
+const COLORING_PAGE_PREFIX = `IMPORTANT: Generate a COLORING BOOK PAGE with PURE WHITE background (#FFFFFF). 
+The output must be BLACK LINE ART on WHITE BACKGROUND ONLY. No colors, no gray, no shading.
+This is a printable coloring page - the background MUST be pure white paper.
+
+`;
+
+/**
+ * Generate images using OpenAI DALL-E 3
  * 
- * ⚠️ HARD RULE: This function sends the prompt EXACTLY as provided.
- * No hidden system prompts. No automatic style injection.
- * The prompt parameter is the source of truth.
+ * For coloring pages, we add a mandatory prefix to ensure white background output.
  * 
  * ERROR HANDLING:
  * - Non-retryable errors (billing limit, invalid key) throw NonRetryableGenerationError
  * - Retryable errors throw RetryableGenerationError
  * - Caller should check error type and handle accordingly
  * 
- * @param params.prompt - The EXACT prompt to send (no modifications)
- * @param params.n - Number of images (1-4, default 1)
- * @param params.size - Image size (default "1024x1536" for portrait coloring pages)
+ * @param params.prompt - The prompt to send (coloring page prefix will be added)
+ * @param params.n - Number of images (1 for DALL-E 3)
+ * @param params.size - Image size (default "1024x1792" for portrait coloring pages)
  * @param context - Optional context for error tracking (pageIndex, batchId)
  */
 export async function generateImage(
@@ -96,7 +104,7 @@ export async function generateImage(
   const { 
     prompt, 
     n = 1, 
-    size = "1024x1536", // Portrait format for coloring pages
+    size = "1024x1792", // Portrait format for coloring pages (DALL-E 3 size)
   } = params;
 
   if (!isOpenAIImageGenConfigured()) {
@@ -110,22 +118,27 @@ export async function generateImage(
     throw new Error("Prompt is required");
   }
 
+  // Add coloring page prefix for proper white background generation
+  const fullPrompt = COLORING_PAGE_PREFIX + prompt;
+
   console.log(`[openaiImageGen] Generating ${n} image(s) with model: ${IMAGE_MODEL}`);
   console.log(`[openaiImageGen] Size: ${size}, Page: ${context.pageIndex || "N/A"}`);
-  console.log(`[openaiImageGen] EXACT PROMPT (${prompt.length} chars): "${prompt.substring(0, 150)}..."`);
+  console.log(`[openaiImageGen] Prompt length: ${fullPrompt.length} chars`);
 
   const images: string[] = [];
   const revisedPrompts: string[] = [];
 
-  // Loop for multiple images
+  // DALL-E 3 only supports n=1, so we loop for multiple images
   for (let i = 0; i < Math.min(n, 4); i++) {
     try {
-      // gpt-image-1.5 uses minimal parameters - no response_format, style, etc.
+      // DALL-E 3 with HD quality and natural style for clean line art
       const response = await openai.images.generate({
         model: IMAGE_MODEL,
-        prompt: prompt, // EXACT prompt - no modifications
-        n: 1,
+        prompt: fullPrompt,
+        n: 1, // DALL-E 3 only supports n=1
         size: size,
+        quality: "hd", // HD quality for crisp lines
+        style: "natural", // Natural style for cleaner artwork
       } as OpenAI.Images.ImageGenerateParams);
 
       const imageData = response.data?.[0];

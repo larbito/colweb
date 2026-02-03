@@ -47,7 +47,7 @@ const characterProfileSchema = z.object({
 const requestSchema = z.object({
   page: z.number().int().min(1),
   prompt: z.string().min(1),
-  size: z.enum(["1024x1024", "1024x1536", "1536x1024"]).default("1024x1536"),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024", "1024x1536", "1536x1024"]).default("1024x1792"),
   maxRetries: z.number().int().min(0).max(3).default(2), // QA retries
   // Storybook mode parameters
   isStorybookMode: z.boolean().default(false),

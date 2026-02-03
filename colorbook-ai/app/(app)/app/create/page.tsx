@@ -250,8 +250,9 @@ export default function CreateColoringBookPage() {
   // ============================================================
 
   const getImageSize = () => {
-    if (orientation === "landscape") return "1536x1024";
-    if (orientation === "portrait") return "1024x1536";
+    // DALL-E 3 compatible sizes
+    if (orientation === "landscape") return "1792x1024";
+    if (orientation === "portrait") return "1024x1792";
     return "1024x1024";
   };
 

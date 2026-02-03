@@ -14,7 +14,7 @@
 // ORIENTATION / SIZE TYPES
 // ============================================================
 
-export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024";
+export type ImageSize = "1024x1024" | "1024x1792" | "1792x1024" | "1024x1536" | "1536x1024";
 export type Orientation = "portrait" | "landscape" | "square";
 
 // US Letter dimensions at 300 DPI
@@ -29,10 +29,9 @@ export const US_LETTER_PRESET = {
 };
 
 // Model size that's closest to US Letter ratio (0.7727)
-// 1024x1536 = 0.6666 ratio (too tall)
-// 1024x1024 = 1.0 ratio (square)
-// Best available: 1024x1536 and crop to fill
-export const BEST_LETTER_SIZE: ImageSize = "1024x1536";
+// DALL-E 3 sizes: 1024x1792 = 0.571 ratio (portrait), 1024x1024 = 1.0 ratio (square)
+// Best available: 1024x1792 for portrait coloring pages
+export const BEST_LETTER_SIZE: ImageSize = "1024x1792";
 
 /**
  * US LETTER FULL-PAGE composition constraint.
@@ -64,14 +63,14 @@ export const EMPTY_BAND_THRESHOLDS = {
 };
 
 export function getOrientationFromSize(size: ImageSize): Orientation {
-  if (size === "1536x1024") return "landscape";
-  if (size === "1024x1536") return "portrait";
+  if (size === "1536x1024" || size === "1792x1024") return "landscape";
+  if (size === "1024x1536" || size === "1024x1792") return "portrait";
   return "square";
 }
 
 export function getSizeFromOrientation(orientation: Orientation): ImageSize {
-  if (orientation === "landscape") return "1536x1024";
-  if (orientation === "portrait") return "1024x1536";
+  if (orientation === "landscape") return "1792x1024";
+  if (orientation === "portrait") return "1024x1792";
   return "1024x1024";
 }
 
