@@ -116,12 +116,22 @@ async function renderPageToImage(
     svgContent = createBelongsToPageSVG(width, height, options);
   }
   
-  // Convert SVG to PNG using sharp
-  const pngBuffer = await sharp(Buffer.from(svgContent))
-    .png()
-    .toBuffer();
+  // TEMP DEBUG LOG - log first 500 chars of SVG to verify it's valid
+  console.log(`[front-matter] SVG for ${key} (first 500 chars):`, svgContent.substring(0, 500));
   
-  return pngBuffer.toString("base64");
+  try {
+    // Convert SVG to PNG using sharp
+    const pngBuffer = await sharp(Buffer.from(svgContent))
+      .png()
+      .toBuffer();
+    
+    console.log(`[front-matter] PNG buffer size for ${key}: ${pngBuffer.length} bytes`);
+    
+    return pngBuffer.toString("base64");
+  } catch (sharpError) {
+    console.error(`[front-matter] Sharp error for ${key}:`, sharpError);
+    throw sharpError;
+  }
 }
 
 /**

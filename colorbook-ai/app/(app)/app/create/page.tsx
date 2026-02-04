@@ -1299,9 +1299,10 @@ export default function CreateColoringBookPage() {
   const [generatingFrontMatter, setGeneratingFrontMatter] = useState<FrontMatterKey | null>(null);
   
   // Front matter computed values
+  // A page is truly "ready" ONLY if status="done" AND imageBase64 exists
   const enabledFrontMatter = frontMatter.filter(fm => fm.enabled);
-  const doneFrontMatterCount = frontMatter.filter(fm => fm.enabled && fm.status === "done").length;
-  const frontMatterReady = enabledFrontMatter.every(fm => fm.status === "done");
+  const doneFrontMatterCount = frontMatter.filter(fm => fm.enabled && fm.status === "done" && !!fm.imageBase64).length;
+  const frontMatterReady = enabledFrontMatter.every(fm => fm.status === "done" && !!fm.imageBase64);
   
   // Generate a single front matter page
   const generateFrontMatterPage = async (key: FrontMatterKey) => {
@@ -1354,9 +1355,9 @@ export default function CreateColoringBookPage() {
     }
   };
   
-  // Generate all enabled front matter pages
+  // Generate all enabled front matter pages (also regenerate if image is missing)
   const generateAllFrontMatter = async () => {
-    const toGenerate = frontMatter.filter(fm => fm.enabled && fm.status !== "done");
+    const toGenerate = frontMatter.filter(fm => fm.enabled && (fm.status !== "done" || !fm.imageBase64));
     for (const fm of toGenerate) {
       await generateFrontMatterPage(fm.key);
     }
@@ -2451,13 +2452,14 @@ export default function CreateColoringBookPage() {
                         )}
                       </div>
                       
-                      {/* Preview Area */}
-                      <div className="aspect-[8.5/11] bg-muted relative">
+                      {/* Preview Area - PaperPreview style */}
+                      <div className="aspect-[8.5/11] relative bg-white border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden rounded-sm">
                         {fm.imageBase64 ? (
                           <img
-                            src={`data:image/png;base64,${fm.imageBase64}`}
+                            src={fm.imageBase64.startsWith("data:") ? fm.imageBase64 : `data:image/png;base64,${fm.imageBase64}`}
                             alt={fm.label}
                             className="w-full h-full object-contain"
+                            style={{ backgroundColor: 'white' }}
                           />
                         ) : fm.status === "generating" ? (
                           <div className="flex flex-col items-center justify-center h-full gap-2">
@@ -2482,13 +2484,13 @@ export default function CreateColoringBookPage() {
                         <Button
                           size="sm"
                           className="w-full"
-                          variant={fm.status === "done" ? "outline" : "default"}
+                          variant={fm.status === "done" && fm.imageBase64 ? "outline" : "default"}
                           onClick={() => generateFrontMatterPage(fm.key)}
                           disabled={!fm.enabled || generatingFrontMatter === fm.key}
                         >
                           {generatingFrontMatter === fm.key ? (
                             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                          ) : fm.status === "done" ? (
+                          ) : fm.status === "done" && fm.imageBase64 ? (
                             <><RefreshCw className="mr-2 h-4 w-4" /> Regenerate</>
                           ) : (
                             <><Sparkles className="mr-2 h-4 w-4" /> Generate</>
@@ -2499,8 +2501,8 @@ export default function CreateColoringBookPage() {
                   ))}
                 </div>
                 
-                {/* Generate All Button */}
-                {enabledFrontMatter.some(fm => fm.status !== "done") && (
+                {/* Generate All Button - show if any enabled page is not ready (status !== "done" OR missing imageBase64) */}
+                {enabledFrontMatter.some(fm => fm.status !== "done" || !fm.imageBase64) && (
                   <Button 
                     onClick={generateAllFrontMatter} 
                     disabled={generatingFrontMatter !== null}
@@ -2557,11 +2559,11 @@ export default function CreateColoringBookPage() {
                   </Button>
                   <Button 
                     onClick={() => setCurrentStep(6)}
-                    disabled={enabledFrontMatter.some(fm => fm.status !== "done")}
+                    disabled={!frontMatterReady}
                     className="flex-1"
                     size="lg"
                   >
-                    {enabledFrontMatter.every(fm => fm.status === "done") ? (
+                    {frontMatterReady ? (
                       <><FileDown className="mr-2 h-5 w-5" /> Continue to Export</>
                     ) : (
                       <><AlertCircle className="mr-2 h-5 w-5" /> Generate Front Matter First</>

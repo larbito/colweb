@@ -92,11 +92,33 @@ function ExportPageContent() {
   const generateTitlePreview = async () => {
     setIsGeneratingTitle(true);
     try {
-      // Simple title page - just a placeholder for now
-      // In production, this could call an AI to generate a decorative title page
-      setTitlePagePreview("TITLE_PAGE_PLACEHOLDER");
-      toast.success("Title page ready");
+      const response = await fetch("/api/front-matter/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: "title",
+          options: {
+            bookTitle,
+            authorName: authorName || undefined,
+            year: new Date().getFullYear().toString(),
+          },
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.status === "done" && data.imageBase64) {
+        // Build proper data URL
+        const imageDataUrl = data.imageBase64.startsWith("data:") 
+          ? data.imageBase64 
+          : `data:image/png;base64,${data.imageBase64}`;
+        setTitlePagePreview(imageDataUrl);
+        toast.success("Title page ready");
+      } else {
+        throw new Error(data.error || "Generation failed");
+      }
     } catch (error) {
+      console.error("[export/titlePage] Error:", error);
       toast.error("Failed to generate title page");
     }
     setIsGeneratingTitle(false);
@@ -106,9 +128,33 @@ function ExportPageContent() {
   const generateCopyrightPreview = async () => {
     setIsGeneratingCopyright(true);
     try {
-      setCopyrightPagePreview("COPYRIGHT_PAGE_PLACEHOLDER");
-      toast.success("Copyright page ready");
+      const response = await fetch("/api/front-matter/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: "copyright",
+          options: {
+            bookTitle,
+            authorName: authorName || undefined,
+            year: new Date().getFullYear().toString(),
+          },
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.status === "done" && data.imageBase64) {
+        // Build proper data URL
+        const imageDataUrl = data.imageBase64.startsWith("data:") 
+          ? data.imageBase64 
+          : `data:image/png;base64,${data.imageBase64}`;
+        setCopyrightPagePreview(imageDataUrl);
+        toast.success("Copyright page ready");
+      } else {
+        throw new Error(data.error || "Generation failed");
+      }
     } catch (error) {
+      console.error("[export/copyrightPage] Error:", error);
       toast.error("Failed to generate copyright page");
     }
     setIsGeneratingCopyright(false);
