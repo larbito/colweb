@@ -1,145 +1,161 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createBookZip, getSafeZipFilename } from "@/lib/exportZip";
+import JSZip from "jszip";
+import { 
+  base64ToBuffer,
+  smartCropToLetter,
+  LETTER_WIDTH,
+  LETTER_HEIGHT,
+} from "@/lib/imageProcessing";
 
-/**
- * Route segment config
- * ZIP Export - creates downloadable ZIP with organized structure
- */
-export const maxDuration = 180; // 3 minutes for large ZIP files
-export const dynamic = "force-dynamic";
+export const maxDuration = 300; // 5 minutes for large ZIPs
+
+const pageImageSchema = z.object({
+  pageIndex: z.number(),
+  imageBase64: z.string(),
+  title: z.string().optional(),
+  prompt: z.string().optional(),
+  isProcessed: z.boolean().default(false),
+});
 
 const requestSchema = z.object({
-  title: z.string().default("coloring-book"),
-  
-  // Coloring pages
-  pages: z.array(z.object({
-    pageIndex: z.number(),
-    imageBase64: z.string(),
-    title: z.string().optional(),
-    prompt: z.string().optional(),
-    finalPrompt: z.string().optional(),
-  })),
-  
-  // Extra pages (title, copyright, belongs-to)
-  extras: z.array(z.object({
-    type: z.enum(["title", "copyright", "belongs-to"]),
-    imageBase64: z.string(),
-  })).optional(),
-  
-  // Book metadata
-  metadata: z.object({
-    bookType: z.string().optional(),
-    complexity: z.string().optional(),
-    pageSize: z.string().optional(),
-    authorName: z.string().optional(),
-    settings: z.record(z.unknown()).optional(),
-  }).optional(),
+  pages: z.array(pageImageSchema),
+  bookTitle: z.string().default("Coloring-Book"),
+  includeMetadata: z.boolean().default(true),
+  processToLetter: z.boolean().default(true), // Post-process to US Letter
 });
 
 /**
  * POST /api/export/zip
  * 
- * Creates a ZIP file containing:
- *   /pages/page-001.png ... page-080.png
- *   /extras/title.png, copyright.png (optional)
- *   /meta/prompts.json (page info and prompts)
- *   /meta/book.json (settings)
+ * Generate a ZIP file containing all coloring pages as PNGs.
+ * Includes optional metadata.json with prompts and titles.
+ * 
+ * All images are processed to US Letter format (2550x3300 @ 300 DPI).
  */
 export async function POST(request: NextRequest) {
-  const startTime = Date.now();
-  
   try {
     const body = await request.json();
-    const parseResult = requestSchema.safeParse(body);
-
-    if (!parseResult.success) {
-      console.error("[export/zip] Validation error:", parseResult.error.flatten());
-      return NextResponse.json(
-        { 
-          ok: false,
-          error: "Invalid request - check page data format",
-          errorCode: "VALIDATION_ERROR",
-          details: parseResult.error.flatten(),
-        },
-        { status: 400 }
-      );
+    const data = requestSchema.parse(body);
+    
+    console.log(`[export-zip] Starting ZIP generation: ${data.pages.length} pages`);
+    
+    const zip = new JSZip();
+    const imagesFolder = zip.folder("images");
+    
+    if (!imagesFolder) {
+      throw new Error("Failed to create images folder");
     }
-
-    const { title, pages, extras, metadata } = parseResult.data;
-
-    console.log(`[export/zip] Creating ZIP: "${title}" with ${pages.length} pages, ${extras?.length || 0} extras`);
-
-    // Validate we have at least one page
-    if (pages.length === 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No pages provided",
-          errorCode: "NO_PAGES",
-        },
-        { status: 400 }
-      );
-    }
-
-    // Create ZIP using streaming helper
-    const result = await createBookZip({
-      pages,
-      extras: extras as { type: "title" | "copyright" | "belongs-to"; imageBase64: string }[] | undefined,
-      metadata: {
-        title,
-        createdAt: new Date().toISOString(),
-        pageCount: pages.length,
-        ...metadata,
-      },
-    });
-
-    const durationMs = Date.now() - startTime;
-    const sizeMB = (result.totalSizeBytes / 1024 / 1024).toFixed(2);
-    console.log(`[export/zip] ZIP created: ${sizeMB} MB, ${result.fileCount} files in ${durationMs}ms`);
-
-    // Return ZIP as binary
-    const filename = getSafeZipFilename(title);
     
-    return new NextResponse(new Uint8Array(result.zipBuffer), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": String(result.totalSizeBytes),
-        "X-File-Count": String(result.fileCount),
-        "X-Duration-Ms": String(durationMs),
-      },
-    });
-
-  } catch (error) {
-    const durationMs = Date.now() - startTime;
-    console.error("[export/zip] Error after", durationMs, "ms:", error);
+    const metadata: {
+      title: string;
+      pageCount: number;
+      pages: Array<{
+        pageIndex: number;
+        filename: string;
+        title?: string;
+        prompt?: string;
+      }>;
+      exportDate: string;
+      format: string;
+    } = {
+      title: data.bookTitle,
+      pageCount: data.pages.length,
+      pages: [],
+      exportDate: new Date().toISOString(),
+      format: "US Letter (2550x3300 @ 300 DPI)",
+    };
     
-    let errorMessage = "Failed to create ZIP";
-    let errorCode = "ZIP_CREATION_ERROR";
-    
-    if (error instanceof Error) {
-      errorMessage = error.message;
-      
-      if (error.message.includes("memory")) {
-        errorCode = "MEMORY_ERROR";
-        errorMessage = "Out of memory - try with fewer pages";
-      } else if (error.message.includes("buffer") || error.message.includes("base64")) {
-        errorCode = "INVALID_IMAGE_DATA";
-        errorMessage = "Invalid image data - check base64 encoding";
+    // Process each page
+    let processedCount = 0;
+    for (const pageData of data.pages) {
+      try {
+        let imageBuffer: Buffer;
+        
+        // Process to US Letter if needed
+        if (data.processToLetter && !pageData.isProcessed) {
+          const processed = await smartCropToLetter(pageData.imageBase64, {
+            targetWidth: LETTER_WIDTH,
+            targetHeight: LETTER_HEIGHT,
+          });
+          imageBuffer = base64ToBuffer(processed.imageBase64);
+        } else {
+          imageBuffer = base64ToBuffer(pageData.imageBase64);
+        }
+        
+        // Generate filename
+        const paddedIndex = String(pageData.pageIndex).padStart(3, "0");
+        const safeTitle = pageData.title 
+          ? pageData.title.replace(/[^a-z0-9]/gi, "-").slice(0, 30) 
+          : "";
+        const filename = safeTitle 
+          ? `page-${paddedIndex}-${safeTitle}.png`
+          : `page-${paddedIndex}.png`;
+        
+        // Add to ZIP
+        imagesFolder.file(filename, imageBuffer);
+        
+        // Add to metadata
+        metadata.pages.push({
+          pageIndex: pageData.pageIndex,
+          filename,
+          title: pageData.title,
+          prompt: pageData.prompt,
+        });
+        
+        processedCount++;
+        
+      } catch (pageError) {
+        console.error(`[export-zip] Failed to process page ${pageData.pageIndex}:`, pageError);
+        // Continue with other pages
       }
     }
     
+    // Add metadata if requested
+    if (data.includeMetadata) {
+      zip.file("metadata.json", JSON.stringify(metadata, null, 2));
+    }
+    
+    // Add a README
+    const readme = `# ${data.bookTitle}
+
+Exported: ${new Date().toLocaleString()}
+Total Pages: ${processedCount}
+
+## Format
+All images are in US Letter format (2550x3300 pixels @ 300 DPI).
+Perfect for printing on standard US Letter paper (8.5" x 11").
+
+## Files
+- images/ - Contains all coloring pages as PNG files
+${data.includeMetadata ? "- metadata.json - Page titles and prompts\n" : ""}
+`;
+    zip.file("README.txt", readme);
+    
+    console.log(`[export-zip] Processed ${processedCount} pages successfully`);
+    
+    // Generate ZIP
+    const zipBuffer = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    });
+    
+    const zipBase64 = zipBuffer.toString("base64");
+    
+    return NextResponse.json({
+      success: true,
+      zipBase64,
+      filename: `${data.bookTitle.replace(/[^a-z0-9]/gi, "-")}-coloring-book.zip`,
+      processedPages: processedCount,
+      totalSize: zipBuffer.length,
+    });
+    
+  } catch (error) {
+    console.error("[export-zip] Error:", error);
     return NextResponse.json(
-      { 
-        ok: false,
-        error: errorMessage,
-        errorCode,
-        durationMs,
-      },
+      { error: error instanceof Error ? error.message : "ZIP generation failed" },
       { status: 500 }
     );
   }
 }
-

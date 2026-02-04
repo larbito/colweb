@@ -1,683 +1,627 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import { AppTopbar } from "@/components/app/app-topbar";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { PageContainer } from "@/components/app/app-shell";
+import { PageHeader } from "@/components/app/page-header";
+import { SectionCard, SubSection } from "@/components/app/section-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Card, CardContent } from "@/components/ui/card";
 import {
-  ChevronLeft,
-  ChevronRight,
+  FileDown,
   Download,
+  Loader2,
+  CheckCircle2,
+  RefreshCw,
+  Eye,
+  Archive,
   FileText,
   BookOpen,
-  Eye,
-  AlertTriangle,
-  CheckCircle2,
-  BookMarked,
-  Layers,
-  Loader2,
+  Hash,
   Settings2,
-  FileDown,
-  Image as ImageIcon,
-  Sparkles,
-  Clock,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
+  ChevronLeft,
+  ChevronRight,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-// Steps for the export wizard
-const EXPORT_STEPS = [
-  { id: "layout", label: "Layout & Paper", icon: Layers },
-  { id: "front-matter", label: "Front Matter", icon: BookMarked },
-  { id: "checks", label: "Print Ready", icon: CheckCircle2 },
-  { id: "export", label: "Export", icon: FileDown },
-];
-
-type ExportStep = "layout" | "front-matter" | "checks" | "export";
-
 interface PageData {
-  page: number;
-  imageBase64?: string;
-  enhancedImageBase64?: string;
-  finalLetterBase64?: string;
-  status?: string;
+  pageIndex: number;
+  imageBase64: string;
+  title?: string;
+  prompt?: string;
 }
 
-// Wrapper component that uses search params
+type ExportStep = "configure" | "preview" | "download";
+
 function ExportPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  // These will be used to load book data when connected to backend
-  const _bookId = searchParams.get("bookId");
-  const _batchId = searchParams.get("batchId");
   
-  // TODO: Load book data based on bookId or batchId
-  // useEffect(() => { if (_bookId) loadBookData(_bookId); }, [_bookId]);
-
-  // Wizard state
-  const [currentStep, setCurrentStep] = useState<ExportStep>("layout");
+  // Step state
+  const [currentStep, setCurrentStep] = useState<ExportStep>("configure");
   
-  // Layout settings
-  const [pageSize, setPageSize] = useState<"letter" | "a4">("letter");
-  const [margins, setMargins] = useState<"minimal" | "standard">("minimal");
-  const [insertBlankPages, setInsertBlankPages] = useState(true);
-  
-  // Front matter settings
-  const [includeBelongsTo, setIncludeBelongsTo] = useState(true);
-  const [belongsToName, setBelongsToName] = useState("");
-  const [includeCopyright, setIncludeCopyright] = useState(true);
-  const [author, setAuthor] = useState("");
-  const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [copyrightText, setCopyrightText] = useState("All rights reserved.");
-  
-  // Book data
-  const [bookTitle, setBookTitle] = useState("My Coloring Book");
+  // Retrieve pages from session storage
   const [pages, setPages] = useState<PageData[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Export state
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
-  const [exportStatus, setExportStatus] = useState("");
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  // PDF options
+  const [includeTitlePage, setIncludeTitlePage] = useState(true);
+  const [includeCopyrightPage, setIncludeCopyrightPage] = useState(true);
+  const [includePageNumbers, setIncludePageNumbers] = useState(true);
+  const [bookTitle, setBookTitle] = useState("My Coloring Book");
+  const [authorName, setAuthorName] = useState("");
+  const [copyrightText, setCopyrightText] = useState("");
   
-  // Preview state
-  const [previewPage, setPreviewPage] = useState(0);
-  const [previewZoom, setPreviewZoom] = useState(100);
-
-  // Calculate step index
-  const currentStepIndex = EXPORT_STEPS.findIndex(s => s.id === currentStep);
-
-  // Navigation
-  const goToNextStep = () => {
-    const nextIndex = currentStepIndex + 1;
-    if (nextIndex < EXPORT_STEPS.length) {
-      setCurrentStep(EXPORT_STEPS[nextIndex].id as ExportStep);
+  // Title page preview (generated separately)
+  const [titlePagePreview, setTitlePagePreview] = useState<string | null>(null);
+  const [copyrightPagePreview, setCopyrightPagePreview] = useState<string | null>(null);
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+  const [isGeneratingCopyright, setIsGeneratingCopyright] = useState(false);
+  
+  // PDF state
+  const [pdfBase64, setPdfBase64] = useState<string | null>(null);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState(0);
+  
+  // ZIP state
+  const [isGeneratingZip, setIsGeneratingZip] = useState(false);
+  
+  // Load pages from session storage
+  useEffect(() => {
+    try {
+      const storedPages = sessionStorage.getItem("exportPages");
+      if (storedPages) {
+        const parsed = JSON.parse(storedPages);
+        setPages(parsed);
+        
+        // Get book title from URL if present
+        const title = searchParams.get("title");
+        if (title) setBookTitle(title);
+      }
+    } catch (e) {
+      console.error("Failed to load pages:", e);
     }
-  };
-
-  const goToPrevStep = () => {
-    const prevIndex = currentStepIndex - 1;
-    if (prevIndex >= 0) {
-      setCurrentStep(EXPORT_STEPS[prevIndex].id as ExportStep);
+    setIsLoading(false);
+  }, [searchParams]);
+  
+  // Generate title page preview
+  const generateTitlePreview = async () => {
+    setIsGeneratingTitle(true);
+    try {
+      // Simple title page - just a placeholder for now
+      // In production, this could call an AI to generate a decorative title page
+      setTitlePagePreview("TITLE_PAGE_PLACEHOLDER");
+      toast.success("Title page ready");
+    } catch (error) {
+      toast.error("Failed to generate title page");
     }
+    setIsGeneratingTitle(false);
   };
-
-  // Check print readiness
-  const printReadyIssues: string[] = [];
-  const enhancedCount = pages.filter(p => p.enhancedImageBase64 || p.finalLetterBase64).length;
-  if (enhancedCount < pages.length) {
-    printReadyIssues.push(`${pages.length - enhancedCount} pages not enhanced for print quality`);
+  
+  // Generate copyright page preview
+  const generateCopyrightPreview = async () => {
+    setIsGeneratingCopyright(true);
+    try {
+      setCopyrightPagePreview("COPYRIGHT_PAGE_PLACEHOLDER");
+      toast.success("Copyright page ready");
+    } catch (error) {
+      toast.error("Failed to generate copyright page");
+    }
+    setIsGeneratingCopyright(false);
+  };
+  
+  // Generate PDF
+  const generatePdf = async (previewOnly = false) => {
+    setIsGeneratingPdf(true);
+    setPdfProgress(0);
+    
+    try {
+      const response = await fetch("/api/export/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pages: pages.map((p, idx) => ({
+            pageIndex: idx + 1,
+            imageBase64: p.imageBase64,
+            title: p.title,
+            isProcessed: false, // Will be processed to US Letter
+          })),
+          includeTitlePage,
+          includeCopyrightPage,
+          includePageNumbers,
+          bookTitle,
+          authorName: authorName || undefined,
+          copyrightText: copyrightText || undefined,
+          previewMode: previewOnly,
+          previewPageCount: 5,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "PDF generation failed");
+      }
+      
+      const data = await response.json();
+      setPdfBase64(data.pdfBase64);
+      setPdfProgress(100);
+      
+      if (!previewOnly) {
+        toast.success(`PDF ready! ${data.totalPages} pages`);
+      }
+      
+    } catch (error) {
+      console.error("PDF generation failed:", error);
+      toast.error(error instanceof Error ? error.message : "PDF generation failed");
+    }
+    
+    setIsGeneratingPdf(false);
+  };
+  
+  // Download PDF
+  const downloadPdf = () => {
+    if (!pdfBase64) return;
+    
+    const link = document.createElement("a");
+    link.href = `data:application/pdf;base64,${pdfBase64}`;
+    link.download = `${bookTitle.replace(/[^a-z0-9]/gi, "-")}-coloring-book.pdf`;
+    link.click();
+    
+    toast.success("PDF downloaded!");
+  };
+  
+  // Generate and download ZIP
+  const generateZip = async () => {
+    setIsGeneratingZip(true);
+    
+    try {
+      const response = await fetch("/api/export/zip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pages: pages.map((p, idx) => ({
+            pageIndex: idx + 1,
+            imageBase64: p.imageBase64,
+            title: p.title,
+            prompt: p.prompt,
+            isProcessed: false,
+          })),
+          bookTitle,
+          includeMetadata: true,
+          processToLetter: true,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "ZIP generation failed");
+      }
+      
+      const data = await response.json();
+      
+      // Download ZIP
+      const link = document.createElement("a");
+      link.href = `data:application/zip;base64,${data.zipBase64}`;
+      link.download = data.filename;
+      link.click();
+      
+      toast.success(`ZIP downloaded! ${data.processedPages} pages`);
+      
+    } catch (error) {
+      console.error("ZIP generation failed:", error);
+      toast.error(error instanceof Error ? error.message : "ZIP generation failed");
+    }
+    
+    setIsGeneratingZip(false);
+  };
+  
+  // Step navigation
+  const goToStep = (step: ExportStep) => {
+    if (step === "preview" && !pdfBase64) {
+      generatePdf(true);
+    }
+    setCurrentStep(step);
+  };
+  
+  if (isLoading) {
+    return (
+      <PageContainer>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </PageContainer>
+    );
+  }
+  
+  if (pages.length === 0) {
+    return (
+      <PageContainer>
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+          <AlertCircle className="h-12 w-12 text-muted-foreground" />
+          <h2 className="text-xl font-semibold">No Pages to Export</h2>
+          <p className="text-muted-foreground text-center max-w-md">
+            Generate some coloring pages first, then come back to export them as PDF or ZIP.
+          </p>
+          <Button onClick={() => router.push("/app/create")}>
+            Create Coloring Book
+          </Button>
+        </div>
+      </PageContainer>
+    );
   }
 
-  // Calculate total pages in PDF
-  const totalPdfPages = 
-    (includeBelongsTo ? 1 : 0) +
-    (includeCopyright ? 1 : 0) +
-    pages.length +
-    (insertBlankPages ? pages.length : 0);
-
   return (
-    <>
-      <AppTopbar
-        title="Export PDF"
-        subtitle={bookTitle}
+    <PageContainer>
+      <PageHeader
+        title="Export Book"
+        subtitle={`Export ${pages.length} pages to PDF or download as ZIP`}
       />
       
-      <main className="flex-1 overflow-hidden">
-        <div className="h-full flex">
-          {/* Left: Preview Panel */}
-          <div className="w-1/2 border-r bg-muted/30 flex flex-col">
-            {/* Preview Header */}
-            <div className="p-4 border-b bg-background flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Eye className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">PDF Preview</span>
-                <Badge variant="outline" className="ml-2">
-                  Page {previewPage + 1} of {totalPdfPages || pages.length || 1}
-                </Badge>
+      {/* Step indicator */}
+      <div className="flex items-center gap-4 mb-8">
+        <StepButton
+          step={1}
+          label="Configure"
+          isActive={currentStep === "configure"}
+          isComplete={currentStep === "preview" || currentStep === "download"}
+          onClick={() => setCurrentStep("configure")}
+        />
+        <div className="flex-1 h-px bg-border" />
+        <StepButton
+          step={2}
+          label="Preview"
+          isActive={currentStep === "preview"}
+          isComplete={currentStep === "download"}
+          onClick={() => goToStep("preview")}
+        />
+        <div className="flex-1 h-px bg-border" />
+        <StepButton
+          step={3}
+          label="Download"
+          isActive={currentStep === "download"}
+          isComplete={false}
+          onClick={() => goToStep("download")}
+        />
+      </div>
+      
+      {/* Configure Step */}
+      {currentStep === "configure" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Book Info */}
+          <SectionCard title="Book Information" icon={BookOpen}>
+            <div className="space-y-4">
+              <SubSection title="Book Title">
+                <Input
+                  value={bookTitle}
+                  onChange={(e) => setBookTitle(e.target.value)}
+                  placeholder="Enter your book title"
+                />
+              </SubSection>
+              
+              <SubSection title="Author Name (optional)">
+                <Input
+                  value={authorName}
+                  onChange={(e) => setAuthorName(e.target.value)}
+                  placeholder="Your name or pen name"
+                />
+              </SubSection>
+            </div>
+          </SectionCard>
+          
+          {/* PDF Options */}
+          <SectionCard title="PDF Options" icon={Settings2}>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <div className="font-medium">Title Page</div>
+                    <div className="text-sm text-muted-foreground">Include a decorative title page</div>
+                  </div>
+                </div>
+                <Switch checked={includeTitlePage} onCheckedChange={setIncludeTitlePage} />
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPreviewZoom(Math.max(50, previewZoom - 25))}
-                >
-                  <ZoomOut className="h-4 w-4" />
-                </Button>
-                <span className="text-sm text-muted-foreground w-12 text-center">{previewZoom}%</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPreviewZoom(Math.min(200, previewZoom + 25))}
-                >
-                  <ZoomIn className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPreviewZoom(100)}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </Button>
+              
+              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <div className="font-medium">Copyright Page</div>
+                    <div className="text-sm text-muted-foreground">Include copyright information</div>
+                  </div>
+                </div>
+                <Switch checked={includeCopyrightPage} onCheckedChange={setIncludeCopyrightPage} />
+              </div>
+              
+              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <Hash className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <div className="font-medium">Page Numbers</div>
+                    <div className="text-sm text-muted-foreground">Add page numbers at bottom</div>
+                  </div>
+                </div>
+                <Switch checked={includePageNumbers} onCheckedChange={setIncludePageNumbers} />
               </div>
             </div>
-            
-            {/* Preview Content */}
-            <div className="flex-1 overflow-auto p-6 flex items-center justify-center">
-              {pages.length > 0 && pages[previewPage] ? (
-                <div 
-                  className="bg-white shadow-lg rounded-sm"
-                  style={{
-                    width: `${(pageSize === "letter" ? 612 : 595) * (previewZoom / 100) * 0.5}px`,
-                    height: `${(pageSize === "letter" ? 792 : 841) * (previewZoom / 100) * 0.5}px`,
-                  }}
-                >
-                  {pages[previewPage].finalLetterBase64 || pages[previewPage].enhancedImageBase64 || pages[previewPage].imageBase64 ? (
-                    <img
-                      src={`data:image/png;base64,${pages[previewPage].finalLetterBase64 || pages[previewPage].enhancedImageBase64 || pages[previewPage].imageBase64}`}
-                      alt={`Page ${previewPage + 1}`}
+          </SectionCard>
+          
+          {/* Copyright Text */}
+          {includeCopyrightPage && (
+            <SectionCard title="Copyright Text" icon={FileText} className="lg:col-span-2">
+              <Textarea
+                value={copyrightText}
+                onChange={(e) => setCopyrightText(e.target.value)}
+                placeholder={`© ${new Date().getFullYear()} All Rights Reserved\n\nThis coloring book is for personal use only.\nNo part may be reproduced without permission.`}
+                rows={4}
+              />
+            </SectionCard>
+          )}
+          
+          {/* Pages Preview Grid */}
+          <SectionCard title={`Pages (${pages.length})`} icon={BookOpen} className="lg:col-span-2">
+            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+              {pages.slice(0, 16).map((page, idx) => (
+                <div key={idx} className="aspect-[8.5/11] rounded-lg overflow-hidden border bg-white">
+                  <img
+                    src={`data:image/png;base64,${page.imageBase64}`}
+                    alt={`Page ${idx + 1}`}
                       className="w-full h-full object-contain"
                     />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                      <ImageIcon className="h-12 w-12 opacity-30" />
-                    </div>
-                  )}
                 </div>
-              ) : (
-                <div className="text-center text-muted-foreground">
-                  <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                  <p>No pages to preview</p>
-                  <p className="text-sm mt-2">Generate some pages first, then come back to export</p>
+              ))}
+              {pages.length > 16 && (
+                <div className="aspect-[8.5/11] rounded-lg border bg-muted flex items-center justify-center">
+                  <span className="text-sm text-muted-foreground">+{pages.length - 16} more</span>
                 </div>
               )}
             </div>
-            
-            {/* Preview Navigation */}
-            {pages.length > 0 && (
-              <div className="p-4 border-t bg-background flex items-center justify-center gap-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPreviewPage(Math.max(0, previewPage - 1))}
-                  disabled={previewPage === 0}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                
-                {/* Page thumbnails */}
-                <div className="flex gap-2 overflow-x-auto max-w-md py-2">
-                  {pages.slice(0, 10).map((page, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setPreviewPage(idx)}
-                      className={`w-12 h-16 rounded border-2 transition-all flex-shrink-0 overflow-hidden ${
-                        previewPage === idx
-                          ? "border-primary ring-2 ring-primary/20"
-                          : "border-border hover:border-primary/50"
-                      }`}
-                    >
-                      {page.imageBase64 ? (
-                        <img
-                          src={`data:image/png;base64,${page.finalLetterBase64 || page.imageBase64}`}
-                          alt={`Thumbnail ${idx + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-muted flex items-center justify-center text-xs text-muted-foreground">
-                          {idx + 1}
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                  {pages.length > 10 && (
-                    <div className="w-12 h-16 flex items-center justify-center text-xs text-muted-foreground">
-                      +{pages.length - 10}
-                    </div>
-                  )}
-                </div>
-                
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPreviewPage(Math.min(pages.length - 1, previewPage + 1))}
-                  disabled={previewPage >= pages.length - 1}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </div>
+          </SectionCard>
           
-          {/* Right: Configuration Wizard */}
-          <div className="w-1/2 flex flex-col">
-            {/* Step Indicator */}
-            <div className="p-4 border-b bg-muted/30">
-              <div className="flex items-center justify-between max-w-lg mx-auto">
-                {EXPORT_STEPS.map((step, idx) => {
-                  const isActive = currentStep === step.id;
-                  const isCompleted = currentStepIndex > idx;
-                  const Icon = step.icon;
-                  
-                  return (
-                    <div key={step.id} className="flex items-center">
-                      <button
-                        onClick={() => setCurrentStep(step.id as ExportStep)}
-                        className="flex flex-col items-center"
-                      >
-                        <div
-                          className={`
-                            w-10 h-10 rounded-full flex items-center justify-center mb-1 transition-all
-                            ${isActive ? "bg-primary text-primary-foreground" : ""}
-                            ${isCompleted ? "bg-green-500 text-white" : ""}
-                            ${!isActive && !isCompleted ? "bg-muted text-muted-foreground" : ""}
-                          `}
-                        >
-                          {isCompleted ? <CheckCircle2 className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+          {/* Actions */}
+          <div className="lg:col-span-2 flex justify-end gap-3">
+            <Button variant="outline" onClick={() => router.back()}>
+              Back
+                </Button>
+            <Button onClick={() => goToStep("preview")}>
+              Continue to Preview
+              <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+          </div>
                         </div>
-                        <span className={`text-xs ${isActive ? "text-primary font-medium" : "text-muted-foreground"}`}>
-                          {step.label}
-                        </span>
-                      </button>
-                      {idx < EXPORT_STEPS.length - 1 && (
-                        <div className={`w-12 h-0.5 mx-2 ${isCompleted ? "bg-green-500" : "bg-muted"}`} />
-                      )}
-                    </div>
-                  );
-                })}
+      )}
+      
+      {/* Preview Step */}
+      {currentStep === "preview" && (
+        <div className="space-y-6">
+          {isGeneratingPdf ? (
+            <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <div className="text-center">
+                <div className="font-medium">Generating PDF Preview...</div>
+                <div className="text-sm text-muted-foreground">This may take a moment</div>
               </div>
             </div>
-            
-            {/* Step Content */}
-            <div className="flex-1 overflow-auto p-6">
-              {currentStep === "layout" && (
-                <div className="space-y-6 max-w-lg">
-                  <div>
-                    <h2 className="text-xl font-semibold mb-1">Layout & Paper</h2>
-                    <p className="text-sm text-muted-foreground">Configure page size and layout options</p>
-                  </div>
-                  
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base">Paper Size</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => setPageSize("letter")}
-                          className={`p-4 rounded-lg border-2 text-left transition-all ${
-                            pageSize === "letter"
-                              ? "border-primary bg-primary/5"
-                              : "border-border hover:border-primary/50"
-                          }`}
-                        >
-                          <div className="font-medium">US Letter</div>
-                          <div className="text-sm text-muted-foreground">8.5 × 11 inches</div>
-                        </button>
-                        <button
-                          onClick={() => setPageSize("a4")}
-                          className={`p-4 rounded-lg border-2 text-left transition-all ${
-                            pageSize === "a4"
-                              ? "border-primary bg-primary/5"
-                              : "border-border hover:border-primary/50"
-                          }`}
-                        >
-                          <div className="font-medium">A4</div>
-                          <div className="text-sm text-muted-foreground">210 × 297 mm</div>
-                        </button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                  
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base">Layout Options</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
+          ) : pdfBase64 ? (
+            <div className="space-y-4">
                       <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium">Blank pages between drawings</div>
-                          <div className="text-sm text-muted-foreground">Prevents bleed-through when coloring</div>
-                        </div>
-                        <Switch checked={insertBlankPages} onCheckedChange={setInsertBlankPages} />
-                      </div>
-                      
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium">Margins</div>
-                          <div className="text-sm text-muted-foreground">Safe area for printing</div>
-                        </div>
+                <h3 className="text-lg font-semibold">PDF Preview</h3>
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => setMargins("minimal")}
-                            className={`px-3 py-1 rounded text-sm ${
-                              margins === "minimal" ? "bg-primary text-primary-foreground" : "bg-muted"
-                            }`}
-                          >
-                            Minimal
-                          </button>
-                          <button
-                            onClick={() => setMargins("standard")}
-                            className={`px-3 py-1 rounded text-sm ${
-                              margins === "standard" ? "bg-primary text-primary-foreground" : "bg-muted"
-                            }`}
-                          >
-                            Standard
-                          </button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <Button variant="outline" size="sm" onClick={() => generatePdf(false)}>
+                    <RefreshCw className="h-4 w-4 mr-1" />
+                    Regenerate
+                  </Button>
                 </div>
-              )}
+              </div>
               
-              {currentStep === "front-matter" && (
-                <div className="space-y-6 max-w-lg">
-                  <div>
-                    <h2 className="text-xl font-semibold mb-1">Front Matter</h2>
-                    <p className="text-sm text-muted-foreground">Add belongs-to page and copyright information</p>
-                  </div>
-                  
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <BookMarked className="h-4 w-4" />
-                        Belongs To Page
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="font-medium">Include "Belongs To" page</div>
-                        <Switch checked={includeBelongsTo} onCheckedChange={setIncludeBelongsTo} />
-                      </div>
-                      
-                      {includeBelongsTo && (
-                        <div>
-                          <label className="text-sm font-medium mb-1 block">Default name (optional)</label>
-                          <Input
-                            value={belongsToName}
-                            onChange={(e) => setBelongsToName(e.target.value)}
-                            placeholder="Leave blank for write-in line"
-                          />
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                  
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <FileText className="h-4 w-4" />
-                        Copyright Page
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="font-medium">Include copyright page</div>
-                        <Switch checked={includeCopyright} onCheckedChange={setIncludeCopyright} />
-                      </div>
-                      
-                      {includeCopyright && (
-                        <>
-                          <div>
-                            <label className="text-sm font-medium mb-1 block">Author / Company</label>
-                            <Input
-                              value={author}
-                              onChange={(e) => setAuthor(e.target.value)}
-                              placeholder="Your name or company"
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="text-sm font-medium mb-1 block">Year</label>
-                              <Input
-                                value={year}
-                                onChange={(e) => setYear(e.target.value)}
-                              />
-                            </div>
-                            <div>
-                              <label className="text-sm font-medium mb-1 block">Rights</label>
-                              <Input
-                                value={copyrightText}
-                                onChange={(e) => setCopyrightText(e.target.value)}
-                                placeholder="All rights reserved."
+              {/* PDF Embed */}
+              <div className="border rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-900">
+                <iframe
+                  src={`data:application/pdf;base64,${pdfBase64}`}
+                  className="w-full h-[600px]"
+                  title="PDF Preview"
                               />
                             </div>
                           </div>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-              
-              {currentStep === "checks" && (
-                <div className="space-y-6 max-w-lg">
-                  <div>
-                    <h2 className="text-xl font-semibold mb-1">Print Ready Checks</h2>
-                    <p className="text-sm text-muted-foreground">Ensure your book is ready for printing</p>
-                  </div>
-                  
-                  <Card>
-                    <CardContent className="pt-6 space-y-4">
-                      {/* Status checks */}
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-3">
-                          <CheckCircle2 className="h-5 w-5 text-green-500" />
-                          <span>{pages.length} coloring pages ready</span>
-                        </div>
-                        
-                        {enhancedCount === pages.length ? (
-                          <div className="flex items-center gap-3">
-                            <CheckCircle2 className="h-5 w-5 text-green-500" />
-                            <span>All pages enhanced for print quality</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-3">
-                            <AlertTriangle className="h-5 w-5 text-amber-500" />
-                            <span>{pages.length - enhancedCount} pages not enhanced</span>
-                          </div>
-                        )}
-                        
-                        {includeBelongsTo && (
-                          <div className="flex items-center gap-3">
-                            <CheckCircle2 className="h-5 w-5 text-green-500" />
-                            <span>Belongs-to page will be generated</span>
-                          </div>
-                        )}
-                        
-                        {includeCopyright && (
-                          <div className="flex items-center gap-3">
-                            <CheckCircle2 className="h-5 w-5 text-green-500" />
-                            <span>Copyright page included</span>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {printReadyIssues.length > 0 && (
-                        <div className="p-4 rounded-lg bg-amber-50 border border-amber-200">
-                          <div className="flex items-center gap-2 text-amber-700 mb-2">
-                            <AlertTriangle className="h-4 w-4" />
-                            <span className="font-medium">Warnings</span>
-                          </div>
-                          <ul className="text-sm text-amber-600 space-y-1">
-                            {printReadyIssues.map((issue, i) => (
-                              <li key={i}>• {issue}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                  
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base">PDF Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Total pages:</span>
-                          <span className="ml-2 font-medium">{totalPdfPages}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Paper size:</span>
-                          <span className="ml-2 font-medium">{pageSize === "letter" ? "US Letter" : "A4"}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Coloring pages:</span>
-                          <span className="ml-2 font-medium">{pages.length}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Blank pages:</span>
-                          <span className="ml-2 font-medium">{insertBlankPages ? pages.length : 0}</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-              
-              {currentStep === "export" && (
-                <div className="space-y-6 max-w-lg">
-                  <div>
-                    <h2 className="text-xl font-semibold mb-1">Export PDF</h2>
-                    <p className="text-sm text-muted-foreground">Generate and download your coloring book</p>
-                  </div>
-                  
-                  {!isExporting && !pdfUrl && (
-                    <Card>
-                      <CardContent className="pt-6 text-center">
-                        <FileDown className="h-16 w-16 mx-auto mb-4 text-primary/50" />
-                        <h3 className="font-medium mb-2">Ready to Export</h3>
-                        <p className="text-sm text-muted-foreground mb-6">
-                          Your {totalPdfPages}-page PDF is ready to be generated
-                        </p>
-                        <Button
-                          size="lg"
-                          onClick={() => {
-                            setIsExporting(true);
-                            // Simulate export progress
-                            let progress = 0;
-                            const interval = setInterval(() => {
-                              progress += 10;
-                              setExportProgress(progress);
-                              setExportStatus(`Assembling page ${Math.floor(progress / 10)}...`);
-                              if (progress >= 100) {
-                                clearInterval(interval);
-                                setIsExporting(false);
-                                setPdfUrl("#"); // Placeholder
-                                toast.success("PDF generated successfully!");
-                              }
-                            }, 500);
-                          }}
-                        >
-                          <FileDown className="mr-2 h-5 w-5" />
-                          Build PDF
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  )}
-                  
-                  {isExporting && (
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center gap-3 mb-4">
-                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                          <span className="font-medium">Building PDF...</span>
-                        </div>
-                        <Progress value={exportProgress} className="mb-2" />
-                        <p className="text-sm text-muted-foreground">{exportStatus}</p>
-                      </CardContent>
-                    </Card>
-                  )}
-                  
-                  {pdfUrl && (
-                    <Card>
-                      <CardContent className="pt-6 text-center">
-                        <CheckCircle2 className="h-16 w-16 mx-auto mb-4 text-green-500" />
-                        <h3 className="font-medium mb-2">PDF Ready!</h3>
-                        <p className="text-sm text-muted-foreground mb-6">
-                          Your coloring book PDF has been generated
-                        </p>
-                        <div className="flex gap-3 justify-center">
-                          <Button variant="outline" onClick={() => {}}>
-                            <Eye className="mr-2 h-4 w-4" />
-                            Preview
-                          </Button>
-                          <Button>
-                            <Download className="mr-2 h-4 w-4" />
-                            Download PDF
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              )}
-            </div>
-            
-            {/* Navigation Footer */}
-            <div className="p-4 border-t bg-muted/30 flex justify-between">
-              <Button
-                variant="outline"
-                onClick={goToPrevStep}
-                disabled={currentStepIndex === 0}
-              >
-                <ChevronLeft className="mr-2 h-4 w-4" />
-                Back
+          ) : (
+            <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
+              <Eye className="h-12 w-12 text-muted-foreground" />
+              <div className="text-center">
+                <div className="font-medium">No preview available</div>
+                <div className="text-sm text-muted-foreground">Click below to generate PDF preview</div>
+              </div>
+              <Button onClick={() => generatePdf(true)}>
+                Generate Preview
               </Button>
-              
-              {currentStepIndex < EXPORT_STEPS.length - 1 ? (
-                <Button onClick={goToNextStep}>
-                  Next
-                  <ChevronRight className="ml-2 h-4 w-4" />
-                </Button>
-              ) : (
-                <div className="text-sm text-muted-foreground flex items-center">
-                  <Clock className="mr-2 h-4 w-4" />
-                  Export ready
                 </div>
               )}
-            </div>
+              
+          {/* Actions */}
+          <div className="flex justify-between">
+            <Button variant="outline" onClick={() => setCurrentStep("configure")}>
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Back to Configure
+            </Button>
+            <Button onClick={() => goToStep("download")} disabled={!pdfBase64}>
+              Continue to Download
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
           </div>
         </div>
-      </main>
-    </>
-  );
-}
-
-// Loading fallback for Suspense
-function ExportPageLoading() {
-  return (
-    <>
-      <AppTopbar
-        title="Export PDF"
-        subtitle="Loading..."
-      />
-      <main className="flex-1 overflow-hidden flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-          <p className="text-muted-foreground">Loading export settings...</p>
+      )}
+      
+      {/* Download Step */}
+      {currentStep === "download" && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* PDF Download */}
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-center space-y-4">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30">
+                    <FileDown className="h-8 w-8 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg">Download PDF</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Print-ready PDF with all {pages.length} pages
+                    </p>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    US Letter (8.5&quot; x 11&quot;) @ 300 DPI
+                        </div>
+                  <Button 
+                    className="w-full" 
+                    onClick={pdfBase64 ? downloadPdf : () => generatePdf(false)}
+                    disabled={isGeneratingPdf}
+                  >
+                    {isGeneratingPdf ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Generating...
+                      </>
+                    ) : pdfBase64 ? (
+                      <>
+                        <Download className="h-4 w-4 mr-2" />
+                        Download PDF
+                      </>
+                    ) : (
+                      <>
+                        <FileDown className="h-4 w-4 mr-2" />
+                        Generate & Download
+                      </>
+                    )}
+                  </Button>
+                        </div>
+                    </CardContent>
+                  </Card>
+                  
+            {/* ZIP Download */}
+                  <Card>
+              <CardContent className="pt-6">
+                <div className="text-center space-y-4">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-900/30">
+                    <Archive className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                </div>
+                  <div>
+                    <h3 className="font-semibold text-lg">Download ZIP</h3>
+                    <p className="text-sm text-muted-foreground">
+                      All pages as individual PNG files
+                    </p>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Includes metadata.json with prompts
+                  </div>
+                        <Button
+                    className="w-full" 
+                    variant="outline"
+                    onClick={generateZip}
+                    disabled={isGeneratingZip}
+                  >
+                    {isGeneratingZip ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Archive className="h-4 w-4 mr-2" />
+                        Download ZIP
+                      </>
+                    )}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+            </div>
+            
+          {/* Success message */}
+          <Card className="border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30">
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-4">
+                <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400 flex-shrink-0" />
+                <div>
+                  <h4 className="font-medium text-green-900 dark:text-green-100">Your coloring book is ready!</h4>
+                  <p className="text-sm text-green-800 dark:text-green-200 mt-1">
+                    Download your {pages.length}-page coloring book as PDF or ZIP.
+                    All images are processed to US Letter format (2550×3300 pixels) at 300 DPI.
+                  </p>
+                </div>
+            </div>
+            </CardContent>
+          </Card>
+          
+          {/* Back button */}
+          <div className="flex justify-start">
+            <Button variant="outline" onClick={() => setCurrentStep("preview")}>
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Back to Preview
+            </Button>
+          </div>
         </div>
-      </main>
-    </>
+      )}
+    </PageContainer>
   );
 }
 
-// Default export with Suspense boundary
+// Step button component
+function StepButton({
+  step,
+  label,
+  isActive,
+  isComplete,
+  onClick,
+}: {
+  step: number;
+  label: string;
+  isActive: boolean;
+  isComplete: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`
+        flex items-center gap-2 px-4 py-2 rounded-lg transition-colors
+        ${isActive 
+          ? "bg-primary text-primary-foreground" 
+          : isComplete 
+            ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+            : "bg-muted text-muted-foreground hover:bg-muted/80"
+        }
+      `}
+    >
+      <span className={`
+        flex items-center justify-center w-6 h-6 rounded-full text-sm font-medium
+        ${isActive 
+          ? "bg-primary-foreground text-primary" 
+          : isComplete 
+            ? "bg-green-500 text-white"
+            : "bg-background"
+        }
+      `}>
+        {isComplete ? <CheckCircle2 className="h-4 w-4" /> : step}
+      </span>
+      <span className="font-medium">{label}</span>
+    </button>
+  );
+}
+
+// Main export component wrapped in Suspense
 export default function ExportPage() {
   return (
-    <Suspense fallback={<ExportPageLoading />}>
+    <Suspense fallback={
+      <PageContainer>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </PageContainer>
+    }>
       <ExportPageContent />
     </Suspense>
   );
 }
-
