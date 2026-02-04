@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
+import { generateImage, isOpenAIImageGenConfigured, type ImageSize as DalleImageSize } from "@/lib/services/openaiImageGen";
 import { buildColoringPrompt, buildDalle3Prompt } from "@/lib/coloringPromptBuilder";
 import { validateColoringPage } from "@/lib/coloringPageValidator";
 import { hasRequiredConstraints } from "@/lib/coloringPagePromptEnforcer";
 import type { ImageAnalysis, GeneratedPrompt, GenerationResult, ValidationResult } from "@/lib/coloringPageTypes";
+
+// Map sizes to DALL-E 3 compatible sizes (auto defaults to portrait)
+const SIZE_TO_DALLE: Record<string, DalleImageSize> = {
+  "1024x1024": "1024x1024",
+  "1024x1792": "1024x1792",
+  "1792x1024": "1792x1024",
+  "auto": "1024x1792",
+};
 
 const analysisSchema = z.object({
   character: z.object({
@@ -36,7 +44,7 @@ const requestSchema = z.object({
   analysis: analysisSchema,
   count: z.number().int().min(1).max(20).default(1),
   scenes: z.array(z.string()).optional(),
-  size: z.enum(["1024x1024", "1024x1536", "1536x1024", "auto"]).default("1024x1536"),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024", "auto"]).default("1024x1792"),
 });
 
 /**
@@ -122,7 +130,7 @@ export async function POST(request: NextRequest) {
 async function generateSinglePage(
   prompt: GeneratedPrompt,
   analysis: ImageAnalysis,
-  size: "1024x1024" | "1024x1536" | "1536x1024" | "auto"
+  size: "1024x1024" | "1024x1792" | "1792x1024" | "auto"
 ): Promise<GenerationResult> {
   const maxRetries = 3;
   let lastValidation: ValidationResult | undefined;
@@ -176,11 +184,12 @@ Interior areas must remain white/unfilled.`;
       
       console.log(`[generate-coloring-pages] Page ${prompt.pageIndex} attempt ${attempt + 1}, prompt length: ${finalPrompt.length}`);
 
-      // Generate with centralized OpenAI service
+      // Generate with centralized OpenAI service using DALL-E 3 compatible size
+      const dalleSize = SIZE_TO_DALLE[size] || "1024x1792";
       const result = await generateImage({
         prompt: finalPrompt,
         n: 1,
-        size,
+        size: dalleSize,
       });
 
       if (!result.images || result.images.length === 0) {

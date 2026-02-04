@@ -26,7 +26,7 @@ const requestSchema = z.object({
   frameStyle: z.enum(["none", "thin", "corners"]).default("thin"),
   
   // Page configuration
-  size: z.enum(["1024x1024", "1024x1536", "1536x1024"]).default("1024x1536"),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024"]).default("1024x1792"),
   
   // Customization
   labelText: z.string().default("THIS BOOK BELONGS TO:"),
@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
     const result = await generateImage({
       prompt: finalPrompt,
       n: 1,
-      size: size as "1024x1024" | "1024x1536" | "1536x1024",
+      size: size as "1024x1024" | "1024x1792" | "1792x1024",
     });
 
     if (!result.images || result.images.length === 0) {

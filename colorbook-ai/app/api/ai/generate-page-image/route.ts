@@ -79,7 +79,7 @@ Interior areas must remain white/unfilled.`;
     }
 
     // Get the appropriate image size (always portrait)
-    const imageSize = SIZE_MAP[spec.pixelSize] || "1024x1536";
+    const imageSize = SIZE_MAP[spec.pixelSize] || "1024x1792";
 
     let imageBase64: string | undefined;
     let retryCount = 0;

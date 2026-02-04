@@ -119,7 +119,7 @@ export function ExportPDFModal({
           characterDescription: characterProfile?.species 
             ? `a cute ${characterProfile.species}` 
             : "a friendly cartoon animal",
-          size: "1024x1536",
+          size: "1024x1792",
           labelText: "THIS BOOK BELONGS TO:",
           style: "cute",
           autoProcess: true,

@@ -1861,7 +1861,7 @@ export default function CreateColoringBookPage() {
                     {COMPLEXITY_OPTIONS.find(o => o.value === complexity)?.description}
                   </p>
                 </div>
-              </SubSection>
+                    </SubSection>
                     </div>
                   )}
                 </div>

@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
+import { generateImage, isOpenAIImageGenConfigured, type ImageSize as DalleImageSize } from "@/lib/services/openaiImageGen";
 import { z } from "zod";
 import { buildFinalColoringPrompt, type ImageSize } from "@/lib/coloringPagePromptEnforcer";
 import { validateGeneratedImage } from "@/lib/services/imageValidator";
 import type { CharacterIdentityProfile } from "@/lib/characterIdentity";
+
+// Map sizes to DALL-E 3 compatible sizes
+const SIZE_TO_DALLE: Record<string, DalleImageSize> = {
+  "1024x1024": "1024x1024",
+  "1024x1792": "1024x1792",
+  "1792x1024": "1792x1024",
+};
 
 /**
  * Route segment config
@@ -12,7 +19,7 @@ export const maxDuration = 240;
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
-  size: z.enum(["1024x1024", "1024x1536", "1536x1024"]).default("1024x1536"),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024"]).default("1024x1792"),
   isStorybookMode: z.boolean().default(false),
   characterProfile: z.any().optional(),
   validateOutline: z.boolean().default(true),
@@ -90,11 +97,12 @@ export async function POST(
 
         console.log(`[pages/${pageIndex}/regenerate] Attempt ${attempt}/${maxRetries}`);
 
-        // Generate image
+        // Generate image with DALL-E 3 compatible size
+        const dalleSize = SIZE_TO_DALLE[size] || "1024x1792";
         const result = await generateImage({
           prompt: finalPrompt,
           n: 1,
-          size: size as ImageSize,
+          size: dalleSize,
         });
 
         if (!result.images || result.images.length === 0) {

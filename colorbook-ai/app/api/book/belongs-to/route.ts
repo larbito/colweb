@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
+import { generateImage, isOpenAIImageGenConfigured, type ImageSize as DalleImageSize } from "@/lib/services/openaiImageGen";
 import { z } from "zod";
 import {
   buildFinalColoringPrompt,
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
 import { processPageToLetter, LETTER_WIDTH, LETTER_HEIGHT } from "@/lib/imageProcessing";
+
+// Map sizes to DALL-E 3 compatible sizes
+const SIZE_TO_DALLE: Record<string, DalleImageSize> = {
+  "1024x1024": "1024x1024",
+  "1024x1792": "1024x1792",
+  "1792x1024": "1792x1024",
+};
 
 /**
  * Route segment config
@@ -25,7 +32,7 @@ const requestSchema = z.object({
   // Fallback character description if no profile
   characterDescription: z.string().optional(),
   // Page configuration
-  size: z.enum(["1024x1024", "1024x1536", "1536x1024"]).default("1024x1536"),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024"]).default("1024x1792"),
   // Customization
   labelText: z.string().default("THIS BOOK BELONGS TO:"),
   style: z.enum(["cute", "playful", "elegant"]).default("cute"),
@@ -206,11 +213,12 @@ This is a COLORING PAGE: pure black outlines on white background, NO fills, NO g
 
     console.log("[belongs-to] Generating belongs-to page for:", charDesc.slice(0, 80));
 
-    // Generate the image
+    // Generate the image with DALL-E 3 compatible size
+    const dalleSize = SIZE_TO_DALLE[size] || "1024x1792";
     const result = await generateImage({
       prompt: finalPrompt,
       n: 1,
-      size: size as ImageSize,
+      size: dalleSize,
     });
 
     if (!result.images || result.images.length === 0) {

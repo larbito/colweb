@@ -390,7 +390,7 @@ export function buildFinalColoringPrompt(
   const { 
     includeNegativeBlock = true, 
     maxLength = 3500, // STRICT LIMIT: 3500 chars max for better generation quality
-    size = "1024x1536",
+    size = "1024x1792",
     isStorybookMode = false,
     characterConsistencyBlock,
     extraBottomReinforcement = false,

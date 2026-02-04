@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
 
       // Apply the coloring page constraints
       finalPrompt = buildFinalColoringPrompt(sceneDescription, {
-        size: "1024x1536", // Portrait for coloring pages
+        size: "1024x1792", // Portrait for coloring pages (DALL-E 3)
         isStorybookMode: settings.sameCharacter || false,
         characterConsistencyBlock: characterBlock,
       });

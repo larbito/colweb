@@ -55,8 +55,8 @@ export const TRIM_TO_PIXELS: Record<string, string> = {
   "8.5x11": "1024x1326",
   "8×10": "1024x1280",     // 8:10 ratio
   "8x10": "1024x1280",
-  "6×9": "1024x1536",      // 6:9 ratio (2:3)
-  "6x9": "1024x1536",
+  "6×9": "1024x1792",      // 6:9 ratio - DALL-E 3 portrait
+  "6x9": "1024x1792",
   "A4": "1024x1448",       // A4 ratio ~1:1.414
 };
 

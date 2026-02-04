@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 3: Convert scenes to full prompts with ALL constraints
-    const imageSize = (size || "1024x1536") as ImageSize;
+    const imageSize = (size || "1024x1792") as ImageSize;
     const pages: PagePromptItem[] = scenePlan.scenes.map((scene) => {
       const fullPrompt = buildFullPagePrompt({
         scene,
@@ -487,7 +487,7 @@ function buildFullPagePrompt(params: {
   size?: ImageSize;
   complexity?: ComplexityLevel;
 }): string {
-  const { scene, creativeBrief, styleProfile, characterProfile, characterConsistencyBlock, characterBible, size = "1024x1536", complexity = "medium" } = params;
+  const { scene, creativeBrief, styleProfile, characterProfile, characterConsistencyBlock, characterBible, size = "1024x1792", complexity = "medium" } = params;
 
   const parts: string[] = [];
 
@@ -558,9 +558,9 @@ Artwork fills 90-95% of canvas with minimal margins.`);
   parts.push(PAGE_COVERAGE_CONTRACT);
 
   // Orientation-specific
-  if (size === "1536x1024") {
+  if (size === "1792x1024" || size === "1536x1024") {
     parts.push(LANDSCAPE_EXTRA_CONSTRAINTS);
-  } else if (size === "1024x1536") {
+  } else if (size === "1024x1792" || size === "1024x1536") {
     parts.push(PORTRAIT_EXTRA_CONSTRAINTS);
   } else {
     parts.push(SQUARE_EXTRA_CONSTRAINTS);

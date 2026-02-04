@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
+import { generateImage, isOpenAIImageGenConfigured, type ImageSize as DalleImageSize } from "@/lib/services/openaiImageGen";
 import { z } from "zod";
 import {
   buildFinalColoringPrompt,
   getRetryReinforcement,
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
+
+// Map legacy sizes to DALL-E 3 compatible sizes
+const SIZE_TO_DALLE: Record<string, DalleImageSize> = {
+  "1024x1024": "1024x1024",
+  "1024x1792": "1024x1792",
+  "1792x1024": "1792x1024",
+  "1024x1536": "1024x1792", // Legacy portrait -> DALL-E 3 portrait
+  "1536x1024": "1792x1024", // Legacy landscape -> DALL-E 3 landscape
+};
 import {
   type CharacterIdentityProfile,
   buildCharacterIdentityContract,
@@ -163,11 +172,14 @@ export async function POST(request: NextRequest) {
 
         console.log(`[generate-one] Page ${page}: Attempt ${attempt}/${totalAttempts} (prompt: ${finalPrompt.length} chars)`);
 
+        // Map size to DALL-E 3 compatible size
+        const dalleSize = SIZE_TO_DALLE[size] || "1024x1792";
+
         // Generate image with context for error tracking
         const result = await generateImage({
           prompt: finalPrompt,
           n: 1,
-          size: size as ImageSize,
+          size: dalleSize,
         }, {
           pageIndex: page,
         });

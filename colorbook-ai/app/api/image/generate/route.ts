@@ -34,7 +34,7 @@ import {
 const requestSchema = z.object({
   prompt: z.string().min(1, "Prompt is required").max(4000, "Prompt too long"),
   n: z.number().int().min(1).max(4).default(1),
-  size: z.enum(["1024x1024", "1024x1536", "1536x1024", "auto"]).default("1024x1536"),
+  size: z.enum(["1024x1024", "1024x1792", "1792x1024", "auto"]).default("1024x1792"),
   // If true, skip adding constraints (useful if caller already applied them)
   skipConstraints: z.boolean().default(false),
 });
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     const { prompt, n, size, skipConstraints } = parseResult.data;
     
     // Normalize size for constraint checking (auto defaults to portrait)
-    const normalizedSize = (size === "auto" ? "1024x1536" : size) as EnforcerImageSize;
+    const normalizedSize = (size === "auto" ? "1024x1792" : size) as EnforcerImageSize;
 
     // Build the final prompt with no-fill constraints and framing constraints
     let finalPrompt: string;

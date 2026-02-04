@@ -56,12 +56,12 @@ const requestSchema = z.object({
   referenceImageBase64: z.string().optional(), // Reference style image
 });
 
-// GPT Image 1.5 supported sizes: 1024x1024, 1024x1536, 1536x1024, auto
-const SIZE_MAP: Record<string, "1024x1536" | "1024x1024" | "1536x1024"> = {
-  "1024x1326": "1024x1536",
-  "1024x1280": "1024x1536",
-  "1024x1536": "1024x1536",
-  "1024x1448": "1024x1536",
+// DALL-E 3 supported sizes: 1024x1024, 1024x1792, 1792x1024
+const SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = {
+  "1024x1326": "1024x1792",
+  "1024x1280": "1024x1792",
+  "1024x1536": "1024x1792",
+  "1024x1448": "1024x1792",
   "1024x1024": "1024x1024",
 };
 
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
     } = parseResult.data;
 
     const preset = KDP_SIZE_PRESETS[sizePreset] || KDP_SIZE_PRESETS["8.5x11"];
-    const dalleSize = SIZE_MAP[preset.pixels] || "1024x1536";
+    const dalleSize = SIZE_MAP[preset.pixels] || "1024x1792";
 
     const spec: GenerationSpec = {
       trimSize: sizePreset,

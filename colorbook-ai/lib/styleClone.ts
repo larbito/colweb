@@ -246,7 +246,7 @@ export function getAllProjects(): StyleCloneProject[] {
 export const KDP_SIZE_PRESETS: Record<string, { label: string; pixels: string; aspectRatio: string }> = {
   "8.5x11": { label: "8.5 × 11 in (US Letter)", pixels: "1024x1326", aspectRatio: "portrait" },
   "8x10": { label: "8 × 10 in", pixels: "1024x1280", aspectRatio: "portrait" },
-  "6x9": { label: "6 × 9 in", pixels: "1024x1536", aspectRatio: "portrait" },
+  "6x9": { label: "6 × 9 in", pixels: "1024x1792", aspectRatio: "portrait" },
   "A4": { label: "A4 (International)", pixels: "1024x1448", aspectRatio: "portrait" },
   "8.5x8.5": { label: "8.5 × 8.5 in (Square)", pixels: "1024x1024", aspectRatio: "square" },
 };

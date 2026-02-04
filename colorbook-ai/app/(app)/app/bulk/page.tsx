@@ -788,7 +788,7 @@ export default function BulkCreatePage() {
         body: JSON.stringify({
           page: page.index,
           prompt: page.finalPrompt || `Create a coloring page for: ${page.ideaText}`,
-          size: "1024x1536",
+          size: "1024x1792",
           maxRetries: 0,
           isStorybookMode: book.bookMode === "storybook",
           validateOutline: false,

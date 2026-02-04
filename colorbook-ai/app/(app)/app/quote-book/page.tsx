@@ -438,7 +438,7 @@ export default function QuoteBookPage() {
             body: JSON.stringify({
               page: pageItem.page,
               prompt: pageItem.prompt,
-              size: "1024x1536",
+              size: "1024x1792",
               validateOutline: true,
               isQuotePage: true, // Signal this is a quote page - NO CHARACTERS
             }),

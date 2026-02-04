@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateImage, isOpenAIImageGenConfigured } from "@/lib/services/openaiImageGen";
+import { generateImage, isOpenAIImageGenConfigured, type ImageSize as DalleImageSize } from "@/lib/services/openaiImageGen";
 import {
   batchGenerateRequestSchema,
   type BatchGenerateResponse,
@@ -10,6 +10,15 @@ import {
   assertPromptHasConstraints,
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
+
+// Map legacy sizes to DALL-E 3 compatible sizes
+const SIZE_TO_DALLE: Record<string, DalleImageSize> = {
+  "1024x1024": "1024x1024",
+  "1024x1792": "1024x1792",
+  "1792x1024": "1792x1024",
+  "1024x1536": "1024x1792", // Legacy portrait -> DALL-E 3 portrait
+  "1536x1024": "1792x1024", // Legacy landscape -> DALL-E 3 landscape
+};
 
 /**
  * Route segment config - extend timeout for image generation
@@ -148,10 +157,13 @@ RETRY: OUTLINE-ONLY line art, NO fills, fill 90% of canvas, ground at bottom.`;
 
       console.log(`[batch/generate] Page ${pageNumber}: Attempt ${attempt + 1}/${maxRetries + 1}`);
 
+      // Map size to DALL-E 3 compatible size
+      const dalleSize = SIZE_TO_DALLE[size] || "1024x1792";
+
       const result = await generateImage({
         prompt: attemptPrompt,
         n: 1,
-        size,
+        size: dalleSize,
       });
 
       if (result.images && result.images.length > 0) {

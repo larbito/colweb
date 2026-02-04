@@ -92,8 +92,8 @@ export default function BatchGenerationPage() {
 
   // Helper to get image size from orientation
   const getImageSize = () => {
-    if (orientation === "landscape") return "1536x1024";
-    if (orientation === "portrait") return "1024x1536";
+    if (orientation === "landscape") return "1792x1024";
+    if (orientation === "portrait") return "1024x1792";
     return "1024x1024";
   };
 
