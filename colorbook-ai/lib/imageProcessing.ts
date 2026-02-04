@@ -115,19 +115,23 @@ export function bufferToBase64(buffer: Buffer): string {
  * MANDATORY postprocessing for all coloring pages.
  * Converts ANY image to pure black line art on pure white background.
  * 
+ * CRITICAL: This function handles INVERTED images (white lines on black background).
+ * If the image is mostly dark (>50% black), it will be inverted before processing.
+ * 
  * This GUARANTEES the background is always white, even if the model
  * returns a dark or colored canvas.
  * 
  * Algorithm:
  * 1. Convert to grayscale
- * 2. For each pixel:
- *    - If luminance < BINARIZATION_THRESHOLD: set to pure black (0,0,0)
- *    - Else: set to pure white (255,255,255)
- * 3. Output as PNG (lossless)
+ * 2. Detect if image is inverted (mostly dark)
+ * 3. For each pixel:
+ *    - Normal: If luminance < threshold: black (ink), else: white (background)
+ *    - Inverted: If luminance > (255-threshold): black (ink was white), else: white
+ * 4. Output as PNG (lossless)
  * 
  * @param imageBase64 - Input image as base64 string
  * @param threshold - Luminance threshold (default 235). Lower = more pixels become ink.
- * @returns Pure black/white image as base64 string
+ * @returns Pure black/white image as base64 string (ALWAYS white background)
  */
 export async function forcePureBlackWhite(
   imageBase64: string,
@@ -149,15 +153,65 @@ export async function forcePureBlackWhite(
     .raw()
     .toBuffer({ resolveWithObject: true });
   
+  // ============================================
+  // DETECT IF IMAGE IS INVERTED (mostly dark)
+  // ============================================
+  let darkPixels = 0;
+  const totalPixels = grayData.length;
+  const darkThreshold = 128; // Pixels below this are "dark"
+  
+  for (let i = 0; i < grayData.length; i++) {
+    if (grayData[i] < darkThreshold) {
+      darkPixels++;
+    }
+  }
+  
+  const darkRatio = darkPixels / totalPixels;
+  
+  // Detect if image is inverted (mostly dark)
+  // Special case: if nearly 100% dark, the model produced a completely black image
+  // In this case, we can't recover any content - just make it white
+  const isCompletelyBlack = darkRatio > 0.98;
+  const isInverted = darkRatio > 0.5 && !isCompletelyBlack;
+  
+  console.log(`[forcePureBlackWhite] Image analysis: darkRatio=${(darkRatio * 100).toFixed(1)}%, isInverted=${isInverted}, isCompletelyBlack=${isCompletelyBlack}`);
+  
+  // If image is completely black (no content), create a white image
+  // This is better than showing a black rectangle
+  if (isCompletelyBlack) {
+    console.warn(`[forcePureBlackWhite] Image is completely black (${(darkRatio * 100).toFixed(1)}% dark) - creating white canvas`);
+    const outputData = Buffer.alloc(width * height * 3, 255); // All white
+    const outputBuffer = await sharp(outputData, {
+      raw: { width, height, channels: 3 },
+    })
+      .png({ compressionLevel: 6 })
+      .toBuffer();
+    return bufferToBase64(outputBuffer);
+  }
+  
   // Create output buffer (RGB - 3 channels)
   const outputData = Buffer.alloc(width * height * 3);
   
-  // Process each pixel
+  // For inverted images: bright pixels (lines) become black, dark pixels (background) become white
+  // For normal images: dark pixels (lines) become black, bright pixels (background) become white
+  const invertedThreshold = 255 - threshold; // ~20 for detecting lines on dark background
+  
   for (let i = 0; i < grayData.length; i++) {
     const luminance = grayData[i];
     const outputIdx = i * 3;
     
-    if (luminance < threshold) {
+    let isInk: boolean;
+    
+    if (isInverted) {
+      // Inverted image: light pixels are ink (white lines on black background)
+      // Lines on black background have high luminance
+      isInk = luminance > invertedThreshold;
+    } else {
+      // Normal image: dark pixels are ink (black lines on white background)
+      isInk = luminance < threshold;
+    }
+    
+    if (isInk) {
       // Ink pixel -> pure black
       outputData[outputIdx] = 0;     // R
       outputData[outputIdx + 1] = 0; // G
@@ -180,6 +234,8 @@ export async function forcePureBlackWhite(
   })
     .png({ compressionLevel: 6 })
     .toBuffer();
+  
+  console.log(`[forcePureBlackWhite] Output created (${width}x${height}), was inverted: ${isInverted}`);
   
   return bufferToBase64(outputBuffer);
 }
