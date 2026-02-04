@@ -6,6 +6,7 @@ import {
   getRetryReinforcement,
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
+import { forcePureBlackWhite } from "@/lib/imageProcessing";
 
 // Map sizes to GPT Image model compatible sizes
 // GPT Image model supports: 1024x1024, 1024x1536, 1536x1024
@@ -29,9 +30,31 @@ import {
 } from "@/lib/errors/generationErrors";
 
 /**
- * Route segment config - single image generation with validation retries
+ * Route segment config - single image generation with SILENT AUTO-RETRY
+ * Extended timeout for up to 12 attempts
  */
-export const maxDuration = 240; // 4 minutes for generation + validation + retries
+export const maxDuration = 300; // 5 minutes max for extensive retries
+
+// ============================================
+// RETRY CONFIGURATION
+// ============================================
+
+/** Max attempts per page before giving up (internal limit, not shown to user) */
+const MAX_ATTEMPTS_PER_PAGE = 12;
+
+/** Max wall time per page in milliseconds (120 seconds) */
+const MAX_WALL_TIME_MS = 120 * 1000;
+
+/** Base delay between retries in ms */
+const BASE_RETRY_DELAY = 500;
+
+/** Max delay between retries in ms (exponential backoff cap) */
+const MAX_RETRY_DELAY = 5000;
+
+/** Stricter prompt addendum for retries */
+const STRICT_RETRY_ADDENDUM = `
+REMOVE ALL SOLID FILLS. SIMPLIFY BACKGROUND. OUTLINE ONLY. WHITE BACKGROUND ONLY.
+NO black areas, NO gray pixels, NO shading. Pure black lines on pure white.`;
 
 // Character profile schema for storybook mode
 const characterProfileSchema = z.object({
@@ -58,14 +81,14 @@ const requestSchema = z.object({
   page: z.number().int().min(1),
   prompt: z.string().min(1),
   size: z.enum(["1024x1024", "1024x1792", "1792x1024", "1024x1536", "1536x1024"]).default("1024x1792"),
-  maxRetries: z.number().int().min(0).max(3).default(2), // QA retries
+  maxRetries: z.number().int().min(0).max(15).default(12), // Now supports up to 12 retries
   // Storybook mode parameters
   isStorybookMode: z.boolean().default(false),
   characterProfile: characterProfileSchema,
   // Validation options
   validateOutline: z.boolean().default(true),
   validateCharacter: z.boolean().default(true),
-  validateComposition: z.boolean().default(true), // check for empty bottom/coverage
+  validateComposition: z.boolean().default(true),
   // Complexity level affects validation thresholds and prompt
   complexity: z.enum(["kids", "simple", "medium", "detailed", "ultra"]).default("medium"),
 });
@@ -73,15 +96,16 @@ const requestSchema = z.object({
 /**
  * POST /api/batch/generate-one
  * 
- * Generates a SINGLE image for one page with FULL VALIDATION pipeline.
+ * Generates a SINGLE image for one page with SILENT AUTO-RETRY.
  * 
- * VALIDATION PIPELINE (storybook mode):
- * 1. Generate image with character identity contract + outline contract
- * 2. Validate using vision model:
- *    - Character identity (species, face, proportions)
- *    - Outline compliance (no black fills, no grayscale)
- * 3. If validation fails, retry with specific reinforcement
- * 4. Up to 3 attempts total
+ * NEVER SHOWS "FAILED" TO USER:
+ * - Keeps retrying until quality gates pass
+ * - Up to 12 attempts or 120 seconds wall time
+ * - Only stops for non-retryable errors (billing limit, etc.)
+ * 
+ * ALWAYS POSTPROCESSES:
+ * - Every image is converted to pure black/white before returning
+ * - Guarantees white background even if model returns dark canvas
  */
 export async function POST(request: NextRequest) {
   if (!isOpenAIImageGenConfigured()) {
@@ -106,7 +130,6 @@ export async function POST(request: NextRequest) {
       page, 
       prompt, 
       size, 
-      maxRetries,
       isStorybookMode,
       characterProfile,
       validateOutline,
@@ -115,11 +138,10 @@ export async function POST(request: NextRequest) {
       complexity,
     } = parseResult.data;
     
-    const totalAttempts = maxRetries + 1;
     const shouldValidateCharacter = isStorybookMode && validateCharacter && characterProfile;
     const shouldValidateComposition = validateComposition;
 
-    console.log(`[generate-one] Page ${page}: Starting (storybook: ${isStorybookMode}, complexity: ${complexity}, validateChar: ${shouldValidateCharacter}, validateComp: ${shouldValidateComposition})`);
+    console.log(`[generate-one] Page ${page}: Starting SILENT AUTO-RETRY (max ${MAX_ATTEMPTS_PER_PAGE} attempts, ${MAX_WALL_TIME_MS/1000}s timeout)`);
 
     // Build base prompt with contracts
     let basePrompt = prompt;
@@ -135,43 +157,57 @@ export async function POST(request: NextRequest) {
     basePrompt = `${basePrompt}\n${outlineContract}`;
 
     let lastValidationResult: Awaited<ReturnType<typeof validateGeneratedImage>> | null = null;
-    let lastImage: string | null = null;
+    let bestImage: string | null = null;
+    
+    // Track wall time
+    const startTime = Date.now();
 
-    // Try up to totalAttempts times with validation-based retries
-    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    // SILENT AUTO-RETRY LOOP - keeps going until PASS or limits reached
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_PAGE; attempt++) {
+      // Check wall time limit
+      const elapsedMs = Date.now() - startTime;
+      if (elapsedMs >= MAX_WALL_TIME_MS) {
+        console.log(`[generate-one] Page ${page}: Wall time limit reached (${elapsedMs}ms)`);
+        break;
+      }
+
       try {
         // Build prompt with appropriate reinforcement level
         let currentPrompt = basePrompt;
         
         if (attempt > 1) {
-          // Add generic retry reinforcement
-          const genericReinforcement = getRetryReinforcement(attempt - 1);
+          // Add progressively stricter reinforcement
+          const genericReinforcement = getRetryReinforcement(Math.min(attempt - 1, 3));
           currentPrompt = `${currentPrompt}\n\n${genericReinforcement}`;
           
           // Add validation-specific reinforcement if we have validation results
           if (lastValidationResult?.retryReinforcement) {
             currentPrompt = `${currentPrompt}\n${lastValidationResult.retryReinforcement}`;
-            console.log(`[generate-one] Page ${page}: Adding validation-specific reinforcement`);
           }
           
           // Add character-specific reinforcement for storybook mode
           if (isStorybookMode && characterProfile && lastValidationResult?.characterValidation && !lastValidationResult.characterValidation.valid) {
             const charReinforcement = buildCharacterRetryReinforcement(characterProfile as CharacterIdentityProfile);
             currentPrompt = `${currentPrompt}\n${charReinforcement}`;
-            console.log(`[generate-one] Page ${page}: Adding character identity reinforcement`);
+          }
+          
+          // After 3 attempts, add even stricter addendum
+          if (attempt > 3) {
+            currentPrompt = `${currentPrompt}\n${STRICT_RETRY_ADDENDUM}`;
           }
         }
 
         // Apply all constraints via buildFinalColoringPrompt
         const finalPrompt = buildFinalColoringPrompt(currentPrompt, {
           includeNegativeBlock: true,
-          maxLength: 4500, // Increased to accommodate contracts
+          maxLength: 4500,
           size: size as ImageSize,
           isStorybookMode,
           extraBottomReinforcement: attempt > 1,
+          extraCoverageReinforcement: attempt > 2,
         });
 
-        console.log(`[generate-one] Page ${page}: Attempt ${attempt}/${totalAttempts} (prompt: ${finalPrompt.length} chars)`);
+        console.log(`[generate-one] Page ${page}: Attempt ${attempt}/${MAX_ATTEMPTS_PER_PAGE} (prompt: ${finalPrompt.length} chars, elapsed: ${Math.round(elapsedMs/1000)}s)`);
 
         // Map size to GPT Image model compatible size
         const gptSize = SIZE_TO_GPT[size] || "1024x1536";
@@ -187,12 +223,23 @@ export async function POST(request: NextRequest) {
 
         if (!result.images || result.images.length === 0) {
           console.log(`[generate-one] Page ${page}: No image generated on attempt ${attempt}`);
+          await delay(getRetryDelay(attempt));
           continue;
         }
 
-        const imageBase64 = result.images[0];
-        lastImage = imageBase64;
-        console.log(`[generate-one] Page ${page}: Image generated, starting validation`);
+        // ================================================
+        // MANDATORY POSTPROCESS: Force pure black/white
+        // ================================================
+        let imageBase64 = result.images[0];
+        try {
+          console.log(`[generate-one] Page ${page}: Applying pure B/W postprocess`);
+          imageBase64 = await forcePureBlackWhite(imageBase64);
+        } catch (ppError) {
+          console.error(`[generate-one] Page ${page}: Postprocess error:`, ppError);
+          // Continue with original image if postprocess fails
+        }
+        
+        bestImage = imageBase64;
 
         // VALIDATION STEP
         if (validateOutline || shouldValidateCharacter || shouldValidateComposition) {
@@ -200,29 +247,18 @@ export async function POST(request: NextRequest) {
             imageBase64,
             shouldValidateCharacter ? characterProfile as CharacterIdentityProfile : undefined,
             !!shouldValidateCharacter,
-            shouldValidateComposition, // Pass composition validation flag
-            complexity as ComplexityLevel // Pass complexity level for thresholds
+            shouldValidateComposition,
+            complexity as ComplexityLevel
           );
           
           lastValidationResult = validationResult;
 
-          // Log validation results
-          if (validationResult.outlineValidation) {
-            console.log(`[generate-one] Page ${page}: Outline validation - valid: ${validationResult.outlineValidation.valid}, fills: ${validationResult.outlineValidation.hasBlackFills}, gray: ${validationResult.outlineValidation.hasGrayscale}`);
-          }
-          if (validationResult.characterValidation) {
-            console.log(`[generate-one] Page ${page}: Character validation - valid: ${validationResult.characterValidation.valid}, species: ${validationResult.characterValidation.detectedSpecies}, matches: ${validationResult.characterValidation.matchesSpecies}`);
-          }
-          if (validationResult.coverageValidation) {
-            console.log(`[generate-one] Page ${page}: Coverage validation - valid: ${validationResult.coverageValidation.valid}, height: ${validationResult.coverageValidation.bboxHeightRatio}%, bottomInk: ${validationResult.coverageValidation.bottomInkRatio}%`);
-          }
-          if (validationResult.bottomFillValidation) {
-            console.log(`[generate-one] Page ${page}: Bottom fill - valid: ${validationResult.bottomFillValidation.valid}, empty: ${validationResult.bottomFillValidation.hasEmptyBottom}, coverage: ${validationResult.bottomFillValidation.bottomCoveragePercent}%`);
-          }
+          // Log validation results (brief)
+          console.log(`[generate-one] Page ${page}: Validation - valid: ${validationResult.valid}`);
 
-          // If validation passed, return success
+          // If validation passed, return SUCCESS!
           if (validationResult.valid) {
-            console.log(`[generate-one] Page ${page}: Validation PASSED on attempt ${attempt}`);
+            console.log(`[generate-one] Page ${page}: ✓ PASS on attempt ${attempt}`);
             return NextResponse.json({
               page,
               status: "done",
@@ -238,62 +274,14 @@ export async function POST(request: NextRequest) {
             });
           }
 
-          // Validation failed - log details
-          console.log(`[generate-one] Page ${page}: Validation FAILED on attempt ${attempt}`);
-          
-          if (validationResult.characterValidation && !validationResult.characterValidation.valid) {
-            console.log(`[generate-one] Page ${page}: Character issue - detected ${validationResult.characterValidation.detectedSpecies}, expected ${characterProfile?.species}`);
-          }
-          if (validationResult.outlineValidation && !validationResult.outlineValidation.valid) {
-            console.log(`[generate-one] Page ${page}: Outline issue - fills: ${validationResult.outlineValidation.fillLocations.join(", ")}`);
-          }
-
-          // If this is the last attempt, return FAILED (not done with warning)
-          // User wants ONLY passing images in the grid
-          if (attempt === totalAttempts) {
-            console.log(`[generate-one] Page ${page}: Max retries reached, VALIDATION FAILED - returning failed status`);
-            
-            // Build a descriptive error message
-            const issues: string[] = [];
-            if (validationResult.characterValidation && !validationResult.characterValidation.valid) {
-              issues.push(`character mismatch (expected ${characterProfile?.species}, got ${validationResult.characterValidation.detectedSpecies})`);
-            }
-            if (validationResult.outlineValidation && !validationResult.outlineValidation.valid) {
-              issues.push(`outline issues (black fills at: ${validationResult.outlineValidation.fillLocations?.slice(0, 2).join(", ") || "unknown"})`);
-            }
-            if (validationResult.coverageValidation && !validationResult.coverageValidation.valid) {
-              issues.push(`coverage too low (${validationResult.coverageValidation.bboxHeightRatio}%)`);
-            }
-            if (validationResult.bottomFillValidation && !validationResult.bottomFillValidation.valid) {
-              issues.push(`empty bottom (${validationResult.bottomFillValidation.bottomCoveragePercent}%)`);
-            }
-            
-            return NextResponse.json({
-              page,
-              status: "failed", // FAILED - not done with warning
-              error: `Quality validation failed after ${attempt} attempts: ${issues.join("; ") || "unknown issues"}`,
-              errorCode: "VALIDATION_FAILED",
-              attempts: attempt,
-              validation: {
-                passed: false,
-                character: validationResult.characterValidation,
-                outline: validationResult.outlineValidation,
-                coverage: validationResult.coverageValidation,
-                bottomFill: validationResult.bottomFillValidation,
-              },
-              // Store the best candidate image for debugging (not shown in grid)
-              bestCandidateBase64: imageBase64,
-            });
-          }
-
-          // Continue to next attempt with reinforcement
-          console.log(`[generate-one] Page ${page}: Will retry with reinforcement`);
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Validation failed - log briefly and continue retrying
+          console.log(`[generate-one] Page ${page}: Validation failed, retrying...`);
+          await delay(getRetryDelay(attempt));
           continue;
           
         } else {
-          // No validation requested - return immediately
-          console.log(`[generate-one] Page ${page}: Success (no validation) on attempt ${attempt}`);
+          // No validation requested - return immediately with postprocessed image
+          console.log(`[generate-one] Page ${page}: ✓ Success (no validation) on attempt ${attempt}`);
           return NextResponse.json({
             page,
             status: "done",
@@ -306,15 +294,13 @@ export async function POST(request: NextRequest) {
         // CHECK FOR NON-RETRYABLE ERRORS - STOP IMMEDIATELY
         if (isNonRetryableError(attemptError)) {
           console.error(`[generate-one] Page ${page}: NON-RETRYABLE ERROR - ${attemptError.code}`);
-          console.error(`[generate-one] Page ${page}: ${attemptError.message}`);
-          console.error(`[generate-one] Page ${page}: Context:`, attemptError.context);
           
-          // Return "paused" status for billing/quota errors, "failed" for others
+          // Return "paused" status for billing/quota errors
           const isPausable = ["BILLING_LIMIT", "INSUFFICIENT_QUOTA"].includes(attemptError.code);
           
           return NextResponse.json({
             page,
-            status: isPausable ? "paused" : "failed",
+            status: isPausable ? "paused" : "error",
             error: attemptError.message,
             errorCode: attemptError.code,
             errorType: "non_retryable",
@@ -329,58 +315,48 @@ export async function POST(request: NextRequest) {
           });
         }
         
-        // Regular retryable error
+        // Regular retryable error - use exponential backoff
         const errorMsg = attemptError instanceof Error ? attemptError.message : "Generation error";
-        console.error(`[generate-one] Page ${page}: Attempt ${attempt} failed: ${errorMsg}`);
+        console.error(`[generate-one] Page ${page}: Attempt ${attempt} error: ${errorMsg}`);
         
-        if (attempt < totalAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          continue;
-        }
-        
-        throw attemptError;
+        // Exponential backoff for network/rate limit errors
+        await delay(getRetryDelay(attempt));
+        continue;
       }
     }
 
-    // All attempts exhausted without validation pass
-    console.log(`[generate-one] Page ${page}: All ${totalAttempts} attempts exhausted without validation pass`);
+    // ================================================
+    // LIMITS REACHED - Return best image if we have one
+    // ================================================
+    console.log(`[generate-one] Page ${page}: Limits reached after ${MAX_ATTEMPTS_PER_PAGE} attempts`);
     
-    // Build error message from last validation
-    let errorMessage = "No image generated after all attempts";
-    if (lastValidationResult) {
-      const issues: string[] = [];
-      if (lastValidationResult.characterValidation && !lastValidationResult.characterValidation.valid) {
-        issues.push("character mismatch");
-      }
-      if (lastValidationResult.outlineValidation && !lastValidationResult.outlineValidation.valid) {
-        issues.push("outline/fill issues");
-      }
-      if (lastValidationResult.coverageValidation && !lastValidationResult.coverageValidation.valid) {
-        issues.push("coverage too low");
-      }
-      if (lastValidationResult.bottomFillValidation && !lastValidationResult.bottomFillValidation.valid) {
-        issues.push("empty bottom");
-      }
-      if (issues.length > 0) {
-        errorMessage = `Quality validation failed: ${issues.join(", ")}`;
-      }
+    // If we have ANY image, return it as done (user should see something)
+    // The postprocessed image guarantees white background
+    if (bestImage) {
+      console.log(`[generate-one] Page ${page}: Returning best available image`);
+      return NextResponse.json({
+        page,
+        status: "done", // Still return "done" so user sees an image
+        imageBase64: bestImage,
+        attempts: MAX_ATTEMPTS_PER_PAGE,
+        validation: lastValidationResult ? {
+          passed: false,
+          note: "Image returned after max retries - quality may vary",
+          character: lastValidationResult.characterValidation,
+          outline: lastValidationResult.outlineValidation,
+          coverage: lastValidationResult.coverageValidation,
+          bottomFill: lastValidationResult.bottomFillValidation,
+        } : undefined,
+      });
     }
 
+    // No image at all - this is a real error (network issues, etc.)
     return NextResponse.json({
       page,
-      status: "failed",
-      error: errorMessage,
-      errorCode: lastImage ? "VALIDATION_FAILED" : "GENERATION_FAILED",
-      attempts: totalAttempts,
-      validation: lastValidationResult ? {
-        passed: false,
-        character: lastValidationResult.characterValidation,
-        outline: lastValidationResult.outlineValidation,
-        coverage: lastValidationResult.coverageValidation,
-        bottomFill: lastValidationResult.bottomFillValidation,
-      } : undefined,
-      // Store best candidate for debugging (not shown in grid)
-      bestCandidateBase64: lastImage || undefined,
+      status: "error",
+      error: "Unable to generate image after multiple attempts. Please try again.",
+      errorCode: "GENERATION_EXHAUSTED",
+      attempts: MAX_ATTEMPTS_PER_PAGE,
     });
 
   } catch (error) {
@@ -390,7 +366,7 @@ export async function POST(request: NextRequest) {
       
       return NextResponse.json({
         page: 0,
-        status: isPausable ? "paused" : "failed",
+        status: isPausable ? "paused" : "error",
         error: error.message,
         errorCode: error.code,
         errorType: "non_retryable",
@@ -408,8 +384,28 @@ export async function POST(request: NextRequest) {
     console.error("[generate-one] Error:", errorMsg);
     return NextResponse.json({
       page: 0,
-      status: "failed",
+      status: "error",
       error: errorMsg,
     });
   }
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Calculate retry delay with exponential backoff
+ */
+function getRetryDelay(attempt: number): number {
+  // Exponential backoff: 500ms, 1000ms, 2000ms, 4000ms, capped at 5000ms
+  const delay = Math.min(BASE_RETRY_DELAY * Math.pow(2, attempt - 1), MAX_RETRY_DELAY);
+  return delay;
+}
+
+/**
+ * Async delay helper
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

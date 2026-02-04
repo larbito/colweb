@@ -374,6 +374,14 @@ FULL-PAGE composition: Art MUST fill the ENTIRE page with balanced top and botto
 - 2-4 foreground props at bottom. NO floating art.
 AVOID: fills, shading, grayscale, borders, empty bands, tiny centered subject.`;
 
+/**
+ * MANDATORY WHITE BACKGROUND CONSTRAINT - ALWAYS appended to every prompt
+ * This ensures the model generates pure white backgrounds
+ */
+export const WHITE_BACKGROUND_CONSTRAINT = `
+PURE WHITE BACKGROUND ONLY (RGB 255,255,255). BLACK OUTLINE ONLY.
+NO black background, NO colored background, NO gray background, NO shading, NO gradients, NO textures. NO filled black areas.`;
+
 export function buildFinalColoringPrompt(
   userPrompt: string,
   options: {
@@ -453,6 +461,9 @@ export function buildFinalColoringPrompt(
     const shortNegatives = NEGATIVE_PROMPT_LIST.slice(0, 10).join(", ");
     parts.push(`\nAVOID: ${shortNegatives}.`);
   }
+
+  // ALWAYS append white background constraint at the very end (MANDATORY)
+  parts.push(WHITE_BACKGROUND_CONSTRAINT);
 
   let finalPrompt = parts.join("\n");
 

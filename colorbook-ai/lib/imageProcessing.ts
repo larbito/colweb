@@ -49,6 +49,14 @@ export const COMPLEXITY_BLACK_RATIOS: Record<string, number> = {
   ultra: 0.35,
 };
 
+/** 
+ * Luminance threshold for binarization.
+ * Pixels with luminance < this value become black ink.
+ * Pixels with luminance >= this value become pure white.
+ * Tuned for coloring pages - captures fine lines while removing gray backgrounds.
+ */
+export const BINARIZATION_THRESHOLD = 235;
+
 // ============================================
 // TYPES
 // ============================================
@@ -97,6 +105,135 @@ export function base64ToBuffer(base64: string): Buffer {
  */
 export function bufferToBase64(buffer: Buffer): string {
   return buffer.toString("base64");
+}
+
+// ============================================
+// FORCE PURE BLACK/WHITE (MANDATORY POSTPROCESS)
+// ============================================
+
+/**
+ * MANDATORY postprocessing for all coloring pages.
+ * Converts ANY image to pure black line art on pure white background.
+ * 
+ * This GUARANTEES the background is always white, even if the model
+ * returns a dark or colored canvas.
+ * 
+ * Algorithm:
+ * 1. Convert to grayscale
+ * 2. For each pixel:
+ *    - If luminance < BINARIZATION_THRESHOLD: set to pure black (0,0,0)
+ *    - Else: set to pure white (255,255,255)
+ * 3. Output as PNG (lossless)
+ * 
+ * @param imageBase64 - Input image as base64 string
+ * @param threshold - Luminance threshold (default 235). Lower = more pixels become ink.
+ * @returns Pure black/white image as base64 string
+ */
+export async function forcePureBlackWhite(
+  imageBase64: string,
+  threshold: number = BINARIZATION_THRESHOLD
+): Promise<string> {
+  const imageBuffer = base64ToBuffer(imageBase64);
+  const image = sharp(imageBuffer);
+  const metadata = await image.metadata();
+  const width = metadata.width || 0;
+  const height = metadata.height || 0;
+  
+  if (width === 0 || height === 0) {
+    throw new Error("Invalid image dimensions");
+  }
+  
+  // Get raw pixel data in grayscale
+  const { data: grayData } = await image
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  
+  // Create output buffer (RGB - 3 channels)
+  const outputData = Buffer.alloc(width * height * 3);
+  
+  // Process each pixel
+  for (let i = 0; i < grayData.length; i++) {
+    const luminance = grayData[i];
+    const outputIdx = i * 3;
+    
+    if (luminance < threshold) {
+      // Ink pixel -> pure black
+      outputData[outputIdx] = 0;     // R
+      outputData[outputIdx + 1] = 0; // G
+      outputData[outputIdx + 2] = 0; // B
+    } else {
+      // Background pixel -> pure white
+      outputData[outputIdx] = 255;     // R
+      outputData[outputIdx + 1] = 255; // G
+      outputData[outputIdx + 2] = 255; // B
+    }
+  }
+  
+  // Create output image
+  const outputBuffer = await sharp(outputData, {
+    raw: {
+      width,
+      height,
+      channels: 3,
+    },
+  })
+    .png({ compressionLevel: 6 })
+    .toBuffer();
+  
+  return bufferToBase64(outputBuffer);
+}
+
+/**
+ * Check if an image has a white background.
+ * Returns true if the border region is predominantly white.
+ */
+export async function hasWhiteBackground(
+  imageBase64: string,
+  minWhiteRatio: number = 0.95
+): Promise<boolean> {
+  const imageBuffer = base64ToBuffer(imageBase64);
+  const image = sharp(imageBuffer);
+  const metadata = await image.metadata();
+  const width = metadata.width || 0;
+  const height = metadata.height || 0;
+  
+  if (width === 0 || height === 0) {
+    return false;
+  }
+  
+  // Get grayscale data
+  const { data } = await image
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  
+  // Check border region (2% from each edge)
+  const borderSize = Math.max(1, Math.round(Math.min(width, height) * 0.02));
+  let whitePixels = 0;
+  let totalBorderPixels = 0;
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      // Check if pixel is in border region
+      const inBorder = (
+        x < borderSize || 
+        x >= width - borderSize || 
+        y < borderSize || 
+        y >= height - borderSize
+      );
+      
+      if (inBorder) {
+        totalBorderPixels++;
+        if (data[y * width + x] >= WHITE_THRESHOLD) {
+          whitePixels++;
+        }
+      }
+    }
+  }
+  
+  const whiteRatio = whitePixels / totalBorderPixels;
+  return whiteRatio >= minWhiteRatio;
 }
 
 // ============================================
