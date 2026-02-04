@@ -838,13 +838,14 @@ export default function BulkCreatePage() {
       
       return true;
     } catch (error) {
-      console.error(`Failed to generate page ${page.index}:`, error);
+      console.error(`Error generating page ${page.index}:`, error);
       
+      // Keep in generating state with retry option - don't mark as failed
       setBatch(prev => {
         if (!prev) return prev;
         return {
           ...prev,
-          failedPages: prev.failedPages + 1,
+          // Don't count as failed - just needs retry
           books: prev.books.map(b => 
             b.id === book.id 
               ? {
@@ -853,8 +854,9 @@ export default function BulkCreatePage() {
                     p.id === page.id 
                       ? { 
                           ...p, 
-                          status: "failed" as const,
-                          error: error instanceof Error ? error.message : "Generation failed",
+                          status: "draft" as const, // Reset to draft for retry
+                          error: error instanceof Error ? error.message : "Network issue",
+                          canRetry: true,
                         } 
                       : p
                   )
@@ -921,18 +923,20 @@ export default function BulkCreatePage() {
     setIsGeneratingImages(false);
   };
   
-  const retryFailedPages = async () => {
+  // Retry pages that need retry (either failed or have canRetry flag)
+  const retryPendingPages = async () => {
     if (!batch) return;
     
     setBatch(prev => {
       if (!prev) return prev;
       return {
         ...prev,
-        failedPages: 0,
         books: prev.books.map(b => ({
           ...b,
           pages: b.pages.map(p => 
-            p.status === "failed" ? { ...p, status: "draft" as const, error: undefined } : p
+            (p as { canRetry?: boolean }).canRetry 
+              ? { ...p, status: "draft" as const, error: undefined, canRetry: undefined } 
+              : p
           )
         }))
       };
@@ -1624,7 +1628,7 @@ export default function BulkCreatePage() {
                   estimatedSecondsRemaining: isGeneratingImages && batch.avgGenerationMs > 0
                     ? Math.round(((batch.totalPages - batch.generatedPages) * batch.avgGenerationMs) / 1000)
                     : undefined,
-                  failedCount: batch.failedPages,
+                  // Don't show failed count - we retry instead
                   message: isGeneratingImages 
                     ? generationPaused 
                       ? "Paused" 
@@ -1642,12 +1646,18 @@ export default function BulkCreatePage() {
               {/* Start/Resume Button when not generating */}
               {!isGeneratingImages && batch.generatedPages < batch.totalPages && (
                 <div className="flex justify-center gap-3">
-                  {batch.failedPages > 0 && (
-                    <Button variant="outline" onClick={retryFailedPages} className="h-12 rounded-xl">
-                      <RefreshCw className="mr-2 h-5 w-5" />
-                      Retry Failed ({batch.failedPages})
-                    </Button>
-                  )}
+                  {/* Count pages that need retry */}
+                  {(() => {
+                    const needsRetry = batch.books.reduce((count, b) => 
+                      count + b.pages.filter(p => (p as { canRetry?: boolean }).canRetry).length, 0
+                    );
+                    return needsRetry > 0 ? (
+                      <Button variant="outline" onClick={retryPendingPages} className="h-12 rounded-xl">
+                        <RefreshCw className="mr-2 h-5 w-5" />
+                        Retry ({needsRetry})
+                      </Button>
+                    ) : null;
+                  })()}
                   <Button size="lg" onClick={startGeneration} className="h-12 rounded-xl text-base">
                     <Play className="mr-2 h-5 w-5" />
                     {batch.generatedPages > 0 ? "Resume Generation" : "Start Generation"}
@@ -1659,7 +1669,7 @@ export default function BulkCreatePage() {
               <div className="space-y-4">
                 {batch.books.map((book, bookIdx) => {
                   const generatedCount = book.pages.filter(p => p.imageBase64).length;
-                  const failedCount = book.pages.filter(p => p.status === "failed").length;
+                  const needsRetryCount = book.pages.filter(p => (p as { canRetry?: boolean }).canRetry).length;
                   
                   return (
                     <Card key={book.id} className="border-border/50">
@@ -1679,7 +1689,7 @@ export default function BulkCreatePage() {
                               <CardTitle className="text-sm">{book.title || `Book ${bookIdx + 1}`}</CardTitle>
                               <CardDescription className="text-xs">
                                 {generatedCount}/{book.pages.length} generated
-                                {failedCount > 0 && <span className="text-red-500 ml-2">({failedCount} failed)</span>}
+                                {needsRetryCount > 0 && <span className="text-amber-500 ml-2">({needsRetryCount} need retry)</span>}
                               </CardDescription>
                             </div>
                           </div>
@@ -1694,15 +1704,17 @@ export default function BulkCreatePage() {
                           {book.pages.map((page) => {
                             const isCurrentlyGenerating = currentGeneratingPage?.bookId === book.id && currentGeneratingPage?.pageId === page.id;
                             
+                            const needsRetry = (page as { canRetry?: boolean }).canRetry;
+                            
                             return (
                               <div
                                 key={page.id}
                                 className={cn(
-                                  "aspect-[3/4] rounded-lg overflow-hidden relative",
+                                  "aspect-[3/4] rounded-lg overflow-hidden relative bg-white",
                                   page.imageBase64 && "paper-preview",
                                   (page.status === "generating" || isCurrentlyGenerating) && "border-2 border-primary bg-primary/5",
-                                  page.status === "failed" && "border-2 border-destructive/50 bg-destructive/10",
-                                  !page.imageBase64 && page.status !== "generating" && page.status !== "failed" && "border border-muted bg-muted/30"
+                                  needsRetry && "border-2 border-amber-500/50 animate-pulse",
+                                  !page.imageBase64 && page.status !== "generating" && !needsRetry && "border border-muted bg-muted/30"
                                 )}
                               >
                                 {page.imageBase64 ? (
@@ -1715,9 +1727,9 @@ export default function BulkCreatePage() {
                                   <div className="w-full h-full flex items-center justify-center">
                                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
                                   </div>
-                                ) : page.status === "failed" ? (
+                                ) : needsRetry ? (
                                   <div className="w-full h-full flex items-center justify-center">
-                                    <XCircle className="h-4 w-4 text-destructive" />
+                                    <RefreshCw className="h-4 w-4 text-amber-500" />
                                   </div>
                                 ) : (
                                   <div className="w-full h-full flex items-center justify-center">

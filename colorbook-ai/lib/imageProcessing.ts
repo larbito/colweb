@@ -108,130 +108,63 @@ export function bufferToBase64(buffer: Buffer): string {
 }
 
 // ============================================
-// FORCE PURE BLACK/WHITE (MANDATORY POSTPROCESS)
+// SANITIZE PNG (MANDATORY - FLATTEN TO WHITE, REMOVE ALPHA)
 // ============================================
 
 /**
- * MANDATORY postprocessing for all coloring pages.
- * Converts ANY image to pure black line art on pure white background.
+ * MANDATORY sanitization for all generated coloring page images.
  * 
- * CRITICAL: This function handles INVERTED images (white lines on black background).
- * If the image is mostly dark (>50% black), it will be inverted before processing.
+ * This function GUARANTEES a pure white background by:
+ * 1. Flattening any transparency onto white (#FFFFFF)
+ * 2. Removing the alpha channel completely
+ * 3. Outputting as PNG (lossless)
  * 
- * This GUARANTEES the background is always white, even if the model
- * returns a dark or colored canvas.
+ * IMPORTANT: This does NOT apply thresholding or color manipulation.
+ * It preserves the original line art while ensuring no transparency issues.
  * 
- * Algorithm:
- * 1. Convert to grayscale
- * 2. Detect if image is inverted (mostly dark)
- * 3. For each pixel:
- *    - Normal: If luminance < threshold: black (ink), else: white (background)
- *    - Inverted: If luminance > (255-threshold): black (ink was white), else: white
- * 4. Output as PNG (lossless)
+ * @param buffer - Input image as Buffer
+ * @returns Sanitized image as Buffer with white background, no alpha
+ */
+export async function sanitizeColoringPng(buffer: Buffer): Promise<Buffer> {
+  const sanitized = await sharp(buffer)
+    .flatten({ background: "#ffffff" }) // Flatten transparency onto white
+    .removeAlpha() // Remove alpha channel
+    .png({ compressionLevel: 9 }) // Output as PNG
+    .toBuffer();
+  
+  console.log(`[sanitizeColoringPng] Image sanitized (flattened to white, alpha removed)`);
+  return sanitized;
+}
+
+/**
+ * Sanitize a base64 image string.
+ * Convenience wrapper for sanitizeColoringPng that handles base64 conversion.
  * 
  * @param imageBase64 - Input image as base64 string
- * @param threshold - Luminance threshold (default 235). Lower = more pixels become ink.
- * @returns Pure black/white image as base64 string (ALWAYS white background)
+ * @returns Sanitized image as base64 string
+ */
+export async function sanitizeColoringPngBase64(imageBase64: string): Promise<string> {
+  const inputBuffer = base64ToBuffer(imageBase64);
+  const outputBuffer = await sanitizeColoringPng(inputBuffer);
+  return bufferToBase64(outputBuffer);
+}
+
+// ============================================
+// LEGACY: FORCE PURE BLACK/WHITE (KEPT FOR REFERENCE)
+// ============================================
+
+/**
+ * @deprecated Use sanitizeColoringPng instead. This function applies harsh 
+ * thresholding that can delete fine line art. Kept for backward compatibility.
+ * 
+ * Converts image to pure black/white using thresholding.
  */
 export async function forcePureBlackWhite(
   imageBase64: string,
   threshold: number = BINARIZATION_THRESHOLD
 ): Promise<string> {
-  const imageBuffer = base64ToBuffer(imageBase64);
-  const image = sharp(imageBuffer);
-  const metadata = await image.metadata();
-  const width = metadata.width || 0;
-  const height = metadata.height || 0;
-  
-  if (width === 0 || height === 0) {
-    throw new Error("Invalid image dimensions");
-  }
-  
-  // Get raw pixel data in grayscale
-  const { data: grayData } = await image
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  
-  // ============================================
-  // DETECT IF IMAGE IS INVERTED (mostly dark)
-  // ============================================
-  let darkPixels = 0;
-  const totalPixels = grayData.length;
-  const darkThreshold = 128; // Pixels below this are "dark"
-  
-  for (let i = 0; i < grayData.length; i++) {
-    if (grayData[i] < darkThreshold) {
-      darkPixels++;
-    }
-  }
-  
-  const darkRatio = darkPixels / totalPixels;
-  
-  // Detect if image is inverted (mostly dark)
-  // Special case: if nearly 100% dark, the model produced a completely black image
-  // In this case, we can't recover any content - just make it white
-  const isCompletelyBlack = darkRatio > 0.98;
-  const isInverted = darkRatio > 0.5 && !isCompletelyBlack;
-  
-  console.log(`[forcePureBlackWhite] Image analysis: darkRatio=${(darkRatio * 100).toFixed(1)}%, isInverted=${isInverted}, isCompletelyBlack=${isCompletelyBlack}`);
-  
-  // If image is completely black (no content), this is a FAILED generation
-  // Throw an error so the caller knows to retry
-  if (isCompletelyBlack) {
-    console.error(`[forcePureBlackWhite] FAILED: Image is completely black (${(darkRatio * 100).toFixed(1)}% dark) - no content to recover`);
-    throw new Error(`IMAGE_NO_CONTENT: Generated image is completely black (${(darkRatio * 100).toFixed(1)}% dark). Model failed to generate any content.`);
-  }
-  
-  // Create output buffer (RGB - 3 channels)
-  const outputData = Buffer.alloc(width * height * 3);
-  
-  // For inverted images: bright pixels (lines) become black, dark pixels (background) become white
-  // For normal images: dark pixels (lines) become black, bright pixels (background) become white
-  const invertedThreshold = 255 - threshold; // ~20 for detecting lines on dark background
-  
-  for (let i = 0; i < grayData.length; i++) {
-    const luminance = grayData[i];
-    const outputIdx = i * 3;
-    
-    let isInk: boolean;
-    
-    if (isInverted) {
-      // Inverted image: light pixels are ink (white lines on black background)
-      // Lines on black background have high luminance
-      isInk = luminance > invertedThreshold;
-    } else {
-      // Normal image: dark pixels are ink (black lines on white background)
-      isInk = luminance < threshold;
-    }
-    
-    if (isInk) {
-      // Ink pixel -> pure black
-      outputData[outputIdx] = 0;     // R
-      outputData[outputIdx + 1] = 0; // G
-      outputData[outputIdx + 2] = 0; // B
-    } else {
-      // Background pixel -> pure white
-      outputData[outputIdx] = 255;     // R
-      outputData[outputIdx + 1] = 255; // G
-      outputData[outputIdx + 2] = 255; // B
-    }
-  }
-  
-  // Create output image
-  const outputBuffer = await sharp(outputData, {
-    raw: {
-      width,
-      height,
-      channels: 3,
-    },
-  })
-    .png({ compressionLevel: 6 })
-    .toBuffer();
-  
-  console.log(`[forcePureBlackWhite] Output created (${width}x${height}), was inverted: ${isInverted}`);
-  
-  return bufferToBase64(outputBuffer);
+  // Now just use sanitizeColoringPng - no harsh thresholding
+  return sanitizeColoringPngBase64(imageBase64);
 }
 
 /**

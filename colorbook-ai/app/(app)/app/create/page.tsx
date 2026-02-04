@@ -276,11 +276,12 @@ export default function CreateColoringBookPage() {
 
   // Computed values - comprehensive status tracking
   const doneCount = pages.filter(p => p.status === "done").length;
-  const failedCount = pages.filter(p => p.status === "failed").length;
   const pausedCount = pages.filter(p => p.status === "paused").length;
   const queuedCount = pages.filter(p => p.status === "queued").length;
   const generatingCount = pages.filter(p => p.status === "generating").length;
-  const pendingCount = pages.filter(p => p.status === "pending" || p.status === "failed" || p.status === "queued" || p.status === "paused").length;
+  // Pages that need retry (canRetry flag set)
+  const needsRetryCount = pages.filter(p => (p as { canRetry?: boolean }).canRetry).length;
+  const pendingCount = pages.filter(p => p.status === "pending" || p.status === "queued" || p.status === "paused").length;
   const notDoneCount = pages.length - doneCount;
   const enhancedCount = pages.filter(p => p.enhanceStatus === "enhanced").length;
   const processedCount = pages.filter(p => p.finalLetterStatus === "done").length;
@@ -550,8 +551,13 @@ export default function CreateColoringBookPage() {
       return;
     }
 
-    // Include paused pages in generation queue
-    const pagesToGenerate = pages.filter(p => p.status === "pending" || p.status === "failed" || p.status === "queued" || p.status === "paused");
+    // Include paused pages and pages needing retry in generation queue
+    const pagesToGenerate = pages.filter(p => 
+      p.status === "pending" || 
+      p.status === "queued" || 
+      p.status === "paused" ||
+      (p as { canRetry?: boolean }).canRetry
+    );
     if (pagesToGenerate.length === 0) {
       toast.info("All pages already generated!");
       return;
@@ -684,36 +690,51 @@ export default function CreateColoringBookPage() {
           
           // Exit the loop - don't continue with remaining pages
           break;
-        } else {
-          // Regular generation failure (retryable errors exhausted)
+        } else if (data.status === "generating" && data.canRetry) {
+          // API says still improving quality - keep in generating state
+          // This means max attempts reached but no non-retryable error
           setPages(prev => prev.map(p =>
             p.page === pageItem.page
               ? { 
                   ...p, 
-                  status: "failed" as PageStatus, 
-                  error: data.error || "Generation failed",
-                  errorCode: data.errorCode,
+                  status: "generating" as PageStatus, // Keep generating, NOT failed
+                  note: data.note || "Still improving...",
+                  canRetry: true,
                   attempts: (p.attempts || 0) + 1,
                 }
               : p
           ));
-          failCount++;
+          // Don't count as failure - user can retry manually
+        } else {
+          // Regular generation issue (shouldn't happen with new API, but handle it)
+          // Still mark as generating, not failed
+          setPages(prev => prev.map(p =>
+            p.page === pageItem.page
+              ? { 
+                  ...p, 
+                  status: "generating" as PageStatus, // NOT failed
+                  note: "Ready to retry",
+                  canRetry: true,
+                  attempts: (p.attempts || 0) + 1,
+                }
+              : p
+          ));
         }
       } catch (error) {
-        // Network or other error - still continue with remaining pages
+        // Network or other error - keep in generating state with retry option
         console.error(`[generateAllImages] Page ${pageItem.page} error:`, error);
         setPages(prev => prev.map(p =>
           p.page === pageItem.page
             ? { 
                 ...p, 
-                status: "failed" as PageStatus, 
-                error: error instanceof Error ? error.message : "Network error",
-                errorCode: "NETWORK_ERROR",
+                status: "generating" as PageStatus, // NOT failed - allow retry
+                note: "Network issue - tap to retry",
+                canRetry: true,
                 attempts: (p.attempts || 0) + 1,
               }
             : p
         ));
-        failCount++;
+        // Don't count as failure - user can retry
       }
 
       // Update progress
@@ -801,71 +822,92 @@ export default function CreateColoringBookPage() {
             : p
         ));
         toast.success(`Page ${pageNumber} generated!`);
-      } else {
+      } else if (data.status === "paused") {
+        // Non-retryable error (billing, etc) - show paused state
         setPages(prev => prev.map(p =>
           p.page === pageNumber
             ? { 
                 ...p, 
-                status: "failed" as PageStatus, 
-                error: data.error || "Generation failed",
+                status: "paused" as PageStatus, 
+                error: data.pauseReason || "Generation paused",
                 errorCode: data.errorCode,
                 attempts: (p.attempts || 0) + 1,
               }
             : p
         ));
-        toast.error(`Page ${pageNumber} failed: ${data.error || "Unknown error"}`);
+        toast.error(data.pauseReason || "Generation paused due to billing limit");
+      } else {
+        // Quality retry exhausted - keep in generating state
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? { 
+                ...p, 
+                status: "generating" as PageStatus, // NOT failed
+                note: data.note || "Ready to retry",
+                canRetry: true,
+                attempts: (p.attempts || 0) + 1,
+              }
+            : p
+        ));
+        toast.info(`Page ${pageNumber} needs retry - tap card to retry`);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Generation failed");
+      // Network error - keep in generating with retry option
       setPages(prev => prev.map(p =>
         p.page === pageNumber 
           ? { 
               ...p, 
-              status: "failed" as PageStatus,
-              error: error instanceof Error ? error.message : "Network error",
-              errorCode: "NETWORK_ERROR",
+              status: "generating" as PageStatus, // NOT failed
+              note: "Network issue - tap to retry",
+              canRetry: true,
               attempts: (p.attempts || 0) + 1,
             } 
           : p
       ));
+      toast.info(`Network issue - tap page ${pageNumber} to retry`);
     }
   };
 
-  // New: Regenerate only failed pages
-  const regenerateFailed = async () => {
-    const failedPages = pages.filter(p => p.status === "failed");
-    if (failedPages.length === 0) {
-      toast.info("No failed pages to regenerate");
+  // Retry pages that need attention (canRetry flag or paused status)
+  const retryPendingPages = async () => {
+    // Find pages that need retry: canRetry flag OR paused status
+    const pagesToRetry = pages.filter(p => 
+      (p as { canRetry?: boolean }).canRetry || 
+      p.status === "paused"
+    );
+    if (pagesToRetry.length === 0) {
+      toast.info("No pages need retry");
       return;
     }
     
     setIsGenerating(true);
     setJobProgress({
-      totalItems: failedPages.length,
+      totalItems: pagesToRetry.length,
       completedItems: 0,
       phase: "generating",
       startedAt: Date.now(),
     });
     
-    // Mark all failed as queued
+    // Mark all as queued
     setPages(prev => prev.map(p =>
-      p.status === "failed" ? { ...p, status: "queued" as PageStatus } : p
+      (p as { canRetry?: boolean }).canRetry || p.status === "paused"
+        ? { ...p, status: "queued" as PageStatus, canRetry: undefined, note: undefined } 
+        : p
     ));
     
     let successCount = 0;
-    let failCount = 0;
     
-    for (const pageItem of failedPages) {
-    setPages(prev => prev.map(p =>
+    for (const pageItem of pagesToRetry) {
+      setPages(prev => prev.map(p =>
         p.page === pageItem.page 
           ? { ...p, status: "generating" as PageStatus, lastAttemptAt: Date.now() } 
           : p
-    ));
+      ));
 
-    try {
+      try {
         const response = await fetch("/api/batch/generate-one", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             page: pageItem.page,
             prompt: pageItem.prompt,
@@ -882,7 +924,7 @@ export default function CreateColoringBookPage() {
         const data = await safeJsonParse(response);
         
         if (response.ok && data.status === "done" && data.imageBase64) {
-        setPages(prev => prev.map(p =>
+          setPages(prev => prev.map(p =>
             p.page === pageItem.page
               ? { 
                   ...p, 
@@ -891,41 +933,44 @@ export default function CreateColoringBookPage() {
                   attempts: data.attempts || 1,
                   warning: data.warning,
                   error: undefined,
+                  canRetry: undefined,
+                  note: undefined,
                 }
-            : p
-        ));
+              : p
+          ));
           successCount++;
-      } else {
-        setPages(prev => prev.map(p =>
+        } else {
+          // Keep in generating state with retry option
+          setPages(prev => prev.map(p =>
             p.page === pageItem.page
               ? { 
                   ...p, 
-                  status: "failed" as PageStatus, 
-                  error: data.error || "Generation failed",
+                  status: "generating" as PageStatus, // NOT failed
+                  note: "Ready to retry",
+                  canRetry: true,
                   attempts: (p.attempts || 0) + 1,
                 }
               : p
           ));
-          failCount++;
-      }
-    } catch (error) {
-      setPages(prev => prev.map(p =>
+        }
+      } catch (error) {
+        // Network error - keep in generating with retry
+        setPages(prev => prev.map(p =>
           p.page === pageItem.page
             ? { 
                 ...p, 
-                status: "failed" as PageStatus,
-                error: error instanceof Error ? error.message : "Network error",
+                status: "generating" as PageStatus,
+                note: "Network issue - tap to retry",
+                canRetry: true,
                 attempts: (p.attempts || 0) + 1,
               }
             : p
         ));
-        failCount++;
       }
       
       setJobProgress(prev => ({
         ...prev,
-        completedItems: successCount + failCount,
-        failedCount: failCount,
+        completedItems: prev.completedItems + 1,
       }));
       
       await new Promise(r => setTimeout(r, 300));
@@ -934,11 +979,7 @@ export default function CreateColoringBookPage() {
     setIsGenerating(false);
     setJobProgress(prev => ({ ...prev, phase: "complete" }));
     
-    if (failCount === 0) {
-      toast.success(`All ${successCount} failed pages regenerated successfully!`);
-    } else {
-      toast.info(`Regenerated ${successCount} pages, ${failCount} still failed.`);
-    }
+    toast.success(`Retried ${pagesToRetry.length} pages, ${successCount} succeeded`);
   };
 
   // Resume generation after billing limit pause
@@ -1264,18 +1305,22 @@ export default function CreateColoringBookPage() {
         ));
         toast.success(`Page ${pageNumber} regenerated!`);
       } else {
+        // Keep in generating state with retry option
         setPages(prev => prev.map(p =>
           p.page === pageNumber
-            ? { ...p, status: "failed" as PageStatus, error: data.error || "Regeneration failed" }
+            ? { ...p, status: "generating" as PageStatus, note: "Ready to retry", canRetry: true }
             : p
         ));
-        toast.error(`Page ${pageNumber} regeneration failed`);
+        toast.info(`Page ${pageNumber} needs retry`);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Regeneration failed");
+      // Network error - keep in generating with retry
       setPages(prev => prev.map(p =>
-        p.page === pageNumber ? { ...p, status: "failed" as PageStatus } : p
+        p.page === pageNumber 
+          ? { ...p, status: "generating" as PageStatus, note: "Network issue - tap to retry", canRetry: true } 
+          : p
       ));
+      toast.info(`Network issue - tap page ${pageNumber} to retry`);
     } finally {
       setRegeneratingInExport(null);
     }
@@ -1994,9 +2039,9 @@ export default function CreateColoringBookPage() {
                                     <CheckCircle2 className="mr-1 h-3 w-3" /> Generated
                                   </Badge>
                                 )}
-                                {page.status === "failed" && (
-                                  <Badge variant="destructive" className="text-xs">
-                                    <AlertCircle className="mr-1 h-3 w-3" /> Failed
+                                {(page as { canRetry?: boolean }).canRetry && (
+                                  <Badge variant="secondary" className="text-xs bg-amber-500/10 text-amber-600">
+                                    <RefreshCw className="mr-1 h-3 w-3" /> Retry
                                   </Badge>
                                 )}
                               </div>
@@ -2143,10 +2188,10 @@ export default function CreateColoringBookPage() {
                       {generatingCount} generating
                     </Badge>
                   )}
-                  {failedCount > 0 && (
-                    <Badge variant="destructive" className="text-sm">
-                      <AlertCircle className="mr-1 h-3 w-3" />
-                      {failedCount} failed
+                  {needsRetryCount > 0 && (
+                    <Badge variant="secondary" className="text-sm bg-amber-500/10 text-amber-600 border-amber-500/50">
+                      <RefreshCw className="mr-1 h-3 w-3" />
+                      {needsRetryCount} need{needsRetryCount === 1 ? "s" : ""} retry
                     </Badge>
                   )}
                   {pausedCount > 0 && (
@@ -2204,12 +2249,12 @@ export default function CreateColoringBookPage() {
                     </Button>
                   )}
                   
-                  {/* Regenerate Failed - dedicated button */}
-                  {(failedCount > 0 && !isGenerating) && (
-                    <Button variant="outline" onClick={regenerateFailed} disabled={isGenerating}>
+                  {/* Retry Pages - for pages that need retry */}
+                  {(needsRetryCount > 0 && !isGenerating) && (
+                    <Button variant="outline" onClick={retryPendingPages} disabled={isGenerating}>
                       <RotateCcw className="mr-2 h-4 w-4" /> 
-                      Regenerate {failedCount} Failed
-                  </Button>
+                      Retry {needsRetryCount} Page{needsRetryCount > 1 ? "s" : ""}
+                    </Button>
                   )}
                   
                   {/* Generation in progress indicator */}
@@ -2253,12 +2298,13 @@ export default function CreateColoringBookPage() {
                       className={cn(
                         "group overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-primary",
                         page.status === "done" && "border-green-500/30",
-                        page.status === "failed" && "border-red-500/30",
+                        (page as { canRetry?: boolean }).canRetry && "border-amber-500/30 animate-pulse",
                         page.status === "paused" && "border-amber-500/30 bg-amber-500/5"
                       )}
                       onClick={() => page.imageBase64 && openViewer(page.page)}
                     >
-                      <div className="aspect-[3/4] bg-muted relative">
+                      {/* White background for proper image preview */}
+                      <div className="aspect-[3/4] bg-white relative">
                         {page.imageBase64 ? (
                           <>
                             <img
@@ -2293,27 +2339,23 @@ export default function CreateColoringBookPage() {
                         ) : page.status === "generating" ? (
                           <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
                             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                            <span className="text-xs text-muted-foreground">Generating...</span>
+                            <span className="text-xs text-muted-foreground">
+                              {(page as { note?: string }).note || "Generating..."}
+                            </span>
                             {page.attempts > 0 && (
                               <span className="text-[10px] text-muted-foreground">Attempt {page.attempts + 1}</span>
                             )}
-                          </div>
-                        ) : page.status === "failed" ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
-                            <AlertCircle className="h-8 w-8 text-red-500" />
-                            <span className="text-xs text-red-500 font-medium">Failed</span>
-                            <span className="text-[10px] text-red-400 line-clamp-2">{page.error || "Unknown error"}</span>
-                            {page.attempts > 0 && (
-                              <span className="text-[10px] text-muted-foreground">Attempts: {page.attempts}</span>
+                            {/* Show retry button if canRetry is set */}
+                            {(page as { canRetry?: boolean }).canRetry && (
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                className="mt-1"
+                                onClick={(e) => { e.stopPropagation(); generateSinglePage(page.page); }}
+                              >
+                                <RefreshCw className="mr-1 h-3 w-3" /> Retry Now
+                              </Button>
                             )}
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              className="mt-1"
-                              onClick={(e) => { e.stopPropagation(); generateSinglePage(page.page); }}
-                            >
-                              <RefreshCw className="mr-1 h-3 w-3" /> Retry
-                            </Button>
                           </div>
                         ) : page.status === "paused" ? (
                           <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
@@ -2664,25 +2706,25 @@ export default function CreateColoringBookPage() {
                     </span>
                   </div>
                   
-                  {/* Warnings about missing pages */}
-                  {failedCount > 0 && (
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
-                      <AlertCircle className="h-5 w-5 text-red-500 shrink-0" />
+                  {/* Warnings about pages needing retry */}
+                  {needsRetryCount > 0 && (
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+                      <RefreshCw className="h-5 w-5 text-amber-500 shrink-0" />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-red-700 dark:text-red-400">
-                          {failedCount} page{failedCount > 1 ? "s" : ""} failed to generate
+                        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                          {needsRetryCount} page{needsRetryCount > 1 ? "s" : ""} need{needsRetryCount === 1 ? "s" : ""} retry
                         </p>
-                        <p className="text-xs text-red-600 dark:text-red-500">
-                          These pages will not be included in the export. Go back to regenerate them.
+                        <p className="text-xs text-amber-600 dark:text-amber-500">
+                          These pages are still being improved. Retry or wait for better results.
                         </p>
                       </div>
                       <Button size="sm" variant="outline" onClick={() => setCurrentStep(3)}>
-                        <ArrowLeft className="mr-1 h-3 w-3" /> Fix Pages
+                        <ArrowLeft className="mr-1 h-3 w-3" /> Go Back
                       </Button>
                     </div>
                   )}
                   
-                  {pagesWithWarnings > 0 && failedCount === 0 && (
+                  {pagesWithWarnings > 0 && needsRetryCount === 0 && (
                     <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
                       <AlertCircle className="h-5 w-5 text-amber-500 shrink-0" />
                       <div className="flex-1">

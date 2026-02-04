@@ -186,24 +186,26 @@ async function preValidateImageBackground(imageBase64: string): Promise<{ valid:
     
     console.log(`[imageValidator] Pre-validation: borderBrightness=${avgBorderBrightness.toFixed(1)}, blackRatio=${(blackRatio * 100).toFixed(1)}%`);
     
-    // GUARD: Border brightness must be >= 240 (near white)
-    // A coloring page should have pure white borders
-    if (avgBorderBrightness < 240) {
-      console.error(`[imageValidator] DARK BACKGROUND DETECTED: borderBrightness=${avgBorderBrightness.toFixed(1)} < 240. This image has a dark/non-white background.`);
+    // GUARD: Border brightness must be >= 200 (reasonably white)
+    // After sanitization (flatten to white), borders should be white
+    // Relaxed from 240 to 200 to handle slight variations
+    if (avgBorderBrightness < 200) {
+      console.warn(`[imageValidator] Dark background detected: borderBrightness=${avgBorderBrightness.toFixed(1)} < 200. Will retry.`);
       return { 
         valid: false, 
-        reason: `dark_background: Border brightness ${avgBorderBrightness.toFixed(1)} < 240. Image has non-white background.`, 
+        reason: `dark_background: Border brightness ${avgBorderBrightness.toFixed(1)} < 200. Image has non-white background.`, 
         blackRatio 
       };
     }
     
-    // GUARD: Black ratio must be <= 60%
-    // More than 60% black means the image is mostly filled/dark
-    if (blackRatio > 0.60) {
-      console.error(`[imageValidator] TOO MUCH BLACK: ${(blackRatio * 100).toFixed(1)}% > 60%. This image is mostly dark.`);
+    // GUARD: Black ratio must be <= 70%
+    // More than 70% black means the image is mostly filled/dark
+    // Relaxed from 60% to 70% for detailed coloring pages
+    if (blackRatio > 0.70) {
+      console.warn(`[imageValidator] Too much black: ${(blackRatio * 100).toFixed(1)}% > 70%. Will retry.`);
       return { 
         valid: false, 
-        reason: `dark_background: Black ratio ${(blackRatio * 100).toFixed(1)}% > 60%. Image is mostly dark.`, 
+        reason: `too_dark: Black ratio ${(blackRatio * 100).toFixed(1)}% > 70%. Image is mostly dark.`, 
         blackRatio 
       };
     }

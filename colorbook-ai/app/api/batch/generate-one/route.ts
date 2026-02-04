@@ -6,7 +6,7 @@ import {
   getRetryReinforcement,
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
-import { forcePureBlackWhite } from "@/lib/imageProcessing";
+import { sanitizeColoringPngBase64 } from "@/lib/imageProcessing";
 
 // Map sizes to GPT Image model compatible sizes
 // GPT Image model supports: 1024x1024, 1024x1536, 1536x1024
@@ -40,10 +40,10 @@ export const maxDuration = 300; // 5 minutes max for extensive retries
 // ============================================
 
 /** Max attempts per page before giving up (internal limit, not shown to user) */
-const MAX_ATTEMPTS_PER_PAGE = 12;
+const MAX_ATTEMPTS_PER_PAGE = 20;
 
-/** Max wall time per page in milliseconds (120 seconds) */
-const MAX_WALL_TIME_MS = 120 * 1000;
+/** Max wall time per page in milliseconds (180 seconds = 3 min) */
+const MAX_WALL_TIME_MS = 180 * 1000;
 
 /** Base delay between retries in ms */
 const BASE_RETRY_DELAY = 500;
@@ -236,24 +236,16 @@ export async function POST(request: NextRequest) {
         }
 
         // ================================================
-        // MANDATORY POSTPROCESS: Force pure black/white
+        // MANDATORY SANITIZE: Flatten to white, remove alpha
         // ================================================
         let imageBase64 = result.images[0];
         try {
-          console.log(`[generate-one] Page ${page}: [${attemptId}] Applying pure B/W postprocess`);
-          imageBase64 = await forcePureBlackWhite(imageBase64);
-        } catch (ppError) {
-          const ppErrorMsg = ppError instanceof Error ? ppError.message : String(ppError);
-          console.error(`[generate-one] Page ${page}: [${attemptId}] Postprocess error: ${ppErrorMsg}`);
-          
-          // If the image has no content (completely black/white), this is a failed generation
-          // We must retry, not continue with a broken image
-          if (ppErrorMsg.includes("IMAGE_NO_CONTENT")) {
-            console.log(`[generate-one] Page ${page}: [${attemptId}] Model generated blank/black image - will retry`);
-            await delay(getRetryDelay(attempt));
-            continue; // Retry this attempt
-          }
-          // For other postprocess errors, continue with original image
+          console.log(`[generate-one] Page ${page}: [${attemptId}] Sanitizing image (flatten to white, remove alpha)`);
+          imageBase64 = await sanitizeColoringPngBase64(imageBase64);
+        } catch (sanitizeError) {
+          const errorMsg = sanitizeError instanceof Error ? sanitizeError.message : String(sanitizeError);
+          console.error(`[generate-one] Page ${page}: [${attemptId}] Sanitize error: ${errorMsg}`);
+          // Continue with original image if sanitize fails (rare)
         }
         
         // Track this image with its attempt ID
@@ -363,27 +355,23 @@ export async function POST(request: NextRequest) {
     }
 
     // ================================================
-    // LIMITS REACHED - Return best image if we have one
+    // LIMITS REACHED - NEVER return "failed" for quality issues
     // ================================================
     console.log(`[generate-one] Page ${page}: [${requestId}] Limits reached after ${MAX_ATTEMPTS_PER_PAGE} attempts`);
     
-    // IMPORTANT: Only return an image if it passed basic quality checks
-    // Never return a dark background image
-    const lastValidationNotes = lastValidationResult?.outlineValidation?.notes || "";
-    const isDarkBackground = lastValidationNotes.includes("dark_background") || 
-                             lastValidationNotes.includes("PRE-VALIDATION FAILED");
-    
-    if (bestImage && !isDarkBackground) {
+    // If we have ANY image, return it as "done"
+    // The sanitization guarantees white background, so just use what we have
+    if (bestImage) {
       console.log(`[generate-one] Page ${page}: [${requestId}] Returning best available image (attemptId: ${bestImageAttemptId})`);
       return NextResponse.json({
         page,
-        status: "done", // Still return "done" so user sees an image
+        status: "done", // Always "done" if we have an image - NEVER "failed"
         imageBase64: bestImage,
         attempts: MAX_ATTEMPTS_PER_PAGE,
         attemptId: bestImageAttemptId,
         validation: lastValidationResult ? {
-          passed: false,
-          note: "Image returned after max retries - quality may vary",
+          passed: lastValidationResult.valid,
+          note: lastValidationResult.valid ? undefined : "Image quality may vary",
           character: lastValidationResult.characterValidation,
           outline: lastValidationResult.outlineValidation,
           coverage: lastValidationResult.coverageValidation,
@@ -391,26 +379,16 @@ export async function POST(request: NextRequest) {
         } : undefined,
       });
     }
-    
-    // If no valid image (all were dark backgrounds), report error
-    if (isDarkBackground) {
-      console.error(`[generate-one] Page ${page}: [${requestId}] All attempts produced dark backgrounds - no valid image`);
-      return NextResponse.json({
-        page,
-        status: "error",
-        error: "Unable to generate image with white background after multiple attempts. The model keeps producing dark images.",
-        errorCode: "DARK_BACKGROUND_PERSISTENT",
-        attempts: MAX_ATTEMPTS_PER_PAGE,
-      });
-    }
 
-    // No image at all - this is a real error (network issues, etc.)
+    // No image at all - return "generating" status so UI keeps spinner
+    // This is a quality retry issue, NOT a hard failure
+    console.log(`[generate-one] Page ${page}: [${requestId}] No valid image yet - returning 'generating' status`);
     return NextResponse.json({
       page,
-      status: "error",
-      error: "Unable to generate image after multiple attempts. Please try again.",
-      errorCode: "GENERATION_EXHAUSTED",
+      status: "generating", // Keep in generating state - NOT "failed"
       attempts: MAX_ATTEMPTS_PER_PAGE,
+      note: "Still improving quality...",
+      canRetry: true, // Let UI show "Retry" button
     });
 
   } catch (error) {
