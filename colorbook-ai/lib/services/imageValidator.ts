@@ -208,6 +208,17 @@ async function preValidateImageBackground(imageBase64: string): Promise<{ valid:
       };
     }
     
+    // GUARD: Black ratio must be >= 1%
+    // Less than 1% black means the image has no content (blank white)
+    if (blackRatio < 0.01) {
+      console.error(`[imageValidator] NO CONTENT: blackRatio=${(blackRatio * 100).toFixed(2)}% < 1%. This image is blank/empty.`);
+      return { 
+        valid: false, 
+        reason: `no_content: Black ratio ${(blackRatio * 100).toFixed(2)}% < 1%. Image has no content (blank white).`, 
+        blackRatio 
+      };
+    }
+    
     return { valid: true, blackRatio };
     
   } catch (error) {
@@ -266,24 +277,30 @@ export async function validateGeneratedImage(
   }
 
   // PRE-VALIDATION: Check that we have valid input (white background, reasonable black ratio)
-  // This is a HARD FAIL - dark backgrounds MUST trigger retry, not pass through
+  // This is a HARD FAIL - dark backgrounds and blank images MUST trigger retry
   const preCheck = await preValidateImageBackground(imageBase64);
   if (!preCheck.valid) {
     console.error(`[imageValidator] Pre-validation HARD FAIL: ${preCheck.reason}`);
+    
+    // Determine appropriate retry message based on failure type
+    const isNoContent = preCheck.reason?.includes("no_content");
+    const retryMsg = isNoContent
+      ? `CRITICAL ERROR: Generated image is blank/empty with no visible content. You MUST generate BLACK LINE ART with visible outlines, shapes, and details. The image should have clear black lines on a white background.`
+      : `CRITICAL ERROR: Generated image has dark/black background. MUST have PURE WHITE background (RGB 255,255,255). NO dark colors, NO gray background, NO filled areas. Only BLACK OUTLINES on WHITE.`;
+    
     // CRITICAL FIX: Return valid=FALSE to trigger retry
-    // A dark background is a GENERATION ERROR, not an input error
     return {
       valid: false, // MUST be false to trigger retry
       outlineValidation: {
         valid: false,
-        hasBlackFills: true, // Treat dark background as a "fill" issue
+        hasBlackFills: !isNoContent, // Only true for dark backgrounds
         hasGrayscale: false,
         hasUnwantedBorder: false,
-        fillLocations: ["entire image - dark background detected"],
+        fillLocations: isNoContent ? ["entire image - no content"] : ["entire image - dark background detected"],
         confidence: 1.0,
         notes: `PRE-VALIDATION FAILED: ${preCheck.reason}`,
       },
-      retryReinforcement: `CRITICAL ERROR: Generated image has dark/black background. MUST have PURE WHITE background (RGB 255,255,255). NO dark colors, NO gray background, NO filled areas. Only BLACK OUTLINES on WHITE.`,
+      retryReinforcement: retryMsg,
     };
   }
 

@@ -176,17 +176,11 @@ export async function forcePureBlackWhite(
   
   console.log(`[forcePureBlackWhite] Image analysis: darkRatio=${(darkRatio * 100).toFixed(1)}%, isInverted=${isInverted}, isCompletelyBlack=${isCompletelyBlack}`);
   
-  // If image is completely black (no content), create a white image
-  // This is better than showing a black rectangle
+  // If image is completely black (no content), this is a FAILED generation
+  // Throw an error so the caller knows to retry
   if (isCompletelyBlack) {
-    console.warn(`[forcePureBlackWhite] Image is completely black (${(darkRatio * 100).toFixed(1)}% dark) - creating white canvas`);
-    const outputData = Buffer.alloc(width * height * 3, 255); // All white
-    const outputBuffer = await sharp(outputData, {
-      raw: { width, height, channels: 3 },
-    })
-      .png({ compressionLevel: 6 })
-      .toBuffer();
-    return bufferToBase64(outputBuffer);
+    console.error(`[forcePureBlackWhite] FAILED: Image is completely black (${(darkRatio * 100).toFixed(1)}% dark) - no content to recover`);
+    throw new Error(`IMAGE_NO_CONTENT: Generated image is completely black (${(darkRatio * 100).toFixed(1)}% dark). Model failed to generate any content.`);
   }
   
   // Create output buffer (RGB - 3 channels)

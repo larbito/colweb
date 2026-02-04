@@ -243,8 +243,17 @@ export async function POST(request: NextRequest) {
           console.log(`[generate-one] Page ${page}: [${attemptId}] Applying pure B/W postprocess`);
           imageBase64 = await forcePureBlackWhite(imageBase64);
         } catch (ppError) {
-          console.error(`[generate-one] Page ${page}: [${attemptId}] Postprocess error:`, ppError);
-          // Continue with original image if postprocess fails
+          const ppErrorMsg = ppError instanceof Error ? ppError.message : String(ppError);
+          console.error(`[generate-one] Page ${page}: [${attemptId}] Postprocess error: ${ppErrorMsg}`);
+          
+          // If the image has no content (completely black/white), this is a failed generation
+          // We must retry, not continue with a broken image
+          if (ppErrorMsg.includes("IMAGE_NO_CONTENT")) {
+            console.log(`[generate-one] Page ${page}: [${attemptId}] Model generated blank/black image - will retry`);
+            await delay(getRetryDelay(attempt));
+            continue; // Retry this attempt
+          }
+          // For other postprocess errors, continue with original image
         }
         
         // Track this image with its attempt ID
