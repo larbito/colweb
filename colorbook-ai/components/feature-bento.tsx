@@ -3,56 +3,76 @@
 import { motion } from "framer-motion";
 import { Sparkles, Ruler, PenTool, SlidersHorizontal, RefreshCw, FileOutput } from "lucide-react";
 
+/**
+ * Feature cards - symmetric design with consistent styling
+ * Uses only 4 tint colors: emerald, blue, amber, neutral (gray)
+ */
 const features = [
   {
     icon: Sparkles,
     title: "Story Mode Prompts",
     description: "Generate cohesive page-by-page prompts that tell a unified story throughout your book.",
-    glowClass: "card-glow-cyan",
-    iconBg: "bg-cyan-500/10",
-    iconColor: "text-cyan-500",
+    tint: "emerald",
   },
   {
     icon: Ruler,
     title: "KDP Trim Presets",
     description: "8.5×11, 8×10, A4 and more — all with proper bleed and margins for print-on-demand.",
-    glowClass: "card-glow-blue",
-    iconBg: "bg-blue-500/10",
-    iconColor: "text-blue-500",
+    tint: "blue",
   },
   {
     icon: PenTool,
     title: "Line Thickness",
     description: "Choose thin, medium, or bold outlines to match your audience's coloring preferences.",
-    glowClass: "card-glow-green",
-    iconBg: "bg-emerald-500/10",
-    iconColor: "text-emerald-500",
+    tint: "neutral",
   },
   {
     icon: SlidersHorizontal,
     title: "Complexity Control",
     description: "Simple designs for kids to intricate patterns for adults — adjust with one slider.",
-    glowClass: "card-glow-orange",
-    iconBg: "bg-orange-500/10",
-    iconColor: "text-orange-500",
+    tint: "amber",
   },
   {
     icon: RefreshCw,
     title: "Instant Regeneration",
     description: "Not happy with a page? Regenerate it instantly while keeping your prompt intact.",
-    glowClass: "card-glow-pink",
-    iconBg: "bg-pink-500/10",
-    iconColor: "text-pink-500",
+    tint: "emerald",
   },
   {
     icon: FileOutput,
     title: "Print-Ready Export",
     description: "Export PDFs with page numbers, blank backs, and copyright page included.",
-    glowClass: "card-glow-purple",
-    iconBg: "bg-purple-500/10",
-    iconColor: "text-purple-500",
+    tint: "blue",
   },
 ];
+
+// Tint color mappings (max 4 colors)
+const tintStyles = {
+  emerald: {
+    bg: "bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]",
+    border: "border-emerald-500/10 dark:border-emerald-500/15",
+    iconBg: "bg-emerald-500/10",
+    iconColor: "text-emerald-600 dark:text-emerald-400",
+  },
+  blue: {
+    bg: "bg-blue-500/[0.06] dark:bg-blue-500/[0.08]",
+    border: "border-blue-500/10 dark:border-blue-500/15",
+    iconBg: "bg-blue-500/10",
+    iconColor: "text-blue-600 dark:text-blue-400",
+  },
+  amber: {
+    bg: "bg-amber-500/[0.06] dark:bg-amber-500/[0.08]",
+    border: "border-amber-500/10 dark:border-amber-500/15",
+    iconBg: "bg-amber-500/10",
+    iconColor: "text-amber-600 dark:text-amber-400",
+  },
+  neutral: {
+    bg: "bg-gray-500/[0.04] dark:bg-gray-500/[0.06]",
+    border: "border-gray-500/10 dark:border-gray-500/15",
+    iconBg: "bg-gray-500/10",
+    iconColor: "text-gray-600 dark:text-gray-400",
+  },
+};
 
 export function FeatureBento() {
   return (
@@ -77,30 +97,40 @@ export function FeatureBento() {
         </motion.h2>
       </div>
 
+      {/* Symmetric grid - all cards same height */}
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {features.map((feature, i) => (
-          <motion.div
-            key={feature.title}
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-50px" }}
-            transition={{ duration: 0.4, delay: i * 0.08 }}
-            className={`group relative rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 ${feature.glowClass}`}
-          >
-            {/* Icon */}
-            <div className={`mb-5 flex h-12 w-12 items-center justify-center rounded-xl ${feature.iconBg}`}>
-              <feature.icon className={`h-6 w-6 ${feature.iconColor}`} />
-            </div>
-            
-            {/* Content */}
-            <h3 className="mb-2 text-lg font-semibold">
-              {feature.title}
-            </h3>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {feature.description}
-            </p>
-          </motion.div>
-        ))}
+        {features.map((feature, i) => {
+          const tint = tintStyles[feature.tint as keyof typeof tintStyles];
+          
+          return (
+            <motion.div
+              key={feature.title}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-50px" }}
+              transition={{ duration: 0.4, delay: i * 0.08 }}
+              className={`
+                group relative rounded-2xl p-6 border transition-all duration-200
+                hover:-translate-y-1 hover:shadow-lg
+                ${tint.bg} ${tint.border}
+                min-h-[200px] flex flex-col
+              `}
+            >
+              {/* Icon - consistent 48x48 */}
+              <div className={`mb-5 flex h-12 w-12 items-center justify-center rounded-xl ${tint.iconBg}`}>
+                <feature.icon className={`h-6 w-6 ${tint.iconColor}`} />
+              </div>
+              
+              {/* Content */}
+              <h3 className="mb-2 text-lg font-semibold">
+                {feature.title}
+              </h3>
+              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
+                {feature.description}
+              </p>
+            </motion.div>
+          );
+        })}
       </div>
 
       {/* Trusted by creators row */}
@@ -112,8 +142,8 @@ export function FeatureBento() {
         className="mt-16 text-center"
       >
         <p className="text-sm text-muted-foreground mb-6">Trusted by creators worldwide</p>
-        <div className="flex items-center justify-center gap-8 opacity-40">
-          {/* Placeholder logos - you can replace with actual logos */}
+        <div className="flex items-center justify-center gap-8 opacity-30">
+          {/* Placeholder logos */}
           <div className="h-6 w-20 rounded bg-foreground/20" />
           <div className="h-6 w-24 rounded bg-foreground/20" />
           <div className="h-6 w-16 rounded bg-foreground/20" />

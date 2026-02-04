@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronRight } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type Step = 1 | 2 | 3 | 4 | 5;
@@ -16,16 +16,24 @@ interface StepIndicatorProps {
   steps: StepConfig[];
   onStepClick?: (step: Step) => void;
   canNavigateTo?: (step: Step) => boolean;
-  variant?: "default" | "compact" | "pills";
+  variant?: "default" | "slim" | "pills";
   className?: string;
 }
 
+/**
+ * StepIndicator - Slim progress indicator at top of wizard
+ * 
+ * Design system:
+ * - 12px radius
+ * - Consistent spacing
+ * - "slim" variant for top-of-page use
+ */
 export function StepIndicator({
   currentStep,
   steps,
   onStepClick,
   canNavigateTo,
-  variant = "default",
+  variant = "slim",
   className,
 }: StepIndicatorProps) {
   const handleClick = (step: Step) => {
@@ -35,10 +43,53 @@ export function StepIndicator({
     }
   };
 
+  // Slim variant - default for dashboard pages
+  if (variant === "slim") {
+    return (
+      <div className={cn(
+        "flex items-center gap-2 p-2 rounded-2xl bg-muted/50 overflow-x-auto no-scrollbar",
+        className
+      )}>
+        {steps.map((s, idx) => {
+          const isActive = currentStep === s.step;
+          const isCompleted = currentStep > s.step;
+          const canClick = canNavigateTo ? canNavigateTo(s.step) : true;
+
+          return (
+            <button
+              key={s.step}
+              onClick={() => handleClick(s.step)}
+              disabled={!canClick}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap",
+                isActive && "bg-primary text-primary-foreground shadow-sm",
+                isCompleted && !isActive && "text-success hover:bg-success/10",
+                !isActive && !isCompleted && "text-muted-foreground hover:bg-muted",
+                canClick ? "cursor-pointer" : "cursor-not-allowed opacity-50"
+              )}
+            >
+              {/* Step number/check */}
+              <span className={cn(
+                "flex h-5 w-5 items-center justify-center rounded-full text-xs font-semibold",
+                isActive && "bg-primary-foreground/20",
+                isCompleted && "bg-success/20",
+                !isActive && !isCompleted && "bg-muted-foreground/20"
+              )}>
+                {isCompleted ? <Check className="h-3 w-3" /> : s.step}
+              </span>
+              <span className="hidden sm:inline">{s.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Pills variant
   if (variant === "pills") {
     return (
       <div className={cn("flex items-center gap-2", className)}>
-        {steps.map((s, idx) => {
+        {steps.map((s) => {
           const isActive = currentStep === s.step;
           const isCompleted = currentStep > s.step;
           const canClick = canNavigateTo ? canNavigateTo(s.step) : true;
@@ -51,7 +102,7 @@ export function StepIndicator({
               className={cn(
                 "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all",
                 isActive && "bg-primary text-primary-foreground shadow-md",
-                isCompleted && !isActive && "bg-emerald-500/10 text-emerald-600",
+                isCompleted && !isActive && "bg-success/10 text-success",
                 !isActive && !isCompleted && "bg-muted text-muted-foreground",
                 canClick ? "cursor-pointer hover:opacity-90" : "cursor-not-allowed opacity-50"
               )}
@@ -69,37 +120,7 @@ export function StepIndicator({
     );
   }
 
-  if (variant === "compact") {
-    return (
-      <div className={cn("flex items-center gap-1", className)}>
-        {steps.map((s, idx) => {
-          const isActive = currentStep === s.step;
-          const isCompleted = currentStep > s.step;
-
-          return (
-            <div key={s.step} className="flex items-center">
-              <div
-                className={cn(
-                  "h-2 w-2 rounded-full transition-all",
-                  isActive && "bg-primary w-6",
-                  isCompleted && "bg-emerald-500",
-                  !isActive && !isCompleted && "bg-muted"
-                )}
-              />
-              {idx < steps.length - 1 && (
-                <div className={cn(
-                  "h-0.5 w-4 mx-1",
-                  isCompleted ? "bg-emerald-500" : "bg-muted"
-                )} />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  // Default variant
+  // Default variant - horizontal with circles
   return (
     <div className={cn("flex items-center justify-center", className)}>
       {steps.map((s, idx) => {
@@ -120,9 +141,9 @@ export function StepIndicator({
               {/* Step circle */}
               <div
                 className={cn(
-                  "relative flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition-all",
+                  "relative flex h-10 w-10 items-center justify-center rounded-xl text-sm font-semibold transition-all",
                   isActive && "bg-primary text-primary-foreground ring-4 ring-primary/20",
-                  isCompleted && "bg-emerald-500 text-white",
+                  isCompleted && "bg-success text-success-foreground",
                   !isActive && !isCompleted && "bg-muted text-muted-foreground",
                   canClick && !isActive && "group-hover:bg-muted/80"
                 )}
@@ -138,8 +159,8 @@ export function StepIndicator({
               <div className="text-center">
                 <p className={cn(
                   "text-xs font-medium transition-colors",
-                  isActive && "text-primary",
-                  isCompleted && "text-emerald-600",
+                  isActive && "text-foreground",
+                  isCompleted && "text-success",
                   !isActive && !isCompleted && "text-muted-foreground"
                 )}>
                   {s.label}
@@ -157,7 +178,7 @@ export function StepIndicator({
               <div
                 className={cn(
                   "h-0.5 w-12 mx-4 transition-colors",
-                  currentStep > s.step ? "bg-emerald-500" : "bg-muted"
+                  currentStep > s.step ? "bg-success" : "bg-muted"
                 )}
               />
             )}
@@ -168,7 +189,7 @@ export function StepIndicator({
   );
 }
 
-// Vertical step list for sidebar or wizard
+// Vertical step list for sidebar
 interface VerticalStepsProps {
   currentStep: Step;
   steps: StepConfig[];
@@ -204,9 +225,9 @@ export function VerticalSteps({
             <div className="flex flex-col items-center">
               <div
                 className={cn(
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-all",
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold transition-all",
                   isActive && "bg-primary text-primary-foreground",
-                  isCompleted && "bg-emerald-500 text-white",
+                  isCompleted && "bg-success text-success-foreground",
                   !isActive && !isCompleted && "bg-muted text-muted-foreground"
                 )}
               >
@@ -215,7 +236,7 @@ export function VerticalSteps({
               {idx < steps.length - 1 && (
                 <div className={cn(
                   "w-0.5 h-8 my-1",
-                  isCompleted ? "bg-emerald-500" : "bg-muted"
+                  isCompleted ? "bg-success" : "bg-muted"
                 )} />
               )}
             </div>
@@ -231,7 +252,7 @@ export function VerticalSteps({
             >
               <p className={cn(
                 "text-sm font-medium",
-                isActive && "text-primary",
+                isActive && "text-foreground",
                 isCompleted && "text-foreground",
                 !isActive && !isCompleted && "text-muted-foreground"
               )}>

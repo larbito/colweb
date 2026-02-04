@@ -6,8 +6,13 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Section Card - Premium styling for dashboard sections
- * Uses CSS variables for light/dark mode support
+ * SectionCard - Consistent card styling for dashboard sections
+ * 
+ * Design system:
+ * - 16px radius (rounded-2xl)
+ * - 24px padding
+ * - 44x44 icon container with 12px radius
+ * - 18px section title
  */
 
 interface SectionCardProps {
@@ -49,7 +54,7 @@ export function SectionCard({
 
   return (
     <Card className={cn(variantStyles[variant], "overflow-hidden rounded-2xl", className)}>
-      <CardHeader className="pb-4">
+      <CardHeader className="pb-4 p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             {Icon && (
@@ -62,7 +67,7 @@ export function SectionCard({
             )}
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-base">{title}</h3>
+                <h3 className="font-semibold text-lg">{title}</h3>
                 {badge && (
                   <Badge variant={badgeVariant} className="text-[10px] px-2 py-0.5">
                     {badge}
@@ -81,7 +86,11 @@ export function SectionCard({
           )}
         </div>
       </CardHeader>
-      <CardContent className={cn(noPadding && "p-0 pt-0", contentClassName)}>
+      <CardContent className={cn(
+        "p-6 pt-0",
+        noPadding && "p-0 pt-0", 
+        contentClassName
+      )}>
         {children}
       </CardContent>
     </Card>

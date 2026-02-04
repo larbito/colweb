@@ -7,16 +7,31 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * PageHeader - Consistent pattern across all dashboard pages
+ * 
+ * Layout: Title + subtitle on left, primary CTA on right
+ * Typography: 30px page title (text-page-title)
+ */
+
 interface PageHeaderProps {
+  /** Page title - 30px semibold */
   title: string;
+  /** Subtitle/description */
   subtitle?: string;
+  /** Optional icon */
   icon?: LucideIcon;
+  /** Badge text */
   badge?: string;
   badgeVariant?: "default" | "secondary" | "destructive" | "outline";
+  /** Back link */
   backHref?: string;
+  /** Help tooltip text */
   helpText?: string;
+  /** Right-aligned actions (typically primary CTA) */
   actions?: React.ReactNode;
   className?: string;
+  /** Size variant */
   size?: "default" | "lg";
 }
 
@@ -34,15 +49,14 @@ export function PageHeader({
 }: PageHeaderProps) {
   return (
     <div className={cn(
-      "flex flex-col gap-1",
-      size === "lg" ? "pb-8" : "pb-6",
+      "flex flex-col gap-1 border-b border-border pb-6 mb-6",
       className
     )}>
       <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
+        <div className="flex items-start gap-4 min-w-0">
           {/* Back button */}
           {backHref && (
-            <Button variant="ghost" size="icon" asChild className="h-10 w-10 shrink-0 -ml-2">
+            <Button variant="ghost" size="icon-sm" asChild className="shrink-0 -ml-2 mt-1">
               <Link href={backHref}>
                 <ChevronLeft className="h-5 w-5" />
               </Link>
@@ -52,24 +66,24 @@ export function PageHeader({
           {/* Icon */}
           {Icon && (
             <div className={cn(
-              "flex shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary",
-              size === "lg" ? "h-12 w-12" : "h-10 w-10"
+              "flex shrink-0 items-center justify-center rounded-xl bg-muted text-foreground",
+              size === "lg" ? "h-14 w-14" : "h-12 w-12"
             )}>
-              <Icon className={size === "lg" ? "h-6 w-6" : "h-5 w-5"} />
+              <Icon className={size === "lg" ? "h-7 w-7" : "h-6 w-6"} />
             </div>
           )}
           
           {/* Title block */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
+          <div className="space-y-1 min-w-0">
+            <div className="flex items-center gap-3 flex-wrap">
               <h1 className={cn(
-                "font-semibold tracking-tight",
-                size === "lg" ? "text-2xl md:text-3xl" : "text-xl md:text-2xl"
+                "font-semibold tracking-tight truncate",
+                size === "lg" ? "text-[30px]" : "text-2xl"
               )}>
                 {title}
               </h1>
               {badge && (
-                <Badge variant={badgeVariant} className="text-xs">
+                <Badge variant={badgeVariant} className="text-xs shrink-0">
                   {badge}
                 </Badge>
               )}
@@ -77,7 +91,7 @@ export function PageHeader({
             {subtitle && (
               <p className={cn(
                 "text-muted-foreground",
-                size === "lg" ? "text-base" : "text-sm"
+                size === "lg" ? "text-base" : "text-[15px]"
               )}>
                 {subtitle}
               </p>
@@ -91,7 +105,7 @@ export function PageHeader({
           </div>
         </div>
         
-        {/* Actions */}
+        {/* Actions - aligned right */}
         {actions && (
           <div className="flex items-center gap-2 shrink-0">
             {actions}
@@ -110,7 +124,7 @@ interface PageTitleProps {
 
 export function PageTitle({ children, className }: PageTitleProps) {
   return (
-    <h1 className={cn("text-xl font-semibold tracking-tight md:text-2xl", className)}>
+    <h1 className={cn("text-2xl font-semibold tracking-tight", className)}>
       {children}
     </h1>
   );
@@ -118,7 +132,7 @@ export function PageTitle({ children, className }: PageTitleProps) {
 
 export function PageSubtitle({ children, className }: PageTitleProps) {
   return (
-    <p className={cn("text-sm text-muted-foreground", className)}>
+    <p className={cn("text-[15px] text-muted-foreground", className)}>
       {children}
     </p>
   );

@@ -1698,18 +1698,18 @@ export default function BulkCreatePage() {
                               <div
                                 key={page.id}
                                 className={cn(
-                                  "aspect-[3/4] rounded-lg border-2 overflow-hidden relative",
-                                  page.imageBase64 && "border-green-300 bg-white",
-                                  (page.status === "generating" || isCurrentlyGenerating) && "border-primary bg-primary/5",
-                                  page.status === "failed" && "border-red-300 bg-red-50 dark:bg-red-950/20",
-                                  !page.imageBase64 && page.status !== "generating" && page.status !== "failed" && "border-muted bg-muted/30"
+                                  "aspect-[3/4] rounded-lg overflow-hidden relative",
+                                  page.imageBase64 && "paper-preview",
+                                  (page.status === "generating" || isCurrentlyGenerating) && "border-2 border-primary bg-primary/5",
+                                  page.status === "failed" && "border-2 border-destructive/50 bg-destructive/10",
+                                  !page.imageBase64 && page.status !== "generating" && page.status !== "failed" && "border border-muted bg-muted/30"
                                 )}
                               >
                                 {page.imageBase64 ? (
                                   <img
                                     src={`data:image/png;base64,${page.imageBase64}`}
                                     alt={`Page ${page.index}`}
-                                    className="w-full h-full object-cover"
+                                    className="w-full h-full object-contain bg-white"
                                   />
                                 ) : page.status === "generating" || isCurrentlyGenerating ? (
                                   <div className="w-full h-full flex items-center justify-center">
@@ -1717,7 +1717,7 @@ export default function BulkCreatePage() {
                                   </div>
                                 ) : page.status === "failed" ? (
                                   <div className="w-full h-full flex items-center justify-center">
-                                    <XCircle className="h-4 w-4 text-red-500" />
+                                    <XCircle className="h-4 w-4 text-destructive" />
                                   </div>
                                 ) : (
                                   <div className="w-full h-full flex items-center justify-center">
@@ -1835,10 +1835,11 @@ export default function BulkCreatePage() {
                               <div
                                 key={page.id}
                                 className={cn(
-                                  "group relative aspect-[3/4] rounded-xl border-2 overflow-hidden transition-all",
-                                  page.approvedAt && "border-green-400 ring-2 ring-green-200 dark:ring-green-800",
-                                  isPageEnhancing && "border-primary",
-                                  !page.approvedAt && !isPageEnhancing && "border-border/50",
+                                  "group relative aspect-[3/4] rounded-xl overflow-hidden transition-all",
+                                  displayImage && "paper-preview-lg",
+                                  page.approvedAt && "ring-2 ring-success/50",
+                                  isPageEnhancing && "ring-2 ring-primary/50",
+                                  !displayImage && "border border-muted bg-muted/30",
                                   "hover:shadow-lg"
                                 )}
                               >
@@ -1847,43 +1848,40 @@ export default function BulkCreatePage() {
                                     <img
                                       src={`data:image/png;base64,${displayImage}`}
                                       alt={`Page ${page.index}`}
-                                      className="w-full h-full object-cover bg-white"
+                                      className="w-full h-full object-contain bg-white"
                                     />
                                     
                                     <div className="absolute top-2 left-2 flex flex-col gap-1">
                                       {page.enhancedImageBase64 && (
-                                        <Badge className="text-[10px] bg-purple-500">Enhanced</Badge>
+                                        <Badge className="text-[10px] bg-emerald-600">Enhanced</Badge>
                                       )}
                                       {page.approvedAt && (
-                                        <Badge className="text-[10px] bg-green-500">Approved</Badge>
+                                        <Badge className="text-[10px] bg-success">Approved</Badge>
                                       )}
                                     </div>
                                     
-                                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/50 text-white text-xs flex items-center justify-center">
+                                    <div className="absolute top-2 right-2 w-6 h-6 rounded-lg bg-black/50 text-white text-xs flex items-center justify-center">
                                       {page.index}
                                     </div>
                                     
                                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                       <Button 
-                                        size="sm" 
+                                        size="icon-sm" 
                                         variant="secondary"
-                                        className="h-9 w-9 p-0 rounded-lg"
                                         onClick={() => setViewingPage({ bookId: book.id, page })}
                                       >
                                         <Eye className="h-4 w-4" />
                                       </Button>
                                       <Button 
-                                        size="sm" 
+                                        size="icon-sm" 
                                         variant="secondary"
-                                        className="h-9 w-9 p-0 rounded-lg"
                                         onClick={() => approvePage(book.id, page.id)}
                                       >
-                                        <Check className={cn("h-4 w-4", page.approvedAt && "text-green-500")} />
+                                        <Check className={cn("h-4 w-4", page.approvedAt && "text-success")} />
                                       </Button>
                                       <Button 
-                                        size="sm" 
+                                        size="icon-sm" 
                                         variant="secondary"
-                                        className="h-9 w-9 p-0 rounded-lg"
                                         onClick={() => enhancePage(book, page)}
                                         disabled={isPageEnhancing || !!page.enhancedImageBase64}
                                       >
@@ -1894,9 +1892,8 @@ export default function BulkCreatePage() {
                                         )}
                                       </Button>
                                       <Button 
-                                        size="sm" 
+                                        size="icon-sm" 
                                         variant="secondary"
-                                        className="h-9 w-9 p-0 rounded-lg"
                                         onClick={() => regeneratePage(book, page)}
                                       >
                                         <RefreshCw className="h-4 w-4" />
@@ -1910,7 +1907,7 @@ export default function BulkCreatePage() {
                                     )}
                                   </>
                                 ) : (
-                                  <div className="w-full h-full flex flex-col items-center justify-center bg-muted/30">
+                                  <div className="w-full h-full flex flex-col items-center justify-center">
                                     <ImageIcon className="h-8 w-8 text-muted-foreground mb-2" />
                                     <span className="text-xs text-muted-foreground">Not generated</span>
                                   </div>

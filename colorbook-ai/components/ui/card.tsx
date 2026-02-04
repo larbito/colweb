@@ -4,8 +4,9 @@ import { cn } from "@/lib/utils";
 /**
  * Card Design System - ColorBook AI
  * 
- * Consistent card styling using CSS variables for light/dark mode:
- * - Border radius: 16px (1rem)
+ * Consistent card styling:
+ * - Border radius: 16px (rounded-2xl)
+ * - Padding: 24px (p-6)
  * - Border: uses --border token
  * - Background: uses --card token
  */

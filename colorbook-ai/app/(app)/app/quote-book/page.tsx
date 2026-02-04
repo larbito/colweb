@@ -1360,13 +1360,13 @@ export default function QuoteBookPage() {
                       key={page.page}
                       className="group overflow-hidden border-border/50 hover:shadow-lg transition-all duration-200"
                     >
-                      {/* Image Preview - WHITE PAPER CONTAINER */}
+                      {/* Image Preview - Paper Treatment */}
                       <div 
-                        className="aspect-[3/4] relative cursor-pointer"
+                        className="p-2 cursor-pointer"
                         onClick={() => page.status === "done" && openPageViewer(page.page)}
                       >
-                        {/* White paper background container */}
-                        <div className="absolute inset-2 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                        {/* Paper container - always white background */}
+                        <div className="paper-preview aspect-[3/4] relative">
                           {page.imageBase64 ? (
                             <>
                               <img
@@ -1377,13 +1377,13 @@ export default function QuoteBookPage() {
                               {/* Badges */}
                               <div className="absolute top-1 left-1 flex flex-col gap-1">
                                 {page.enhanceStatus === "enhanced" && (
-                                  <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/90">
+                                  <Badge className="text-[10px] px-1.5 py-0 bg-emerald-600">
                                     <Sparkles className="h-2.5 w-2.5 mr-1" />
                                     HD
                                   </Badge>
                                 )}
                                 {page.finalLetterStatus === "done" && (
-                                  <Badge className="text-[10px] px-1.5 py-0 bg-green-500">
+                                  <Badge className="text-[10px] px-1.5 py-0 bg-success">
                                     <CheckCircle2 className="h-2.5 w-2.5 mr-1" />
                                     Print
                                   </Badge>
@@ -1395,27 +1395,27 @@ export default function QuoteBookPage() {
                               </div>
                             </>
                           ) : page.status === "generating" ? (
-                            <div className="flex flex-col items-center justify-center h-full gap-2 bg-gray-50">
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gray-50">
                               <Loader2 className="h-8 w-8 animate-spin text-primary" />
                               <span className="text-xs text-muted-foreground">Generating...</span>
                             </div>
                           ) : page.enhanceStatus === "enhancing" ? (
-                            <div className="flex flex-col items-center justify-center h-full gap-2 bg-gray-50">
-                              <Sparkles className="h-8 w-8 animate-pulse text-purple-500" />
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gray-50">
+                              <Sparkles className="h-8 w-8 animate-pulse text-emerald-500" />
                               <span className="text-xs text-muted-foreground">Enhancing...</span>
                             </div>
                           ) : page.finalLetterStatus === "processing" ? (
-                            <div className="flex flex-col items-center justify-center h-full gap-2 bg-gray-50">
-                              <PanelTop className="h-8 w-8 animate-pulse text-orange-500" />
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gray-50">
+                              <PanelTop className="h-8 w-8 animate-pulse text-amber-500" />
                               <span className="text-xs text-muted-foreground">Processing...</span>
                             </div>
                           ) : page.status === "failed" ? (
-                            <div className="flex flex-col items-center justify-center h-full gap-2 bg-red-50">
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-red-50">
                               <AlertCircle className="h-8 w-8 text-destructive" />
                               <span className="text-xs text-destructive">Failed</span>
                             </div>
                           ) : (
-                            <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-gray-50">
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground bg-gray-50">
                               <Quote className="h-10 w-10 opacity-20" />
                             </div>
                           )}
