@@ -186,24 +186,38 @@ async function preValidateImageBackground(imageBase64: string): Promise<{ valid:
     
     console.log(`[imageValidator] Pre-validation: borderBrightness=${avgBorderBrightness.toFixed(1)}, blackRatio=${(blackRatio * 100).toFixed(1)}%`);
     
-    // GUARD: If border is dark (< 200), we're likely looking at a dark UI background
-    if (avgBorderBrightness < 200) {
-      console.error(`[imageValidator] INVALID INPUT: Dark border detected (brightness=${avgBorderBrightness.toFixed(1)}). This is NOT a coloring page with white background.`);
-      return { valid: false, reason: `Dark border detected (brightness=${avgBorderBrightness.toFixed(1)}). Ensure you're validating raw PNG, not a screenshot or UI overlay.`, blackRatio };
+    // GUARD: Border brightness must be >= 240 (near white)
+    // A coloring page should have pure white borders
+    if (avgBorderBrightness < 240) {
+      console.error(`[imageValidator] DARK BACKGROUND DETECTED: borderBrightness=${avgBorderBrightness.toFixed(1)} < 240. This image has a dark/non-white background.`);
+      return { 
+        valid: false, 
+        reason: `dark_background: Border brightness ${avgBorderBrightness.toFixed(1)} < 240. Image has non-white background.`, 
+        blackRatio 
+      };
     }
     
-    // GUARD: If > 40% of pixels are black, something is very wrong
-    if (blackRatio > 0.40) {
-      console.error(`[imageValidator] INVALID INPUT: Too much black (${(blackRatio * 100).toFixed(1)}%). This doesn't look like a coloring page.`);
-      return { valid: false, reason: `Too much black (${(blackRatio * 100).toFixed(1)}%). This doesn't look like a coloring page.`, blackRatio };
+    // GUARD: Black ratio must be <= 60%
+    // More than 60% black means the image is mostly filled/dark
+    if (blackRatio > 0.60) {
+      console.error(`[imageValidator] TOO MUCH BLACK: ${(blackRatio * 100).toFixed(1)}% > 60%. This image is mostly dark.`);
+      return { 
+        valid: false, 
+        reason: `dark_background: Black ratio ${(blackRatio * 100).toFixed(1)}% > 60%. Image is mostly dark.`, 
+        blackRatio 
+      };
     }
     
     return { valid: true, blackRatio };
     
   } catch (error) {
     console.error("[imageValidator] Pre-validation error:", error);
-    // On error, allow validation to proceed (don't block)
-    return { valid: true, reason: "Pre-validation skipped due to error" };
+    // On error, FAIL SAFE - assume image is invalid and trigger retry
+    // Better to retry than to show a potentially dark image
+    return { 
+      valid: false, 
+      reason: `pre_validation_error: ${error instanceof Error ? error.message : "Unknown error"}` 
+    };
   }
 }
 
@@ -252,21 +266,24 @@ export async function validateGeneratedImage(
   }
 
   // PRE-VALIDATION: Check that we have valid input (white background, reasonable black ratio)
+  // This is a HARD FAIL - dark backgrounds MUST trigger retry, not pass through
   const preCheck = await preValidateImageBackground(imageBase64);
   if (!preCheck.valid) {
-    console.error(`[imageValidator] Pre-validation FAILED: ${preCheck.reason}`);
-    // Return a special result indicating invalid input (not a generation quality issue)
+    console.error(`[imageValidator] Pre-validation HARD FAIL: ${preCheck.reason}`);
+    // CRITICAL FIX: Return valid=FALSE to trigger retry
+    // A dark background is a GENERATION ERROR, not an input error
     return {
-      valid: true, // Mark as valid so we don't retry - this is an INPUT error, not generation error
+      valid: false, // MUST be false to trigger retry
       outlineValidation: {
-        valid: true,
-        hasBlackFills: false,
+        valid: false,
+        hasBlackFills: true, // Treat dark background as a "fill" issue
         hasGrayscale: false,
         hasUnwantedBorder: false,
-        fillLocations: [],
-        confidence: 0,
-        notes: `PRE-VALIDATION SKIPPED: ${preCheck.reason}`,
+        fillLocations: ["entire image - dark background detected"],
+        confidence: 1.0,
+        notes: `PRE-VALIDATION FAILED: ${preCheck.reason}`,
       },
+      retryReinforcement: `CRITICAL ERROR: Generated image has dark/black background. MUST have PURE WHITE background (RGB 255,255,255). NO dark colors, NO gray background, NO filled areas. Only BLACK OUTLINES on WHITE.`,
     };
   }
 

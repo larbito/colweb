@@ -158,12 +158,20 @@ export async function POST(request: NextRequest) {
 
     let lastValidationResult: Awaited<ReturnType<typeof validateGeneratedImage>> | null = null;
     let bestImage: string | null = null;
+    let bestImageAttemptId: string | null = null; // Track which attempt produced the best image
     
     // Track wall time
     const startTime = Date.now();
+    
+    // Generate a unique request ID to track this generation session
+    const requestId = `${page}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    console.log(`[generate-one] Page ${page}: Request ${requestId} starting`);
 
-    // SILENT AUTO-RETRY LOOP - keeps going until PASS or limits reached
+    // SILENT AUTO-RETRY LOOP - runs STRICTLY SEQUENTIALLY
+    // Each attempt must complete fully before the next one starts
     for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_PAGE; attempt++) {
+      // Generate attempt ID for tracking
+      const attemptId = `${requestId}-attempt${attempt}`;
       // Check wall time limit
       const elapsedMs = Date.now() - startTime;
       if (elapsedMs >= MAX_WALL_TIME_MS) {
@@ -207,7 +215,7 @@ export async function POST(request: NextRequest) {
           extraCoverageReinforcement: attempt > 2,
         });
 
-        console.log(`[generate-one] Page ${page}: Attempt ${attempt}/${MAX_ATTEMPTS_PER_PAGE} (prompt: ${finalPrompt.length} chars, elapsed: ${Math.round(elapsedMs/1000)}s)`);
+        console.log(`[generate-one] Page ${page}: [${attemptId}] Attempt ${attempt}/${MAX_ATTEMPTS_PER_PAGE} (prompt: ${finalPrompt.length} chars, elapsed: ${Math.round(elapsedMs/1000)}s)`);
 
         // Map size to GPT Image model compatible size
         const gptSize = SIZE_TO_GPT[size] || "1024x1536";
@@ -222,7 +230,7 @@ export async function POST(request: NextRequest) {
         });
 
         if (!result.images || result.images.length === 0) {
-          console.log(`[generate-one] Page ${page}: No image generated on attempt ${attempt}`);
+          console.log(`[generate-one] Page ${page}: [${attemptId}] No image generated on attempt ${attempt}`);
           await delay(getRetryDelay(attempt));
           continue;
         }
@@ -232,14 +240,20 @@ export async function POST(request: NextRequest) {
         // ================================================
         let imageBase64 = result.images[0];
         try {
-          console.log(`[generate-one] Page ${page}: Applying pure B/W postprocess`);
+          console.log(`[generate-one] Page ${page}: [${attemptId}] Applying pure B/W postprocess`);
           imageBase64 = await forcePureBlackWhite(imageBase64);
         } catch (ppError) {
-          console.error(`[generate-one] Page ${page}: Postprocess error:`, ppError);
+          console.error(`[generate-one] Page ${page}: [${attemptId}] Postprocess error:`, ppError);
           // Continue with original image if postprocess fails
         }
         
-        bestImage = imageBase64;
+        // Track this image with its attempt ID
+        // Only update bestImage if this attempt is newer (prevents race conditions)
+        const shouldUpdateBest = !bestImageAttemptId || attemptId > bestImageAttemptId;
+        if (shouldUpdateBest) {
+          bestImage = imageBase64;
+          bestImageAttemptId = attemptId;
+        }
 
         // VALIDATION STEP
         if (validateOutline || shouldValidateCharacter || shouldValidateComposition) {
@@ -253,17 +267,19 @@ export async function POST(request: NextRequest) {
           
           lastValidationResult = validationResult;
 
-          // Log validation results (brief)
-          console.log(`[generate-one] Page ${page}: Validation - valid: ${validationResult.valid}`);
+          // Log validation results with detail
+          const outlineNotes = validationResult.outlineValidation?.notes || "";
+          console.log(`[generate-one] Page ${page}: [${attemptId}] Validation - valid: ${validationResult.valid}, outline: ${validationResult.outlineValidation?.valid}, notes: ${outlineNotes.slice(0, 100)}`);
 
           // If validation passed, return SUCCESS!
           if (validationResult.valid) {
-            console.log(`[generate-one] Page ${page}: ✓ PASS on attempt ${attempt}`);
+            console.log(`[generate-one] Page ${page}: [${attemptId}] ✓ PASS on attempt ${attempt}`);
             return NextResponse.json({
               page,
               status: "done",
               imageBase64,
               attempts: attempt,
+              attemptId,
               validation: {
                 passed: true,
                 character: validationResult.characterValidation,
@@ -274,26 +290,38 @@ export async function POST(request: NextRequest) {
             });
           }
 
-          // Validation failed - log briefly and continue retrying
-          console.log(`[generate-one] Page ${page}: Validation failed, retrying...`);
+          // Validation failed - log details and continue retrying
+          // IMPORTANT: Do NOT save this image - it failed validation
+          console.log(`[generate-one] Page ${page}: [${attemptId}] ✗ FAIL - validation failed, will retry. Reason: ${validationResult.outlineValidation?.notes || "unknown"}`);
+          
+          // Clear bestImage if this was a dark background failure (never keep dark images)
+          if (outlineNotes.includes("dark_background") || outlineNotes.includes("PRE-VALIDATION FAILED")) {
+            console.log(`[generate-one] Page ${page}: [${attemptId}] Discarding dark background image`);
+            if (bestImageAttemptId === attemptId) {
+              bestImage = null;
+              bestImageAttemptId = null;
+            }
+          }
+          
           await delay(getRetryDelay(attempt));
           continue;
           
         } else {
           // No validation requested - return immediately with postprocessed image
-          console.log(`[generate-one] Page ${page}: ✓ Success (no validation) on attempt ${attempt}`);
+          console.log(`[generate-one] Page ${page}: [${attemptId}] ✓ Success (no validation) on attempt ${attempt}`);
           return NextResponse.json({
             page,
             status: "done",
             imageBase64,
             attempts: attempt,
+            attemptId,
           });
         }
 
       } catch (attemptError) {
         // CHECK FOR NON-RETRYABLE ERRORS - STOP IMMEDIATELY
         if (isNonRetryableError(attemptError)) {
-          console.error(`[generate-one] Page ${page}: NON-RETRYABLE ERROR - ${attemptError.code}`);
+          console.error(`[generate-one] Page ${page}: [${attemptId}] NON-RETRYABLE ERROR - ${attemptError.code}`);
           
           // Return "paused" status for billing/quota errors
           const isPausable = ["BILLING_LIMIT", "INSUFFICIENT_QUOTA"].includes(attemptError.code);
@@ -317,7 +345,7 @@ export async function POST(request: NextRequest) {
         
         // Regular retryable error - use exponential backoff
         const errorMsg = attemptError instanceof Error ? attemptError.message : "Generation error";
-        console.error(`[generate-one] Page ${page}: Attempt ${attempt} error: ${errorMsg}`);
+        console.error(`[generate-one] Page ${page}: [${attemptId}] Attempt ${attempt} error: ${errorMsg}`);
         
         // Exponential backoff for network/rate limit errors
         await delay(getRetryDelay(attempt));
@@ -328,17 +356,22 @@ export async function POST(request: NextRequest) {
     // ================================================
     // LIMITS REACHED - Return best image if we have one
     // ================================================
-    console.log(`[generate-one] Page ${page}: Limits reached after ${MAX_ATTEMPTS_PER_PAGE} attempts`);
+    console.log(`[generate-one] Page ${page}: [${requestId}] Limits reached after ${MAX_ATTEMPTS_PER_PAGE} attempts`);
     
-    // If we have ANY image, return it as done (user should see something)
-    // The postprocessed image guarantees white background
-    if (bestImage) {
-      console.log(`[generate-one] Page ${page}: Returning best available image`);
+    // IMPORTANT: Only return an image if it passed basic quality checks
+    // Never return a dark background image
+    const lastValidationNotes = lastValidationResult?.outlineValidation?.notes || "";
+    const isDarkBackground = lastValidationNotes.includes("dark_background") || 
+                             lastValidationNotes.includes("PRE-VALIDATION FAILED");
+    
+    if (bestImage && !isDarkBackground) {
+      console.log(`[generate-one] Page ${page}: [${requestId}] Returning best available image (attemptId: ${bestImageAttemptId})`);
       return NextResponse.json({
         page,
         status: "done", // Still return "done" so user sees an image
         imageBase64: bestImage,
         attempts: MAX_ATTEMPTS_PER_PAGE,
+        attemptId: bestImageAttemptId,
         validation: lastValidationResult ? {
           passed: false,
           note: "Image returned after max retries - quality may vary",
@@ -347,6 +380,18 @@ export async function POST(request: NextRequest) {
           coverage: lastValidationResult.coverageValidation,
           bottomFill: lastValidationResult.bottomFillValidation,
         } : undefined,
+      });
+    }
+    
+    // If no valid image (all were dark backgrounds), report error
+    if (isDarkBackground) {
+      console.error(`[generate-one] Page ${page}: [${requestId}] All attempts produced dark backgrounds - no valid image`);
+      return NextResponse.json({
+        page,
+        status: "error",
+        error: "Unable to generate image with white background after multiple attempts. The model keeps producing dark images.",
+        errorCode: "DARK_BACKGROUND_PERSISTENT",
+        attempts: MAX_ATTEMPTS_PER_PAGE,
       });
     }
 
