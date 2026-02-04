@@ -116,16 +116,45 @@ async function renderPageToImage(
     svgContent = createBelongsToPageSVG(width, height, options);
   }
   
-  // Convert SVG to PNG using sharp
-  const pngBuffer = await sharp(Buffer.from(svgContent))
-    .png()
-    .toBuffer();
+  console.log(`[front-matter] SVG content length: ${svgContent.length} chars`);
   
-  return pngBuffer.toString("base64");
+  try {
+    // Convert SVG to PNG using sharp
+    const pngBuffer = await sharp(Buffer.from(svgContent))
+      .flatten({ background: "#ffffff" }) // Ensure white background
+      .png()
+      .toBuffer();
+    
+    console.log(`[front-matter] PNG generated: ${pngBuffer.length} bytes`);
+    return pngBuffer.toString("base64");
+  } catch (svgError) {
+    console.error(`[front-matter] SVG to PNG failed:`, svgError);
+    
+    // Fallback: create a simple text image using sharp's composite
+    const fallbackText = key === "title" 
+      ? options.bookTitle || "My Coloring Book"
+      : key === "copyright" 
+        ? `© ${options.year} ${options.authorName || "Author"}`
+        : "This Book Belongs To";
+    
+    // Create a white canvas with simple text (using SVG as workaround)
+    const simpleSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100%" height="100%" fill="white"/>
+      <text x="${width/2}" y="${height/2}" font-family="sans-serif" font-size="48" text-anchor="middle" fill="#333">${escapeXml(fallbackText)}</text>
+    </svg>`;
+    
+    const fallbackBuffer = await sharp(Buffer.from(simpleSvg))
+      .flatten({ background: "#ffffff" })
+      .png()
+      .toBuffer();
+    
+    return fallbackBuffer.toString("base64");
+  }
 }
 
 /**
  * Create Title Page SVG
+ * Uses simple fonts that sharp can render
  */
 function createTitlePageSVG(
   width: number, 
@@ -136,49 +165,34 @@ function createTitlePageSVG(
   const subtitle = options.subtitle ? escapeXml(options.subtitle) : "";
   const author = options.authorName ? escapeXml(options.authorName) : "";
   
+  // Truncate title if too long
+  const displayTitle = title.length > 40 ? title.substring(0, 37) + "..." : title;
+  
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="100%" height="100%" fill="white"/>
     
-    <!-- Decorative border -->
     <rect x="50" y="50" width="${width - 100}" height="${height - 100}" 
           fill="none" stroke="#e0e0e0" stroke-width="2" rx="10"/>
     
-    <!-- Title -->
     <text x="${width / 2}" y="${height * 0.35}" 
-          font-family="Georgia, serif" font-size="72" font-weight="bold" 
-          text-anchor="middle" fill="#333333">
-      ${wrapText(title, 48, width - 200)}
-    </text>
+          font-family="sans-serif" font-size="64" font-weight="bold" 
+          text-anchor="middle" fill="#333333">${displayTitle}</text>
     
-    ${subtitle ? `
-    <!-- Subtitle -->
-    <text x="${width / 2}" y="${height * 0.45}" 
-          font-family="Georgia, serif" font-size="36" font-style="italic"
-          text-anchor="middle" fill="#666666">
-      ${subtitle}
-    </text>
-    ` : ""}
+    ${subtitle ? `<text x="${width / 2}" y="${height * 0.45}" 
+          font-family="sans-serif" font-size="32"
+          text-anchor="middle" fill="#666666">${subtitle}</text>` : ""}
     
-    <!-- Decorative line -->
     <line x1="${width * 0.3}" y1="${height * 0.52}" 
           x2="${width * 0.7}" y2="${height * 0.52}" 
           stroke="#cccccc" stroke-width="2"/>
     
-    ${author ? `
-    <!-- Author -->
-    <text x="${width / 2}" y="${height * 0.65}" 
-          font-family="Arial, sans-serif" font-size="32"
-          text-anchor="middle" fill="#555555">
-      by ${author}
-    </text>
-    ` : ""}
+    ${author ? `<text x="${width / 2}" y="${height * 0.65}" 
+          font-family="sans-serif" font-size="28"
+          text-anchor="middle" fill="#555555">by ${author}</text>` : ""}
     
-    <!-- Footer text -->
     <text x="${width / 2}" y="${height * 0.92}" 
-          font-family="Arial, sans-serif" font-size="18"
-          text-anchor="middle" fill="#999999">
-      A Coloring Book
-    </text>
+          font-family="sans-serif" font-size="18"
+          text-anchor="middle" fill="#999999">A Coloring Book</text>
   </svg>`;
 }
 
@@ -193,41 +207,26 @@ function createCopyrightPageSVG(
   const title = escapeXml(options.bookTitle || "My Coloring Book");
   const author = options.authorName ? escapeXml(options.authorName) : "Author";
   const year = options.year || new Date().getFullYear().toString();
-  const publisher = options.publisher ? escapeXml(options.publisher) : "";
   
-  const lines = [
-    title,
-    "",
-    `Copyright © ${year} ${author}`,
-    "All rights reserved.",
-    "",
-    "No part of this publication may be reproduced,",
-    "distributed, or transmitted in any form or by any means,",
-    "including photocopying, recording, or other electronic",
-    "or mechanical methods, without prior written permission.",
-    "",
-    publisher ? `Published by ${publisher}` : "",
-    "",
-    "This is a coloring book for personal use.",
-    "",
-    "Created with ColorBook AI",
-  ].filter(line => line !== undefined);
-  
-  const startY = height * 0.35;
-  const lineHeight = 36;
-  
-  const textElements = lines.map((line, i) => {
-    const y = startY + i * lineHeight;
-    const fontSize = i === 0 ? 28 : 20;
-    const fontWeight = i === 0 ? "bold" : "normal";
-    return `<text x="${width / 2}" y="${y}" 
-                  font-family="Arial, sans-serif" font-size="${fontSize}" font-weight="${fontWeight}"
-                  text-anchor="middle" fill="#333333">${escapeXml(line)}</text>`;
-  }).join("\n    ");
+  const startY = height * 0.30;
+  const lineHeight = 40;
   
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="100%" height="100%" fill="white"/>
-    ${textElements}
+    
+    <text x="${width / 2}" y="${startY}" font-family="sans-serif" font-size="28" font-weight="bold" text-anchor="middle" fill="#333333">${title}</text>
+    
+    <text x="${width / 2}" y="${startY + lineHeight * 2}" font-family="sans-serif" font-size="22" text-anchor="middle" fill="#333333">Copyright ${year} ${author}</text>
+    
+    <text x="${width / 2}" y="${startY + lineHeight * 3}" font-family="sans-serif" font-size="20" text-anchor="middle" fill="#333333">All rights reserved.</text>
+    
+    <text x="${width / 2}" y="${startY + lineHeight * 5}" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#555555">No part of this publication may be reproduced,</text>
+    <text x="${width / 2}" y="${startY + lineHeight * 6}" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#555555">distributed, or transmitted in any form</text>
+    <text x="${width / 2}" y="${startY + lineHeight * 7}" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#555555">without prior written permission.</text>
+    
+    <text x="${width / 2}" y="${startY + lineHeight * 9}" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#555555">This is a coloring book for personal use.</text>
+    
+    <text x="${width / 2}" y="${startY + lineHeight * 11}" font-family="sans-serif" font-size="16" text-anchor="middle" fill="#999999">Created with ColorBook AI</text>
   </svg>`;
 }
 
@@ -240,47 +239,31 @@ function createBelongsToPageSVG(
   options: z.infer<typeof requestSchema>["options"]
 ): string {
   const name = options.belongsToName ? escapeXml(options.belongsToName) : "";
-  const showLine = !name; // Show write-in line if no name provided
   
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="100%" height="100%" fill="white"/>
     
-    <!-- Decorative frame -->
     <rect x="100" y="100" width="${width - 200}" height="${height - 200}" 
           fill="none" stroke="#e0e0e0" stroke-width="3" rx="20"/>
     
-    <!-- Stars decoration -->
-    <text x="${width / 2}" y="${height * 0.25}" 
-          font-family="Arial" font-size="48" text-anchor="middle" fill="#FFD700">
-      ⭐ ⭐ ⭐
-    </text>
+    <circle cx="${width * 0.35}" cy="${height * 0.25}" r="15" fill="#FFD700"/>
+    <circle cx="${width * 0.5}" cy="${height * 0.25}" r="15" fill="#FFD700"/>
+    <circle cx="${width * 0.65}" cy="${height * 0.25}" r="15" fill="#FFD700"/>
     
-    <!-- Title -->
     <text x="${width / 2}" y="${height * 0.4}" 
-          font-family="Georgia, serif" font-size="56" font-weight="bold"
-          text-anchor="middle" fill="#333333">
-      This Book Belongs To
-    </text>
+          font-family="sans-serif" font-size="48" font-weight="bold"
+          text-anchor="middle" fill="#333333">This Book Belongs To</text>
     
-    ${name ? `
-    <!-- Name (filled in) -->
-    <text x="${width / 2}" y="${height * 0.55}" 
-          font-family="Georgia, serif" font-size="48" font-style="italic"
-          text-anchor="middle" fill="#555555">
-      ${name}
-    </text>
-    ` : `
-    <!-- Write-in line -->
-    <line x1="${width * 0.25}" y1="${height * 0.55}" 
+    ${name ? `<text x="${width / 2}" y="${height * 0.55}" 
+          font-family="sans-serif" font-size="40"
+          text-anchor="middle" fill="#555555">${name}</text>` 
+    : `<line x1="${width * 0.25}" y1="${height * 0.55}" 
           x2="${width * 0.75}" y2="${height * 0.55}" 
-          stroke="#333333" stroke-width="2"/>
-    `}
+          stroke="#333333" stroke-width="2"/>`}
     
-    <!-- Decorative hearts -->
-    <text x="${width / 2}" y="${height * 0.75}" 
-          font-family="Arial" font-size="36" text-anchor="middle" fill="#FF6B6B">
-      ♥ ♥ ♥
-    </text>
+    <circle cx="${width * 0.35}" cy="${height * 0.75}" r="12" fill="#FF6B6B"/>
+    <circle cx="${width * 0.5}" cy="${height * 0.75}" r="12" fill="#FF6B6B"/>
+    <circle cx="${width * 0.65}" cy="${height * 0.75}" r="12" fill="#FF6B6B"/>
   </svg>`;
 }
 
@@ -296,16 +279,7 @@ function escapeXml(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-/**
- * Wrap text to fit within width (simple version)
- */
-function wrapText(text: string, maxChars: number, maxWidth: number): string {
-  if (text.length <= maxChars) return text;
-  
-  // For SVG, we'd ideally use tspan elements for multi-line
-  // For now, just truncate
-  return text.substring(0, maxChars - 3) + "...";
-}
+// wrapText removed - truncation is handled inline in SVG generators
 
 /**
  * Helper functions for pdf-lib rendering (not currently used but kept for reference)

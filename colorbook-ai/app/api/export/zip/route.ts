@@ -11,19 +11,34 @@ import {
 export const maxDuration = 300; // 5 minutes for large ZIPs
 
 const pageImageSchema = z.object({
-  pageIndex: z.number(),
-  imageBase64: z.string(),
-  title: z.string().optional(),
-  prompt: z.string().optional(),
+    pageIndex: z.number(),
+    imageBase64: z.string(),
+    title: z.string().optional(),
+    prompt: z.string().optional(),
   isProcessed: z.boolean().default(false),
+});
+  
+const extraSchema = z.object({
+    type: z.enum(["title", "copyright", "belongs-to"]),
+    imageBase64: z.string(),
 });
 
 const requestSchema = z.object({
   pages: z.array(pageImageSchema),
-  bookTitle: z.string().default("Coloring-Book"),
+  // Support both naming conventions
+  bookTitle: z.string().optional(),
+  title: z.string().optional(),
   includeMetadata: z.boolean().default(true),
-  processToLetter: z.boolean().default(true), // Post-process to US Letter
-});
+  processToLetter: z.boolean().default(true),
+  // Front matter pages
+  extras: z.array(extraSchema).optional(),
+  // Additional metadata (ignored for now but accepted)
+  metadata: z.any().optional(),
+}).transform(data => ({
+  ...data,
+  // Normalize to bookTitle
+  bookTitle: data.bookTitle || data.title || "Coloring-Book",
+}));
 
 /**
  * POST /api/export/zip
@@ -111,6 +126,23 @@ export async function POST(request: NextRequest) {
       }
     }
     
+    // Add front matter pages (extras)
+    if (data.extras && data.extras.length > 0) {
+      const frontMatterFolder = zip.folder("front-matter");
+      if (frontMatterFolder) {
+        for (const extra of data.extras) {
+          try {
+            const imageBuffer = base64ToBuffer(extra.imageBase64);
+            const filename = `${extra.type}-page.png`;
+            frontMatterFolder.file(filename, imageBuffer);
+            console.log(`[export-zip] Added front matter: ${filename}`);
+          } catch (err) {
+            console.error(`[export-zip] Failed to add front matter ${extra.type}:`, err);
+          }
+        }
+      }
+    }
+    
     // Add metadata if requested
     if (data.includeMetadata) {
       zip.file("metadata.json", JSON.stringify(metadata, null, 2));
@@ -141,16 +173,20 @@ ${data.includeMetadata ? "- metadata.json - Page titles and prompts\n" : ""}
       compressionOptions: { level: 6 },
     });
     
-    const zipBase64 = zipBuffer.toString("base64");
+    const filename = `${data.bookTitle.replace(/[^a-z0-9]/gi, "-")}-coloring-book.zip`;
     
-    return NextResponse.json({
-      success: true,
-      zipBase64,
-      filename: `${data.bookTitle.replace(/[^a-z0-9]/gi, "-")}-coloring-book.zip`,
-      processedPages: processedCount,
-      totalSize: zipBuffer.length,
+    // Return ZIP as binary blob (not JSON)
+    // Convert Buffer to Uint8Array for NextResponse compatibility
+    return new NextResponse(new Uint8Array(zipBuffer), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "X-File-Count": String(processedCount + (data.extras?.length || 0)),
+        "X-Total-Size": String(zipBuffer.length),
+      },
     });
-    
+
   } catch (error) {
     console.error("[export-zip] Error:", error);
     return NextResponse.json(
