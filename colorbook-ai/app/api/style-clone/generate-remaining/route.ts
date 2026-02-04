@@ -55,12 +55,12 @@ const requestSchema = z.object({
   skipPageIndices: z.array(z.number()).optional(),
 });
 
-// DALL-E 3 supported sizes: 1024x1024, 1024x1792, 1792x1024
-const SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = {
-  "1024x1326": "1024x1792",
-  "1024x1280": "1024x1792",
-  "1024x1536": "1024x1792",
-  "1024x1448": "1024x1792",
+// GPT Image model supported sizes: 1024x1024, 1024x1536, 1536x1024
+const SIZE_MAP: Record<string, "1024x1536" | "1024x1024" | "1536x1024"> = {
+  "1024x1326": "1024x1536",
+  "1024x1280": "1024x1536",
+  "1024x1536": "1024x1536",
+  "1024x1448": "1024x1536",
   "1024x1024": "1024x1024",
 };
 
@@ -74,10 +74,10 @@ async function generateSinglePage(params: {
   styleContract: StyleContract | null;
   characterBible: string;
   spec: GenerationSpec;
-  dalleSize: "1024x1792" | "1024x1024" | "1792x1024";
+  gptSize: "1024x1536" | "1024x1024" | "1536x1024";
   complexity: Complexity;
 }): Promise<StyleCloneImage> {
-  const { pageIndex, scenePrompt, themePack, styleContract, characterBible, spec, dalleSize, complexity } = params;
+  const { pageIndex, scenePrompt, themePack, styleContract, characterBible, spec, gptSize, complexity } = params;
 
   const thresholds = getQualityThresholds(complexity);
   let imageBase64: string | undefined;
@@ -110,7 +110,7 @@ Interior areas must remain white/unfilled.`;
       const genResult = await generateImage({
         prompt: finalPromptUsed,
         n: 1,
-        size: dalleSize,
+        size: gptSize,
       });
 
       if (!genResult.images || genResult.images.length === 0) {
@@ -145,7 +145,7 @@ Interior areas must remain white/unfilled.`;
       provider: "openai",
       imageModel: "dall-e-3",
       textModel: "gpt-4o",
-      size: dalleSize,
+      size: gptSize,
       promptHash: crypto.createHash("md5").update(finalPromptUsed).digest("hex").substring(0, 8),
       promptPreview: finalPromptUsed.substring(0, 200),
       finalPrompt: finalPromptUsed,
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
     const { prompts, themePack, styleContract, complexity, lineThickness, sizePreset, mode, characterName, characterDescription, skipPageIndices = [] } = parseResult.data;
 
     const preset = KDP_SIZE_PRESETS[sizePreset] || KDP_SIZE_PRESETS["8.5x11"];
-    const dalleSize = SIZE_MAP[preset.pixels] || "1024x1792";
+    const gptSize = SIZE_MAP[preset.pixels] || "1024x1536";
 
     const spec: GenerationSpec = {
       trimSize: sizePreset,
@@ -224,7 +224,7 @@ export async function POST(request: NextRequest) {
           styleContract: styleContract as StyleContract | null,
           characterBible,
           spec,
-          dalleSize,
+          gptSize,
           complexity: complexity as Complexity,
         }))
       );

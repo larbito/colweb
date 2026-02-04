@@ -56,17 +56,17 @@ const requestSchema = z.object({
   referenceImageBase64: z.string().optional(), // Reference style image
 });
 
-// DALL-E 3 supported sizes: 1024x1024, 1024x1792, 1792x1024
-const SIZE_MAP: Record<string, "1024x1792" | "1024x1024" | "1792x1024"> = {
-  "1024x1326": "1024x1792",
-  "1024x1280": "1024x1792",
-  "1024x1536": "1024x1792",
-  "1024x1448": "1024x1792",
+// GPT Image model supported sizes: 1024x1024, 1024x1536, 1536x1024
+const SIZE_MAP: Record<string, "1024x1536" | "1024x1024" | "1536x1024"> = {
+  "1024x1326": "1024x1536",
+  "1024x1280": "1024x1536",
+  "1024x1536": "1024x1536",
+  "1024x1448": "1024x1536",
   "1024x1024": "1024x1024",
 };
 
-// Image model configuration
-const IMAGE_MODEL = "gpt-image-1.5"; // Latest model
+// Model configuration - GPT Image model (NOT DALL-E!)
+const IMAGE_MODEL = "gpt-image-1";
 const TEXT_MODEL = "gpt-4o";
 const MAX_RETRIES = 3;
 
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
     } = parseResult.data;
 
     const preset = KDP_SIZE_PRESETS[sizePreset] || KDP_SIZE_PRESETS["8.5x11"];
-    const dalleSize = SIZE_MAP[preset.pixels] || "1024x1792";
+    const gptSize = SIZE_MAP[preset.pixels] || "1024x1536";
 
     const spec: GenerationSpec = {
       trimSize: sizePreset,
@@ -189,7 +189,7 @@ Interior areas must remain WHITE/unfilled.`;
         const genResult = await generateImage({
           prompt: finalPromptUsed,
           n: 1,
-          size: dalleSize,
+          size: gptSize,
         });
 
         if (!genResult.images || genResult.images.length === 0) {
@@ -260,7 +260,7 @@ Interior areas must remain WHITE/unfilled.`;
       provider: "openai",
       imageModel: IMAGE_MODEL,
       textModel: TEXT_MODEL,
-      size: dalleSize,
+      size: gptSize,
       complexity,
       lineThickness,
       mode: mode || "collection",

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateImage, isOpenAIImageGenConfigured, type ImageSize as DalleImageSize } from "@/lib/services/openaiImageGen";
+import { generateImage, isOpenAIImageGenConfigured, type ImageSize as GPTImageSize } from "@/lib/services/openaiImageGen";
 import { z } from "zod";
 import {
   buildFinalColoringPrompt,
@@ -7,13 +7,14 @@ import {
   type ImageSize,
 } from "@/lib/coloringPagePromptEnforcer";
 
-// Map legacy sizes to DALL-E 3 compatible sizes
-const SIZE_TO_DALLE: Record<string, DalleImageSize> = {
+// Map sizes to GPT Image model compatible sizes
+// GPT Image model supports: 1024x1024, 1024x1536, 1536x1024
+const SIZE_TO_GPT: Record<string, GPTImageSize> = {
   "1024x1024": "1024x1024",
-  "1024x1792": "1024x1792",
-  "1792x1024": "1792x1024",
-  "1024x1536": "1024x1792", // Legacy portrait -> DALL-E 3 portrait
-  "1536x1024": "1792x1024", // Legacy landscape -> DALL-E 3 landscape
+  "1024x1536": "1024x1536", // Portrait
+  "1536x1024": "1536x1024", // Landscape
+  "1024x1792": "1024x1536", // Map DALL-E portrait to GPT portrait
+  "1792x1024": "1536x1024", // Map DALL-E landscape to GPT landscape
 };
 import {
   type CharacterIdentityProfile,
@@ -172,14 +173,14 @@ export async function POST(request: NextRequest) {
 
         console.log(`[generate-one] Page ${page}: Attempt ${attempt}/${totalAttempts} (prompt: ${finalPrompt.length} chars)`);
 
-        // Map size to DALL-E 3 compatible size
-        const dalleSize = SIZE_TO_DALLE[size] || "1024x1792";
+        // Map size to GPT Image model compatible size
+        const gptSize = SIZE_TO_GPT[size] || "1024x1536";
 
         // Generate image with context for error tracking
         const result = await generateImage({
           prompt: finalPrompt,
           n: 1,
-          size: dalleSize,
+          size: gptSize,
         }, {
           pageIndex: page,
         });

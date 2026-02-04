@@ -1,16 +1,17 @@
 /**
  * ============================================================
- * OPENAI IMAGE GENERATION SERVICE
+ * OPENAI IMAGE GENERATION SERVICE - GPT IMAGE MODEL
  * ============================================================
  * 
  * ⚠️  STRICT RULE: This is the ONLY image generation service allowed.
  * 
+ * ❌ DO NOT use DALL-E! Always use GPT image model (gpt-image-1)
  * ❌ DO NOT use Replicate, Stability, SDXL, Midjourney, or any other provider.
  * ❌ DO NOT add fallback providers.
  * ❌ DO NOT import any other image generation libraries.
  * 
  * ✅ ALL image generation in this codebase MUST go through this service.
- * ✅ This service uses ONLY the official OpenAI SDK Images API.
+ * ✅ This service uses ONLY the GPT Image model (gpt-image-1).
  * 
  * To change providers in the future, ONLY modify this file.
  * ============================================================
@@ -42,12 +43,13 @@ const openai = new Proxy({} as OpenAI, {
   },
 });
 
-// Allowed sizes for DALL-E 3
-// Supported: 1024x1024, 1024x1792, 1792x1024
-export type ImageSize = "1024x1024" | "1024x1792" | "1792x1024";
+// Allowed sizes for GPT Image model
+// Supported: 1024x1024, 1024x1536, 1536x1024, 1024x1792, 1792x1024, auto
+export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "1024x1792" | "1792x1024";
 
-// Image model to use - DALL-E 3 for best quality coloring pages
-const IMAGE_MODEL = "dall-e-3";
+// Image model to use - GPT Image model (gpt-image-1) for best quality
+// DO NOT USE DALL-E! Always use GPT image model
+const IMAGE_MODEL = "gpt-image-1";
 
 export interface GenerateImageParams {
   prompt: string;
@@ -83,7 +85,9 @@ This is a printable coloring page - the background MUST be pure white paper.
 `;
 
 /**
- * Generate images using OpenAI DALL-E 3
+ * Generate images using OpenAI GPT Image model (gpt-image-1)
+ * 
+ * IMPORTANT: DO NOT USE DALL-E! Always use the GPT image model.
  * 
  * For coloring pages, we add a mandatory prefix to ensure white background output.
  * 
@@ -93,8 +97,8 @@ This is a printable coloring page - the background MUST be pure white paper.
  * - Caller should check error type and handle accordingly
  * 
  * @param params.prompt - The prompt to send (coloring page prefix will be added)
- * @param params.n - Number of images (1 for DALL-E 3)
- * @param params.size - Image size (default "1024x1792" for portrait coloring pages)
+ * @param params.n - Number of images
+ * @param params.size - Image size (default "1024x1536" for portrait coloring pages)
  * @param context - Optional context for error tracking (pageIndex, batchId)
  */
 export async function generateImage(
@@ -104,7 +108,7 @@ export async function generateImage(
   const { 
     prompt, 
     n = 1, 
-    size = "1024x1792", // Portrait format for coloring pages (DALL-E 3 size)
+    size = "1024x1536", // Portrait format for coloring pages (GPT image size)
   } = params;
 
   if (!isOpenAIImageGenConfigured()) {
@@ -126,33 +130,24 @@ export async function generateImage(
   console.log(`[openaiImageGen] Prompt length: ${fullPrompt.length} chars`);
 
   const images: string[] = [];
-  const revisedPrompts: string[] = [];
 
-  // DALL-E 3 only supports n=1, so we loop for multiple images
-  for (let i = 0; i < Math.min(n, 4); i++) {
-    try {
-      // DALL-E 3 with HD quality and natural style for clean line art
-      const response = await openai.images.generate({
-        model: IMAGE_MODEL,
-        prompt: fullPrompt,
-        n: 1, // DALL-E 3 only supports n=1
-        size: size,
-        quality: "hd", // HD quality for crisp lines
-        style: "natural", // Natural style for cleaner artwork
-      } as OpenAI.Images.ImageGenerateParams);
+  try {
+    // GPT Image model - supports multiple images in one call
+    const response = await openai.images.generate({
+      model: IMAGE_MODEL,
+      prompt: fullPrompt,
+      n: Math.min(n, 4),
+      size: size,
+    } as OpenAI.Images.ImageGenerateParams);
 
-      const imageData = response.data?.[0];
+    if (!response.data || response.data.length === 0) {
+      throw new Error("No image data returned from API");
+    }
+
+    // Process each image
+    for (let i = 0; i < response.data.length; i++) {
+      const imageData = response.data[i];
       
-      if (!imageData) {
-        console.error(`[openaiImageGen] No image data returned for image ${i + 1}`);
-        continue;
-      }
-
-      // Handle revised prompt if present
-      if (imageData.revised_prompt) {
-        revisedPrompts.push(imageData.revised_prompt);
-      }
-
       // Handle both b64_json and url responses
       if (imageData.b64_json) {
         images.push(imageData.b64_json);
@@ -166,30 +161,23 @@ export async function generateImage(
           console.error(`[openaiImageGen] Failed to fetch image ${i + 1}: ${imageResponse.status}`);
         }
       }
-    } catch (error) {
-      // CLASSIFY THE ERROR - determines if retryable
-      const classifiedError = classifyOpenAIError(error, {
-        pageIndex: context.pageIndex,
-        batchId: context.batchId,
-      });
-      
-      // Log once for non-retryable errors (avoid spam)
-      if (isNonRetryableError(classifiedError)) {
-        console.error(`[openaiImageGen] NON-RETRYABLE ERROR: ${classifiedError.code}`, {
-          message: classifiedError.message,
-          context: classifiedError.context,
-        });
-        throw classifiedError; // Throw immediately - do not retry
-      }
-      
-      console.error(`[openaiImageGen] Retryable error on image ${i + 1}:`, classifiedError.message);
-      
-      // For retryable errors, throw if generating single image
-      if (n === 1) {
-        throw classifiedError;
-      }
-      // For multiple images, continue to next
     }
+  } catch (error) {
+    // CLASSIFY THE ERROR - determines if retryable
+    const classifiedError = classifyOpenAIError(error, {
+      pageIndex: context.pageIndex,
+      batchId: context.batchId,
+    });
+    
+    // Log for non-retryable errors
+    if (isNonRetryableError(classifiedError)) {
+      console.error(`[openaiImageGen] NON-RETRYABLE ERROR: ${classifiedError.code}`, {
+        message: classifiedError.message,
+        context: classifiedError.context,
+      });
+    }
+    
+    throw classifiedError;
   }
 
   if (images.length === 0) {
@@ -198,7 +186,7 @@ export async function generateImage(
 
   console.log(`[openaiImageGen] Successfully generated ${images.length} image(s)`);
 
-  return { images, revisedPrompts };
+  return { images };
 }
 
 /**
