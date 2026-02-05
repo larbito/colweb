@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { AppTopbar } from "@/components/app/app-topbar";
 import { PageHeader } from "@/components/app/page-header";
 import { SectionCard, SubSection } from "@/components/app/section-card";
@@ -168,9 +169,118 @@ const THEME_EXAMPLES: Record<string, string[]> = {
 // MAIN COMPONENT
 // ============================================================
 
-export default function CreateColoringBookPage() {
+function CreateColoringBookPageContent() {
   // Step tracking
   const [currentStep, setCurrentStep] = useState<CreateStep>(0);
+  
+  // === PROJECT PERSISTENCE ===
+  // User ID (for anonymous users, stored in localStorage)
+  const [userId, setUserId] = useState<string>("");
+  // Current project ID (persisted to DB)
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
+  
+  // URL params for resuming projects
+  const searchParams = useSearchParams();
+  const resumeProjectId = searchParams?.get("projectId");
+  const shouldResume = searchParams?.get("resume") === "true";
+  
+  // Initialize userId on mount
+  useEffect(() => {
+    let id = localStorage.getItem("colweb_user_id");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("colweb_user_id", id);
+    }
+    setUserId(id);
+  }, []);
+  
+  // Load existing project if resuming
+  useEffect(() => {
+    if (resumeProjectId && userId && !projectId) {
+      loadProject(resumeProjectId);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeProjectId, userId]);
+  
+  /**
+   * Load an existing project from DB for resuming
+   */
+  const loadProject = async (projId: string) => {
+    if (!userId) return;
+    
+    setIsLoadingProject(true);
+    try {
+      // Fetch project details
+      const projResponse = await fetch(`/api/projects?userId=${userId}`);
+      const projData = await projResponse.json();
+      
+      if (!projData.success || !projData.projects) {
+        throw new Error("Failed to load projects");
+      }
+      
+      const project = projData.projects.find((p: { id: string }) => p.id === projId);
+      if (!project) {
+        throw new Error("Project not found");
+      }
+      
+      // Restore project state
+      setProjectId(project.id);
+      setUserIdea(project.idea || "");
+      setBookType(project.book_type as BookType || "theme");
+      setPageCount(project.pages_requested || 10);
+      
+      // Restore settings if available
+      if (project.settings) {
+        if (project.settings.complexity) setComplexity(project.settings.complexity);
+        if (project.settings.orientation) setOrientation(project.settings.orientation);
+      }
+      
+      // Fetch prompts for this project
+      const promptsResponse = await fetch(`/api/projects/${projId}/prompts?userId=${userId}`);
+      const promptsData = await promptsResponse.json();
+      
+      if (promptsData.success && promptsData.prompts?.length > 0) {
+        // Convert prompts to page states
+        const pageStates: PageState[] = promptsData.prompts.map((p: { page_index: number; title: string; prompt_text: string; scene_description?: string; status: string }) => ({
+          page: p.page_index,
+          title: p.title,
+          prompt: p.prompt_text,
+          sceneDescription: p.scene_description || "",
+          status: p.status === "image_done" ? "done" as PageStatus : "pending" as PageStatus,
+          enhanceStatus: "none" as EnhanceStatus,
+          finalLetterStatus: "none" as ProcessingStatus,
+          activeVersion: "original" as const,
+          attempts: 0,
+          // TODO: Load imageBase64 from storage if status is "done"
+        }));
+        
+        setPages(pageStates);
+        setIsPromptImproved(true);
+        setImprovedPrompt(project.idea || "");
+        
+        // Set step based on project state
+        if (project.images_generated_count > 0 || pageStates.some(p => p.status === "done")) {
+          setCurrentStep(3); // Go to generation step
+        } else if (pageStates.length > 0) {
+          setCurrentStep(2); // Go to prompts step
+        } else {
+          setCurrentStep(1); // Go to idea step
+        }
+        
+        console.log(`[create] Loaded project ${projId}: ${pageStates.length} prompts, step ${currentStep}`);
+      } else {
+        // No prompts yet, just set to idea step
+        setCurrentStep(1);
+      }
+      
+    } catch (error) {
+      console.error("[create] Failed to load project:", error);
+    } finally {
+      setIsLoadingProject(false);
+    }
+  };
   
   // Step 0: Book Type
   const [bookType, setBookType] = useState<BookType | null>(null);
@@ -392,6 +502,109 @@ export default function CreateColoringBookPage() {
   };
 
   // ============================================================
+  // PROJECT PERSISTENCE HELPERS
+  // ============================================================
+  
+  /**
+   * Create a project in the database (draft status)
+   */
+  const createProject = async (idea: string, pagesRequested: number): Promise<string | null> => {
+    if (!userId) return null;
+    
+    try {
+      setIsCreatingProject(true);
+      const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: generatedIdea?.title || idea.slice(0, 50) || "Untitled Project",
+          projectType: "coloring_book",
+          bookType: bookType || "theme",
+          idea,
+          pagesRequested,
+          userId,
+          settings: {
+            complexity,
+            orientation,
+            pageCount: pagesRequested,
+          },
+        }),
+      });
+      
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to create project");
+      
+      const newProjectId = data.project.id;
+      setProjectId(newProjectId);
+      console.log(`[create] Project created: ${newProjectId}, pages_requested: ${pagesRequested}`);
+      return newProjectId;
+    } catch (error) {
+      console.error("[create] Failed to create project:", error);
+      return null;
+    } finally {
+      setIsCreatingProject(false);
+    }
+  };
+  
+  /**
+   * Save prompts to the database
+   */
+  const savePromptsToDb = async (projId: string, pageStates: PageState[]): Promise<boolean> => {
+    if (!userId || !projId) return false;
+    
+    try {
+      const prompts = pageStates.map(p => ({
+        pageIndex: p.page,
+        title: p.title,
+        promptText: p.prompt,
+        sceneDescription: p.sceneDescription,
+        status: "ready",
+      }));
+      
+      const response = await fetch(`/api/projects/${projId}/prompts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompts,
+          userId,
+          upsert: true,
+        }),
+      });
+      
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save prompts");
+      
+      console.log(`[create] Saved ${data.savedCount} prompts to project ${projId}`);
+      return true;
+    } catch (error) {
+      console.error("[create] Failed to save prompts:", error);
+      return false;
+    }
+  };
+  
+  /**
+   * Update project status
+   */
+  const updateProjectStatus = async (projId: string, status: string, counts?: { promptsGeneratedCount?: number; imagesGeneratedCount?: number }) => {
+    if (!userId || !projId) return;
+    
+    try {
+      await fetch("/api/projects", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: projId,
+          userId,
+          status,
+          ...counts,
+        }),
+      });
+    } catch (error) {
+      console.error("[create] Failed to update project status:", error);
+    }
+  };
+
+  // ============================================================
   // STEP 2: PROMPTS GENERATION (DIRECT FROM IDEA - NO SEPARATE IMPROVE STEP)
   // ============================================================
 
@@ -419,6 +632,15 @@ export default function CreateColoringBookPage() {
     }));
     setPages(skeletonPages);
     
+    // Create project in DB (draft status)
+    let currentProjectId = projectId;
+    if (!currentProjectId) {
+      currentProjectId = await createProject(idea, pageCount);
+      if (!currentProjectId) {
+        console.warn("[create] Could not create project, continuing without persistence");
+      }
+    }
+    
     try {
       const styleProfile: StyleProfile = {
         lineStyle: "Clean, smooth black outlines suitable for coloring",
@@ -441,12 +663,14 @@ export default function CreateColoringBookPage() {
         };
       }
 
+      console.log(`[create] Generating ${pageCount} prompts for project ${currentProjectId}`);
+      
       const response = await fetch("/api/batch/prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: bookType,
-          count: pageCount,
+          count: pageCount, // This now supports up to 80 with chunked generation
           story: {
             ...storyConfig,
             title: generatedIdea?.title || storyConfig.title,
@@ -482,11 +706,32 @@ export default function CreateColoringBookPage() {
       setPages(pageStates);
       setImprovedPrompt(idea); // Store the idea as the "improved prompt" for reference
       setIsPromptImproved(true);
-      toast.success(`Generated ${pageStates.length} unique prompts from your idea!`);
+      
+      // Validate we got all the prompts we asked for
+      if (pageStates.length < pageCount) {
+        console.warn(`[create] Requested ${pageCount} prompts but only got ${pageStates.length}`);
+        toast.warning(`Generated ${pageStates.length} prompts (requested ${pageCount})`);
+      } else {
+        toast.success(`Generated ${pageStates.length} unique prompts from your idea!`);
+      }
+      
+      // Save prompts to DB
+      if (currentProjectId) {
+        await savePromptsToDb(currentProjectId, pageStates);
+        await updateProjectStatus(currentProjectId, "generating", {
+          promptsGeneratedCount: pageStates.length,
+        });
+      }
+      
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate prompts");
       // Clear skeleton cards on error
       setPages([]);
+      
+      // Mark project as failed if it exists
+      if (currentProjectId) {
+        await updateProjectStatus(currentProjectId, "failed");
+      }
     } finally {
       setGeneratingPrompts(false);
     }
@@ -647,6 +892,13 @@ export default function CreateColoringBookPage() {
               : p
           ));
           successCount++;
+          
+          // Update project image count in DB
+          if (projectId) {
+            updateProjectStatus(projectId, "generating", {
+              imagesGeneratedCount: successCount,
+            });
+          }
         } else if (data.status === "paused" && data.errorType === "non_retryable") {
           // NON-RETRYABLE ERROR (billing limit, invalid API key, etc.)
           // Mark this page as paused and STOP the batch
@@ -753,6 +1005,25 @@ export default function CreateColoringBookPage() {
 
     setIsGenerating(false);
     setJobProgress(prev => ({ ...prev, phase: "complete" }));
+
+    // Update project status based on final result
+    if (projectId) {
+      const finalDoneCount = successCount;
+      const totalRequestedPages = pageCount;
+      
+      if (finalDoneCount >= totalRequestedPages) {
+        // All pages done
+        await updateProjectStatus(projectId, "ready", {
+          imagesGeneratedCount: finalDoneCount,
+        });
+      } else if (finalDoneCount > 0) {
+        // Partial progress - keep as "generating" so user can resume
+        await updateProjectStatus(projectId, "partial", {
+          imagesGeneratedCount: finalDoneCount,
+        });
+      }
+      // If finalDoneCount === 0, keep status as "generating" so user can retry
+    }
 
     if (failCount === 0) {
       toast.success(`All ${successCount} images generated!`);
@@ -1615,6 +1886,21 @@ export default function CreateColoringBookPage() {
   // ============================================================
   // RENDER
   // ============================================================
+  
+  // Show loading state while loading a project to resume
+  if (isLoadingProject) {
+    return (
+      <>
+        <AppTopbar title="Create Coloring Book" />
+        <main className="p-4 lg:p-6">
+          <div className="mx-auto max-w-5xl flex flex-col items-center justify-center min-h-[60vh] space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-muted-foreground">Loading project...</p>
+          </div>
+        </main>
+      </>
+    );
+  }
 
   return (
     <>
@@ -1623,8 +1909,8 @@ export default function CreateColoringBookPage() {
       <main className="p-4 lg:p-6">
         <div className="mx-auto max-w-5xl space-y-6">
           <PageHeader
-            title="Create Coloring Book"
-            subtitle="Generate professional coloring pages from your idea"
+            title={resumeProjectId ? "Resume Project" : "Create Coloring Book"}
+            subtitle={resumeProjectId ? "Continue where you left off" : "Generate professional coloring pages from your idea"}
             icon={PenTool}
             actions={
               doneCount > 0 && (
@@ -3067,5 +3353,21 @@ export default function CreateColoringBookPage() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+// Wrapper component with Suspense for useSearchParams
+export default function CreateColoringBookPage() {
+  return (
+    <Suspense fallback={
+      <main className="p-4 lg:p-6">
+        <div className="mx-auto max-w-5xl flex flex-col items-center justify-center min-h-[60vh] space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </main>
+    }>
+      <CreateColoringBookPageContent />
+    </Suspense>
   );
 }

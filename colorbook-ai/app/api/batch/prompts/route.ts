@@ -322,8 +322,11 @@ Return ONLY valid JSON matching this structure:
 }
 
 // ============================================================
-// STEP 2: PLAN UNIQUE SCENES
+// STEP 2: PLAN UNIQUE SCENES (with chunked generation for large counts)
 // ============================================================
+
+// Maximum scenes per API call to stay within token limits
+const MAX_SCENES_PER_CHUNK = 15;
 
 async function planScenes(
   brief: CreativeBrief,
@@ -331,7 +334,97 @@ async function planScenes(
   mode: "storybook" | "theme"
 ): Promise<{ scenes: PlannedScene[]; usedLocations: string[]; usedProps: string[]; diversityScore: number }> {
   
-  const prompt = `You are planning ${pageCount} UNIQUE coloring book scenes.
+  // For large page counts, generate in chunks
+  if (pageCount > MAX_SCENES_PER_CHUNK) {
+    console.log(`[batch/prompts] Large page count (${pageCount}), using chunked generation`);
+    return planScenesChunked(brief, pageCount, mode);
+  }
+  
+  // For smaller counts, generate all at once
+  return planScenesChunk(brief, pageCount, mode, 1, []);
+}
+
+/**
+ * Chunked scene generation for large page counts (>15 pages)
+ * Generates scenes in batches and maintains continuity between chunks
+ */
+async function planScenesChunked(
+  brief: CreativeBrief,
+  totalPages: number,
+  mode: "storybook" | "theme"
+): Promise<{ scenes: PlannedScene[]; usedLocations: string[]; usedProps: string[]; diversityScore: number }> {
+  
+  const allScenes: PlannedScene[] = [];
+  const usedLocationsSet = new Set<string>();
+  const usedPropsSet = new Set<string>();
+  
+  let currentPage = 1;
+  let chunkIndex = 0;
+  
+  while (currentPage <= totalPages) {
+    const remainingPages = totalPages - currentPage + 1;
+    const chunkSize = Math.min(MAX_SCENES_PER_CHUNK, remainingPages);
+    
+    console.log(`[batch/prompts] Generating chunk ${chunkIndex + 1}: pages ${currentPage}-${currentPage + chunkSize - 1} of ${totalPages}`);
+    
+    // Generate this chunk
+    const chunkResult = await planScenesChunk(
+      brief, 
+      chunkSize, 
+      mode, 
+      currentPage,
+      allScenes.slice(-5) // Pass last 5 scenes for context
+    );
+    
+    // Add scenes with correct page numbers
+    for (const scene of chunkResult.scenes) {
+      scene.pageNumber = currentPage + (scene.pageNumber - 1);
+      allScenes.push(scene);
+      if (scene.location) usedLocationsSet.add(scene.location.toLowerCase());
+      if (scene.props) scene.props.forEach(p => usedPropsSet.add(p.toLowerCase()));
+    }
+    
+    currentPage += chunkSize;
+    chunkIndex++;
+    
+    // Small delay between chunks to avoid rate limits
+    if (currentPage <= totalPages) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+  
+  // Calculate diversity metrics
+  const usedLocations = [...usedLocationsSet];
+  const usedProps = [...usedPropsSet];
+  const locationDiversity = usedLocations.length / Math.min(allScenes.length, 20);
+  const propDiversity = usedProps.length / Math.max(allScenes.length * 4, 1);
+  const diversityScore = Math.round((locationDiversity * 50 + propDiversity * 50));
+  
+  console.log(`[batch/prompts] Chunked generation complete: ${allScenes.length} scenes, ${usedLocations.length} locations, ${usedProps.length} props`);
+  
+  return { scenes: allScenes, usedLocations, usedProps, diversityScore };
+}
+
+/**
+ * Generate a single chunk of scenes
+ */
+async function planScenesChunk(
+  brief: CreativeBrief,
+  chunkSize: number,
+  mode: "storybook" | "theme",
+  startPageNumber: number,
+  previousScenes: PlannedScene[]
+): Promise<{ scenes: PlannedScene[]; usedLocations: string[]; usedProps: string[]; diversityScore: number }> {
+  
+  // Build context from previous scenes to avoid repetition
+  const previousContext = previousScenes.length > 0 ? `
+RECENTLY USED (avoid repeating):
+- Locations: ${[...new Set(previousScenes.map(s => s.location))].join(", ")}
+- Actions: ${[...new Set(previousScenes.map(s => s.action))].join(", ")}
+- Props: ${[...new Set(previousScenes.flatMap(s => s.props?.slice(0, 2) || []))].slice(0, 10).join(", ")}
+` : "";
+  
+  const prompt = `You are planning ${chunkSize} UNIQUE coloring book scenes (pages ${startPageNumber} to ${startPageNumber + chunkSize - 1}).
 
 CREATIVE BRIEF:
 - Theme: ${brief.themeTitle}
@@ -341,7 +434,7 @@ CREATIVE BRIEF:
 - Available Actions: ${brief.varietyPlan.actionsPool.join(", ")}
 - Props Pool: ${brief.varietyPlan.propsPool.join(", ")}
 - Composition Styles: ${brief.varietyPlan.compositionStyles.join(", ")}
-
+${previousContext}
 ${brief.isHolidayTheme ? `
 HOLIDAY THEME: ${brief.holidayName}
 REQUIRED MOTIFS (include 2-4 in EVERY scene): ${brief.holidayMotifs?.join(", ")}
@@ -362,9 +455,9 @@ FORBIDDEN FILLERS: ${brief.forbiddenFillers.join(", ")}
 CRITICAL RULES:
 1. Every scene must clearly relate to "${brief.themeTitle}"
 2. NO generic templates (bedroom/kitchen/school) unless the theme IS daily routine
-3. Use each location at most 2 times across ${pageCount} pages
+3. Use each location at most ONCE in this batch
 4. Each scene needs 4-8 SPECIFIC props (named and positioned)
-5. Each scene must have at least 2 props not used in the previous 2 pages
+5. Each scene must have at least 2 props not used in the previous scenes
 6. Vary composition: alternate close-up, medium, wide
 ${brief.isHolidayTheme ? `7. EVERY scene MUST include ${brief.holidayName} motifs (hearts, pumpkins, etc.)` : ""}
 
@@ -387,12 +480,12 @@ Return ONLY valid JSON:
   ]
 }
 
-Generate exactly ${pageCount} scenes with UNIQUE locations, actions, and props.`;
+Generate exactly ${chunkSize} scenes starting at page ${startPageNumber} with UNIQUE locations, actions, and props.`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [{ role: "user", content: prompt }],
-    max_tokens: Math.min(4000, 100 + pageCount * 150), // Scale tokens with page count
+    max_tokens: 4000, // Enough for 15 scenes
     temperature: 0.8,
   });
 
@@ -407,17 +500,21 @@ Generate exactly ${pageCount} scenes with UNIQUE locations, actions, and props.`
     const parsed = JSON.parse(responseText);
     const scenes: PlannedScene[] = parsed.scenes || [];
     
-    // Calculate diversity metrics
-    const usedLocations = [...new Set(scenes.map(s => s.location))];
+    // Validate we got the expected number
+    if (scenes.length < chunkSize) {
+      console.warn(`[batch/prompts] Chunk returned ${scenes.length} scenes, expected ${chunkSize}`);
+    }
+    
+    // Calculate diversity metrics for this chunk
+    const usedLocations = [...new Set(scenes.map(s => s.location).filter(Boolean))];
     const allProps = scenes.flatMap(s => s.props || []);
     const usedProps = [...new Set(allProps)];
     
-    // Diversity score: unique locations + unique props ratio
     const locationDiversity = usedLocations.length / Math.min(scenes.length, 10);
     const propDiversity = usedProps.length / (allProps.length || 1);
     const diversityScore = Math.round((locationDiversity * 50 + propDiversity * 50));
     
-    console.log(`[batch/prompts] Diversity: ${usedLocations.length} locations, ${usedProps.length} unique props`);
+    console.log(`[batch/prompts] Chunk diversity: ${usedLocations.length} locations, ${usedProps.length} unique props`);
     
     return { scenes, usedLocations, usedProps, diversityScore };
   } catch (e) {

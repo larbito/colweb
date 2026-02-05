@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { PageContainer } from "@/components/app/app-shell";
 import { PageHeader } from "@/components/app/page-header";
 import { ProjectCard } from "@/components/app/project-card";
@@ -8,7 +9,7 @@ import { EmptyState } from "@/components/app/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { mockUser, getRecentProjects, getStats } from "@/lib/mock-data";
+import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Sparkles, 
   Quote, 
@@ -23,8 +24,27 @@ import {
   BookOpen,
   Zap,
   LayoutDashboard,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// Types for projects from DB
+interface DBProject {
+  id: string;
+  name: string;
+  project_type: "coloring_book" | "quote_book";
+  book_type?: string;
+  idea?: string;
+  pages_requested: number;
+  prompts_generated_count: number;
+  images_generated_count: number;
+  status: "draft" | "generating" | "ready" | "failed" | "expired" | "partial";
+  created_at: string;
+  updated_at: string;
+  expires_at?: string;
+  canResume?: boolean;
+  isExpired?: boolean;
+}
 
 // Quick action card component
 interface QuickActionProps {
@@ -115,8 +135,74 @@ function StatCard({ icon: Icon, label, value, trend, trendUp }: StatCardProps) {
 }
 
 export default function DashboardPage() {
-  const recentProjects = getRecentProjects(4);
-  const stats = getStats();
+  const [userId, setUserId] = useState<string>("");
+  const [projects, setProjects] = useState<DBProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Initialize userId and fetch projects from DB
+  useEffect(() => {
+    let id = localStorage.getItem("colweb_user_id");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("colweb_user_id", id);
+    }
+    setUserId(id);
+    
+    // Fetch projects from DB
+    const fetchProjects = async () => {
+      try {
+        const response = await fetch(`/api/projects?userId=${id}`);
+        const data = await response.json();
+        if (data.success && data.projects) {
+          setProjects(data.projects);
+        }
+      } catch (error) {
+        console.error("Failed to fetch projects:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchProjects();
+  }, []);
+  
+  // Compute stats from real project data
+  const recentProjects = projects.slice(0, 4);
+  const stats = {
+    totalProjects: projects.length,
+    totalPages: projects.reduce((sum, p) => sum + (p.images_generated_count || 0), 0),
+    readyPages: projects.reduce((sum, p) => sum + (p.status === "ready" ? p.images_generated_count : 0), 0),
+    exports: projects.filter(p => p.status === "ready").length,
+  };
+  
+  // Convert DB project to ProjectCard format
+  const mapProjectToCard = (p: DBProject): {
+    id: string;
+    name: string;
+    type: "coloring" | "quote";
+    status: "draft" | "in_progress" | "complete";
+    pageCount: number;
+    createdAt: string;
+    updatedAt: string;
+    progress: number;
+    canResume: boolean;
+    promptsCount: number;
+    imagesCount: number;
+  } => ({
+    id: p.id,
+    name: p.name,
+    type: p.project_type === "quote_book" ? "quote" : "coloring",
+    status: p.status === "ready" ? "complete" : p.status === "generating" || p.status === "partial" ? "in_progress" : "draft",
+    pageCount: p.pages_requested,
+    createdAt: p.created_at,
+    updatedAt: p.updated_at,
+    progress: p.pages_requested > 0 
+      ? Math.round((p.images_generated_count / p.pages_requested) * 100) 
+      : 0,
+    canResume: p.canResume || false,
+    promptsCount: p.prompts_generated_count,
+    imagesCount: p.images_generated_count,
+  });
 
   return (
     <main className="flex-1 pt-16 lg:pt-0">
@@ -124,7 +210,7 @@ export default function DashboardPage() {
         <div className="space-y-8">
           {/* Welcome Section */}
           <PageHeader
-            title={`Welcome back, ${mockUser.name.split(" ")[0]}`}
+            title={`Welcome back!`}
             subtitle="Create beautiful coloring books with AI assistance"
             icon={LayoutDashboard}
             size="lg"
@@ -220,7 +306,13 @@ export default function DashboardPage() {
                   </Button>
                 </div>
                 <CardContent className="p-6">
-                  {recentProjects.length === 0 ? (
+                  {loading ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {[1, 2, 3, 4].map((i) => (
+                        <Skeleton key={i} className="h-32 w-full rounded-lg" />
+                      ))}
+                    </div>
+                  ) : recentProjects.length === 0 ? (
                     <EmptyState
                       icon={FolderOpen}
                       title="No projects yet"
@@ -231,7 +323,7 @@ export default function DashboardPage() {
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2">
                       {recentProjects.map((project) => (
-                        <ProjectCard key={project.id} project={project} />
+                        <ProjectCard key={project.id} project={mapProjectToCard(project)} />
                       ))}
                     </div>
                   )}
