@@ -112,27 +112,104 @@ export function bufferToBase64(buffer: Buffer): string {
 // ============================================
 
 /**
+ * Quick check if an image is mostly blank/white or mostly black.
+ * Used to detect failed generations before more expensive processing.
+ */
+export async function isImageInvalid(buffer: Buffer): Promise<{
+  isInvalid: boolean;
+  reason?: string;
+  stats?: { blackRatio: number; whiteRatio: number; avgBrightness: number };
+}> {
+  try {
+    const image = sharp(buffer);
+    const metadata = await image.metadata();
+    const width = metadata.width || 0;
+    const height = metadata.height || 0;
+    
+    if (width === 0 || height === 0) {
+      return { isInvalid: true, reason: "invalid_dimensions" };
+    }
+    
+    // Get raw pixel data
+    const { data } = await image.grayscale().raw().toBuffer({ resolveWithObject: true });
+    
+    let blackPixels = 0;
+    let whitePixels = 0;
+    let sum = 0;
+    const totalPixels = data.length;
+    
+    for (let i = 0; i < totalPixels; i++) {
+      const v = data[i];
+      sum += v;
+      if (v < 30) blackPixels++;
+      if (v > 245) whitePixels++;
+    }
+    
+    const blackRatio = blackPixels / totalPixels;
+    const whiteRatio = whitePixels / totalPixels;
+    const avgBrightness = sum / totalPixels;
+    
+    const stats = { blackRatio, whiteRatio, avgBrightness };
+    
+    // Too black (>70% black pixels or avg brightness < 50)
+    if (blackRatio > 0.70 || avgBrightness < 50) {
+      return { isInvalid: true, reason: "too_dark", stats };
+    }
+    
+    // Too white (>99% white pixels - blank image)
+    if (whiteRatio > 0.99) {
+      return { isInvalid: true, reason: "blank_white", stats };
+    }
+    
+    // No content (<1% black - nothing drawn)
+    if (blackRatio < 0.005) {
+      return { isInvalid: true, reason: "no_content", stats };
+    }
+    
+    return { isInvalid: false, stats };
+  } catch (err) {
+    return { isInvalid: true, reason: "processing_error" };
+  }
+}
+
+/**
  * MANDATORY sanitization for all generated coloring page images.
  * 
  * This function GUARANTEES a pure white background by:
- * 1. Flattening any transparency onto white (#FFFFFF)
- * 2. Removing the alpha channel completely
- * 3. Outputting as PNG (lossless)
+ * 1. First checking if the image is valid (not blank, not too dark)
+ * 2. Flattening any transparency onto white (#FFFFFF)
+ * 3. Removing the alpha channel completely
+ * 4. Outputting as PNG (lossless)
  * 
  * IMPORTANT: This does NOT apply thresholding or color manipulation.
  * It preserves the original line art while ensuring no transparency issues.
  * 
  * @param buffer - Input image as Buffer
  * @returns Sanitized image as Buffer with white background, no alpha
+ * @throws Error if image is invalid (blank, too dark, etc.)
  */
 export async function sanitizeColoringPng(buffer: Buffer): Promise<Buffer> {
+  // Pre-check for invalid images
+  const check = await isImageInvalid(buffer);
+  if (check.isInvalid) {
+    console.error(`[sanitizeColoringPng] INVALID IMAGE: ${check.reason}`, check.stats);
+    throw new Error(`IMAGE_INVALID:${check.reason}`);
+  }
+  
   const sanitized = await sharp(buffer)
     .flatten({ background: "#ffffff" }) // Flatten transparency onto white
     .removeAlpha() // Remove alpha channel
     .png({ compressionLevel: 9 }) // Output as PNG
     .toBuffer();
   
-  console.log(`[sanitizeColoringPng] Image sanitized (flattened to white, alpha removed)`);
+  // Double-check the output isn't corrupted
+  const outputCheck = await isImageInvalid(sanitized);
+  if (outputCheck.isInvalid) {
+    console.error(`[sanitizeColoringPng] OUTPUT STILL INVALID: ${outputCheck.reason}`, outputCheck.stats);
+    throw new Error(`IMAGE_INVALID_AFTER_SANITIZE:${outputCheck.reason}`);
+  }
+  
+  console.log(`[sanitizeColoringPng] Image sanitized successfully (black: ${(outputCheck.stats?.blackRatio || 0 * 100).toFixed(1)}%)`);
   return sanitized;
 }
 

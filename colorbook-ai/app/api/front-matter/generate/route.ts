@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import sharp from "sharp";
+import { 
+  getSupabaseServerClient, 
+  uploadToStorage, 
+  getRetentionHours, 
+  calculateExpiresAt 
+} from "@/lib/supabase/server";
 
 /**
  * Front Matter Generation API
  * 
  * Generates title page, copyright page, and belongs-to page as PNG images.
  * These can be previewed, edited, and regenerated before PDF export.
+ * 
+ * DETERMINISTIC: Uses SVG rendering (no AI) for consistent, reliable output.
  */
 export const maxDuration = 60;
 
@@ -22,6 +29,10 @@ const requestSchema = z.object({
     subtitle: z.string().optional(),
     notes: z.string().optional(),
   }),
+  // Supabase persistence (optional - if provided, saves to storage)
+  projectId: z.string().uuid().optional(),
+  userId: z.string().uuid().optional(),
+  saveToStorage: z.boolean().default(false),
 });
 
 /**
@@ -29,6 +40,8 @@ const requestSchema = z.object({
  * 
  * Generates a single front matter page as a PNG image.
  * Returns base64 encoded image that can be previewed and included in PDF.
+ * 
+ * Optionally saves to Supabase storage if projectId and userId are provided.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -42,46 +55,82 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { key, options } = parseResult.data;
+    const { key, options, projectId, userId, saveToStorage } = parseResult.data;
     
-    console.log(`[front-matter] Generating ${key} page`);
+    console.log(`[front-matter] Generating ${key} page (save=${saveToStorage})`);
     
-    // Generate the page as a PDF first (easier text rendering)
-    const pdfDoc = await PDFDocument.create();
-    
-    // US Letter size (612 x 792 points)
-    const pageWidth = 612;
-    const pageHeight = 792;
-    const page = pdfDoc.addPage([pageWidth, pageHeight]);
-    
-    // Embed fonts
-    const titleFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const italicFont = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
-    
-    // Generate content based on key
-    if (key === "title") {
-      await renderTitlePage(page, options, titleFont, regularFont);
-    } else if (key === "copyright") {
-      await renderCopyrightPage(page, options, regularFont, italicFont);
-    } else if (key === "belongsTo") {
-      await renderBelongsToPage(page, options, titleFont, regularFont);
-    }
-    
-    // Save PDF to bytes
-    const pdfBytes = await pdfDoc.save();
-    
-    // Convert PDF page to PNG using sharp (via canvas rendering would be ideal, 
-    // but we'll use a simple approach - return PDF bytes that frontend can render)
-    // For now, we'll return metadata and let frontend use pdf.js to render preview
-    
-    // Actually, let's generate a simple PNG directly using sharp
+    // Generate PNG directly using SVG rendering
     const imageBase64 = await renderPageToImage(key, options);
+    
+    let assetId: string | undefined;
+    let storagePath: string | undefined;
+    let expiresAt: string | undefined;
+    
+    // Save to Supabase if requested
+    if (saveToStorage && projectId && userId) {
+      try {
+        const imageBuffer = Buffer.from(imageBase64, "base64");
+        storagePath = `${userId}/${projectId}/front/${key}.png`;
+        
+        const { path: uploadedPath, error: uploadError } = await uploadToStorage(
+          "generated",
+          storagePath,
+          imageBuffer,
+          "image/png"
+        );
+        
+        if (uploadError) {
+          console.error(`[front-matter] Upload failed: ${uploadError.message}`);
+        } else {
+          storagePath = uploadedPath;
+          
+          // Save to database
+          const supabase = getSupabaseServerClient();
+          const retentionHours = await getRetentionHours(userId);
+          expiresAt = calculateExpiresAt(retentionHours);
+          
+          const { data: asset, error: dbError } = await supabase
+            .from("generated_assets")
+            .upsert({
+              project_id: projectId,
+              user_id: userId,
+              asset_type: "front_matter",
+              storage_bucket: "generated",
+              storage_path: uploadedPath,
+              mime_type: "image/png",
+              status: "ready",
+              expires_at: expiresAt,
+              meta: {
+                frontMatterType: key,
+                options,
+                fileSize: imageBuffer.length,
+              },
+            }, {
+              onConflict: "project_id,asset_type,meta->>frontMatterType",
+              ignoreDuplicates: false,
+            })
+            .select("id")
+            .single();
+          
+          if (dbError) {
+            console.error(`[front-matter] DB save failed: ${dbError.message}`);
+          } else if (asset) {
+            assetId = asset.id;
+          }
+        }
+      } catch (storageError) {
+        console.error(`[front-matter] Storage error:`, storageError);
+        // Continue - return image even if storage fails
+      }
+    }
     
     return NextResponse.json({
       key,
       status: "done",
       imageBase64,
+      assetId,
+      storagePath,
+      expiresAt,
     });
     
   } catch (error) {
@@ -279,91 +328,5 @@ function escapeXml(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-// wrapText removed - truncation is handled inline in SVG generators
-
-/**
- * Helper functions for pdf-lib rendering (not currently used but kept for reference)
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function renderTitlePage(page: any, options: any, titleFont: any, regularFont: any) {
-  const { width, height } = page.getSize();
-  
-  // Title
-  page.drawText(options.bookTitle || "My Coloring Book", {
-    x: 100,
-    y: height - 300,
-    size: 48,
-    font: titleFont,
-    color: rgb(0.2, 0.2, 0.2),
-  });
-  
-  // Author
-  if (options.authorName) {
-    page.drawText(`by ${options.authorName}`, {
-      x: 100,
-      y: height - 400,
-      size: 24,
-      font: regularFont,
-      color: rgb(0.4, 0.4, 0.4),
-    });
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function renderCopyrightPage(page: any, options: any, regularFont: any, italicFont: any) {
-  const { width, height } = page.getSize();
-  const year = options.year || new Date().getFullYear().toString();
-  const author = options.authorName || "Author";
-  
-  const lines = [
-    `Copyright © ${year} ${author}`,
-    "All rights reserved.",
-    "",
-    "This is a coloring book.",
-    "Created with ColorBook AI",
-  ];
-  
-  let y = height - 300;
-  for (const line of lines) {
-    page.drawText(line, {
-      x: 100,
-      y,
-      size: 14,
-      font: regularFont,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-    y -= 24;
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function renderBelongsToPage(page: any, options: any, titleFont: any, regularFont: any) {
-  const { width, height } = page.getSize();
-  
-  page.drawText("This Book Belongs To", {
-    x: 150,
-    y: height - 350,
-    size: 36,
-    font: titleFont,
-    color: rgb(0.2, 0.2, 0.2),
-  });
-  
-  if (options.belongsToName) {
-    page.drawText(options.belongsToName, {
-      x: 150,
-      y: height - 420,
-      size: 28,
-      font: regularFont,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-  } else {
-    // Draw a line for writing in name
-    page.drawLine({
-      start: { x: 150, y: height - 420 },
-      end: { x: width - 150, y: height - 420 },
-      thickness: 1,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-  }
-}
+// PDF rendering helper functions removed - now using SVG-only rendering via sharp
 

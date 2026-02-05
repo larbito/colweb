@@ -239,13 +239,60 @@ export async function POST(request: NextRequest) {
         // MANDATORY SANITIZE: Flatten to white, remove alpha
         // ================================================
         let imageBase64 = result.images[0];
+        let sanitizeSuccess = false;
         try {
           console.log(`[generate-one] Page ${page}: [${attemptId}] Sanitizing image (flatten to white, remove alpha)`);
           imageBase64 = await sanitizeColoringPngBase64(imageBase64);
+          sanitizeSuccess = true;
         } catch (sanitizeError) {
           const errorMsg = sanitizeError instanceof Error ? sanitizeError.message : String(sanitizeError);
           console.error(`[generate-one] Page ${page}: [${attemptId}] Sanitize error: ${errorMsg}`);
-          // Continue with original image if sanitize fails (rare)
+          
+          // If image is invalid (blank, too dark), RETRY immediately
+          if (errorMsg.includes("IMAGE_INVALID")) {
+            console.log(`[generate-one] Page ${page}: [${attemptId}] Invalid image detected, will retry with stricter prompt`);
+            
+            // Add specific reinforcement based on the failure type
+            if (errorMsg.includes("too_dark")) {
+              lastValidationResult = {
+                valid: false,
+                outlineValidation: {
+                  valid: false,
+                  hasBlackFills: true,
+                  hasGrayscale: false,
+                  hasUnwantedBorder: false,
+                  fillLocations: ["entire image - dark background"],
+                  confidence: 1.0,
+                  notes: "Image has dark/black background instead of white",
+                },
+                retryReinforcement: "CRITICAL: Generate on PURE WHITE background (#FFFFFF). NO dark colors, NO black background, NO gray. Only BLACK LINES on WHITE.",
+              };
+            } else if (errorMsg.includes("blank") || errorMsg.includes("no_content")) {
+              lastValidationResult = {
+                valid: false,
+                outlineValidation: {
+                  valid: false,
+                  hasBlackFills: false,
+                  hasGrayscale: false,
+                  hasUnwantedBorder: false,
+                  fillLocations: ["no content"],
+                  confidence: 1.0,
+                  notes: "Image is blank/empty with no visible content",
+                },
+                retryReinforcement: "CRITICAL: You MUST draw visible BLACK LINE ART. The image must have clear outlines, shapes, and details - not blank.",
+              };
+            }
+            
+            await delay(getRetryDelay(attempt));
+            continue; // Retry immediately
+          }
+        }
+        
+        // Only track valid images
+        if (!sanitizeSuccess) {
+          console.log(`[generate-one] Page ${page}: [${attemptId}] Skipping invalid image`);
+          await delay(getRetryDelay(attempt));
+          continue;
         }
         
         // Track this image with its attempt ID

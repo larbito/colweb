@@ -1,23 +1,29 @@
-/**
- * POST /api/export/build-pdf
- * 
- * Build PDF from project assets and upload to Supabase Storage.
- * Returns signed URL for preview/download.
- * 
- * Order: Title Page → Copyright Page → Belongs To Page → Coloring Pages
- */
-import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import { getSupabaseServerClient, uploadToStorage, createSignedUrl } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { getSupabaseServerClient, createSignedUrl } from "@/lib/supabase/server";
 
+/**
+ * Server-side PDF Generation
+ * 
+ * Fetches images from Supabase storage and builds PDF.
+ * Avoids 413 errors by not receiving images in request body.
+ */
 export const maxDuration = 300;
 
 const requestSchema = z.object({
   projectId: z.string().uuid(),
-  userId: z.string(),
+  userId: z.string().uuid(),
   // Options
+  includeTitlePage: z.boolean().default(true),
+  includeCopyrightPage: z.boolean().default(true),
+  includeBelongsToPage: z.boolean().default(false),
   includePageNumbers: z.boolean().default(true),
+  bookTitle: z.string().default("My Coloring Book"),
+  authorName: z.string().optional(),
+  // Preview mode
+  previewMode: z.boolean().default(false),
+  previewPageCount: z.number().default(5),
 });
 
 // PDF dimensions (72 DPI)
@@ -25,242 +31,260 @@ const PDF_WIDTH = 612;  // 8.5"
 const PDF_HEIGHT = 792; // 11"
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  
   try {
     const body = await request.json();
     const data = requestSchema.parse(body);
     
+    console.log(`[build-pdf] Starting for project ${data.projectId}`);
+    
     const supabase = getSupabaseServerClient();
     
-    console.log(`[build-pdf] Starting PDF build for project ${data.projectId}`);
-    
-    // Get project info
-    const { data: project, error: projectError } = await supabase
-      .from('projects')
-      .select('name, settings')
-      .eq('id', data.projectId)
-      .single();
-    
-    if (projectError || !project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Get all ready assets for this project
+    // Fetch all ready assets for this project
     const { data: assets, error: assetsError } = await supabase
-      .from('generated_assets')
-      .select('*')
-      .eq('project_id', data.projectId)
-      .eq('status', 'ready')
-      .order('page_number', { ascending: true });
+      .from("generated_assets")
+      .select("*")
+      .eq("project_id", data.projectId)
+      .eq("user_id", data.userId)
+      .eq("status", "ready")
+      .order("page_number", { ascending: true });
     
     if (assetsError) {
-      console.error('[build-pdf] Assets query error:', assetsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch assets' },
-        { status: 500 }
-      );
+      console.error("[build-pdf] Failed to fetch assets:", assetsError);
+      return NextResponse.json({ error: "Failed to fetch assets" }, { status: 500 });
     }
     
-    // Separate by type
-    const allAssets = (assets || []) as Array<{
-      id: string;
-      asset_type: string;
-      storage_path: string | null;
-      storage_bucket: string;
-      page_number: number | null;
-      meta: Record<string, unknown>;
-    }>;
-    
-    const frontMatterAssets = allAssets.filter(a => a.asset_type === 'front_matter');
-    const pageAssets = allAssets.filter(a => a.asset_type === 'page_image');
-    
-    const titlePage = frontMatterAssets.find(a => (a.meta as { frontMatterType?: string })?.frontMatterType === 'title');
-    const copyrightPage = frontMatterAssets.find(a => (a.meta as { frontMatterType?: string })?.frontMatterType === 'copyright');
-    const belongsToPage = frontMatterAssets.find(a => (a.meta as { frontMatterType?: string })?.frontMatterType === 'belongsTo');
-    
-    if (pageAssets.length === 0 && frontMatterAssets.length === 0) {
-      return NextResponse.json(
-        { error: 'No assets to include in PDF' },
-        { status: 400 }
-      );
+    if (!assets || assets.length === 0) {
+      return NextResponse.json({ error: "No assets found for this project" }, { status: 404 });
     }
     
-    console.log(`[build-pdf] Found ${pageAssets.length} pages, ${frontMatterAssets.length} front matter`);
+    console.log(`[build-pdf] Found ${assets.length} assets`);
+    
+    // Separate assets by type
+    const pageAssets = assets.filter(a => a.asset_type === "page_image").sort((a, b) => (a.page_number || 0) - (b.page_number || 0));
+    const frontMatterAssets = assets.filter(a => a.asset_type === "front_matter");
+    
+    // Limit for preview mode
+    const pagesToProcess = data.previewMode ? pageAssets.slice(0, data.previewPageCount) : pageAssets;
     
     // Create PDF
     const pdfDoc = await PDFDocument.create();
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     
     let pageNumber = 0;
     
-    // Helper to add image page
-    async function addImagePage(asset: typeof allAssets[0]) {
-      if (!asset.storage_path) return false;
-      
+    // Helper to download and embed image
+    async function embedImage(storagePath: string): Promise<Awaited<ReturnType<typeof pdfDoc.embedPng>> | null> {
       try {
-        const { data: fileData, error } = await supabase.storage
-          .from(asset.storage_bucket || 'colweb')
-          .download(asset.storage_path);
-        
-        if (error || !fileData) {
-          console.error(`[build-pdf] Failed to download ${asset.storage_path}:`, error);
-          return false;
+        const signedUrl = await createSignedUrl("generated", storagePath);
+        if (!signedUrl) {
+          console.error(`[build-pdf] Failed to get signed URL for ${storagePath}`);
+          return null;
         }
         
-        const arrayBuffer = await fileData.arrayBuffer();
-        const imageBytes = new Uint8Array(arrayBuffer);
-        
-        // Embed image (PNG)
-        const image = await pdfDoc.embedPng(imageBytes);
-        
-        // Add page
-        const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
-        pageNumber++;
-        
-        // Scale to fit with margins
-        const margin = 18; // 0.25"
-        const maxWidth = PDF_WIDTH - margin * 2;
-        const maxHeight = PDF_HEIGHT - margin * 2 - (data.includePageNumbers ? 20 : 0);
-        
-        const scaleX = maxWidth / image.width;
-        const scaleY = maxHeight / image.height;
-        const scale = Math.min(scaleX, scaleY, 1); // Don't upscale
-        
-        const scaledWidth = image.width * scale;
-        const scaledHeight = image.height * scale;
-        
-        // Center
-        const x = (PDF_WIDTH - scaledWidth) / 2;
-        const y = data.includePageNumbers 
-          ? (PDF_HEIGHT - scaledHeight) / 2 + 10
-          : (PDF_HEIGHT - scaledHeight) / 2;
-        
-        page.drawImage(image, {
-          x,
-          y,
-          width: scaledWidth,
-          height: scaledHeight,
-        });
-        
-        // Page number
-        if (data.includePageNumbers && asset.asset_type === 'page_image') {
-          const numText = `- ${pageNumber} -`;
-          const numWidth = font.widthOfTextAtSize(numText, 10);
-          page.drawText(numText, {
-            x: (PDF_WIDTH - numWidth) / 2,
-            y: 30,
-            size: 10,
-            font,
-            color: rgb(0.5, 0.5, 0.5),
-          });
+        const response = await fetch(signedUrl);
+        if (!response.ok) {
+          console.error(`[build-pdf] Failed to fetch image: ${response.status}`);
+          return null;
         }
         
-        return true;
+        const buffer = await response.arrayBuffer();
+        return await pdfDoc.embedPng(buffer);
       } catch (err) {
-        console.error(`[build-pdf] Error adding page:`, err);
-        return false;
+        console.error(`[build-pdf] Error embedding image:`, err);
+        return null;
       }
     }
     
-    // Add pages in order
+    // Add front matter pages first
     // 1. Title page
-    if (titlePage) {
-      await addImagePage(titlePage);
+    const titleAsset = frontMatterAssets.find(a => a.meta?.frontMatterType === "title");
+    if (data.includeTitlePage) {
+      if (titleAsset?.storage_path) {
+        const img = await embedImage(titleAsset.storage_path);
+        if (img) {
+          const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+          pageNumber++;
+          const scale = Math.min(PDF_WIDTH / img.width, PDF_HEIGHT / img.height);
+          const w = img.width * scale;
+          const h = img.height * scale;
+          page.drawImage(img, {
+            x: (PDF_WIDTH - w) / 2,
+            y: (PDF_HEIGHT - h) / 2,
+            width: w,
+            height: h,
+          });
+        }
+      } else {
+        // Generate simple title page
+        const titlePage = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+        pageNumber++;
+        const titleSize = 36;
+        const titleWidth = boldFont.widthOfTextAtSize(data.bookTitle, titleSize);
+        titlePage.drawText(data.bookTitle, {
+          x: (PDF_WIDTH - titleWidth) / 2,
+          y: PDF_HEIGHT / 2 + 50,
+          size: titleSize,
+          font: boldFont,
+          color: rgb(0, 0, 0),
+        });
+        if (data.authorName) {
+          const authorText = `by ${data.authorName}`;
+          const authorWidth = regularFont.widthOfTextAtSize(authorText, 18);
+          titlePage.drawText(authorText, {
+            x: (PDF_WIDTH - authorWidth) / 2,
+            y: PDF_HEIGHT / 2 - 20,
+            size: 18,
+            font: regularFont,
+            color: rgb(0.3, 0.3, 0.3),
+          });
+        }
+      }
     }
     
     // 2. Copyright page
-    if (copyrightPage) {
-      await addImagePage(copyrightPage);
+    const copyrightAsset = frontMatterAssets.find(a => a.meta?.frontMatterType === "copyright");
+    if (data.includeCopyrightPage) {
+      if (copyrightAsset?.storage_path) {
+        const img = await embedImage(copyrightAsset.storage_path);
+        if (img) {
+          const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+          pageNumber++;
+          const scale = Math.min(PDF_WIDTH / img.width, PDF_HEIGHT / img.height);
+          const w = img.width * scale;
+          const h = img.height * scale;
+          page.drawImage(img, {
+            x: (PDF_WIDTH - w) / 2,
+            y: (PDF_HEIGHT - h) / 2,
+            width: w,
+            height: h,
+          });
+        }
+      } else {
+        // Generate simple copyright page
+        const copyrightPage = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+        pageNumber++;
+        const year = new Date().getFullYear();
+        const lines = [
+          `© ${year} ${data.authorName || "Author"}`,
+          "All rights reserved.",
+          "",
+          "This coloring book is for personal use only.",
+        ];
+        let y = PDF_HEIGHT - 100;
+        for (const line of lines) {
+          copyrightPage.drawText(line, {
+            x: 72,
+            y,
+            size: 12,
+            font: regularFont,
+            color: rgb(0.2, 0.2, 0.2),
+          });
+          y -= 20;
+        }
+      }
     }
     
-    // 3. Belongs to page
-    if (belongsToPage) {
-      await addImagePage(belongsToPage);
+    // 3. Belongs To page
+    const belongsAsset = frontMatterAssets.find(a => a.meta?.frontMatterType === "belongsTo");
+    if (data.includeBelongsToPage && belongsAsset?.storage_path) {
+      const img = await embedImage(belongsAsset.storage_path);
+      if (img) {
+        const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+        pageNumber++;
+        const scale = Math.min(PDF_WIDTH / img.width, PDF_HEIGHT / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        page.drawImage(img, {
+          x: (PDF_WIDTH - w) / 2,
+          y: (PDF_HEIGHT - h) / 2,
+          width: w,
+          height: h,
+        });
+      }
     }
     
-    // 4. Coloring pages
-    for (const asset of pageAssets) {
-      await addImagePage(asset);
+    // Add coloring pages
+    let processedCount = 0;
+    for (const asset of pagesToProcess) {
+      if (!asset.storage_path) continue;
+      
+      const img = await embedImage(asset.storage_path);
+      if (!img) continue;
+      
+      const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+      pageNumber++;
+      
+      // Scale to fit with small margin
+      const margin = 18;
+      const maxWidth = PDF_WIDTH - margin * 2;
+      const maxHeight = PDF_HEIGHT - margin * 2 - (data.includePageNumbers ? 20 : 0);
+      
+      const scaleX = maxWidth / img.width;
+      const scaleY = maxHeight / img.height;
+      const scale = Math.min(scaleX, scaleY);
+      
+      const w = img.width * scale;
+      const h = img.height * scale;
+      const x = (PDF_WIDTH - w) / 2;
+      const y = data.includePageNumbers ? (PDF_HEIGHT - h) / 2 + 10 : (PDF_HEIGHT - h) / 2;
+      
+      page.drawImage(img, { x, y, width: w, height: h });
+      
+      // Page number
+      if (data.includePageNumbers) {
+        const numText = `- ${pageNumber} -`;
+        const numWidth = regularFont.widthOfTextAtSize(numText, 10);
+        page.drawText(numText, {
+          x: (PDF_WIDTH - numWidth) / 2,
+          y: 30,
+          size: 10,
+          font: regularFont,
+          color: rgb(0.5, 0.5, 0.5),
+        });
+      }
+      
+      processedCount++;
     }
     
-    // Save PDF
+    // Generate PDF bytes
     const pdfBytes = await pdfDoc.save();
-    console.log(`[build-pdf] PDF generated: ${pdfBytes.length} bytes, ${pageNumber} pages`);
     
     // Upload to storage
-    const storagePath = `${data.userId}/${data.projectId}/export/book.pdf`;
-    const { path, error: uploadError } = await uploadToStorage(
-      'colweb',
-      storagePath,
-      pdfBytes,
-      'application/pdf'
-    );
+    const pdfPath = `${data.userId}/${data.projectId}/exports/book.pdf`;
+    const { error: uploadError } = await supabase.storage
+      .from("generated")
+      .upload(pdfPath, pdfBytes, {
+        contentType: "application/pdf",
+        upsert: true,
+      });
     
     if (uploadError) {
-      console.error('[build-pdf] Upload error:', uploadError);
-      return NextResponse.json(
-        { error: 'Failed to upload PDF' },
-        { status: 500 }
-      );
+      console.error("[build-pdf] Failed to upload PDF:", uploadError);
     }
     
-    // Upsert asset record
-    const { data: existingAsset } = await supabase
-      .from('generated_assets')
-      .select('id')
-      .eq('project_id', data.projectId)
-      .eq('asset_type', 'pdf')
-      .single();
+    // Create signed URL for download
+    const downloadUrl = await createSignedUrl("generated", pdfPath, 3600);
     
-    if (existingAsset) {
-      await supabase
-        .from('generated_assets')
-        .update({
-          storage_path: path,
-          status: 'ready',
-          meta: {
-            pageCount: pageNumber,
-            fileSize: pdfBytes.length,
-          },
-        })
-        .eq('id', existingAsset.id);
-    } else {
-      await supabase
-        .from('generated_assets')
-        .insert({
-          project_id: data.projectId,
-          user_id: data.userId,
-          asset_type: 'pdf',
-          storage_bucket: 'colweb',
-          storage_path: path,
-          mime_type: 'application/pdf',
-          status: 'ready',
-          meta: {
-            pageCount: pageNumber,
-            fileSize: pdfBytes.length,
-          },
-        });
-    }
-    
-    // Create signed URL for preview
-    const signedUrl = await createSignedUrl('colweb', path, 3600);
+    const elapsed = Date.now() - startTime;
+    console.log(`[build-pdf] Complete: ${processedCount} pages in ${elapsed}ms`);
     
     return NextResponse.json({
       success: true,
-      storagePath: path,
-      signedUrl,
-      pageCount: pageNumber,
-      fileSize: pdfBytes.length,
+      totalPages: pageNumber,
+      processedPages: processedCount,
+      isPreview: data.previewMode,
+      downloadUrl,
+      storagePath: pdfPath,
     });
     
   } catch (error) {
-    console.error('[build-pdf] Error:', error);
+    console.error("[build-pdf] Error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'PDF build failed' },
+      { error: error instanceof Error ? error.message : "PDF generation failed" },
       { status: 500 }
     );
   }
 }
-

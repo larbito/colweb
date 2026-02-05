@@ -1,248 +1,223 @@
-/**
- * POST /api/export/build-zip
- * 
- * Build ZIP from project assets and upload to Supabase Storage.
- * Returns signed URL for download.
- * 
- * Structure:
- * - /front/title.png
- * - /front/copyright.png
- * - /front/belongs.png
- * - /pages/page-001.png ... page-N.png
- * - /export/book.pdf (if exists)
- * - /meta/prompts.json
- */
-import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
-import JSZip from 'jszip';
-import { getSupabaseServerClient, uploadToStorage, createSignedUrl } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import JSZip from "jszip";
+import { getSupabaseServerClient, createSignedUrl } from "@/lib/supabase/server";
 
+/**
+ * Server-side ZIP Generation
+ * 
+ * Fetches images from Supabase storage and builds ZIP.
+ * Avoids 413 errors by not receiving images in request body.
+ */
 export const maxDuration = 300;
 
 const requestSchema = z.object({
   projectId: z.string().uuid(),
-  userId: z.string(),
-  includePdf: z.boolean().default(true),
+  userId: z.string().uuid(),
+  bookTitle: z.string().default("Coloring-Book"),
+  includeMetadata: z.boolean().default(true),
+  includePdf: z.boolean().default(false),
 });
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  
   try {
     const body = await request.json();
     const data = requestSchema.parse(body);
     
+    console.log(`[build-zip] Starting for project ${data.projectId}`);
+    
     const supabase = getSupabaseServerClient();
     
-    console.log(`[build-zip] Starting ZIP build for project ${data.projectId}`);
-    
-    // Get project info
+    // Fetch project details
     const { data: project, error: projectError } = await supabase
-      .from('projects')
-      .select('name, settings')
-      .eq('id', data.projectId)
+      .from("projects")
+      .select("*")
+      .eq("id", data.projectId)
+      .eq("user_id", data.userId)
       .single();
     
     if (projectError || !project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
     
-    // Get all ready assets
+    // Fetch all ready assets
     const { data: assets, error: assetsError } = await supabase
-      .from('generated_assets')
-      .select('*')
-      .eq('project_id', data.projectId)
-      .eq('status', 'ready')
-      .order('page_number', { ascending: true });
+      .from("generated_assets")
+      .select("*")
+      .eq("project_id", data.projectId)
+      .eq("user_id", data.userId)
+      .eq("status", "ready")
+      .order("page_number", { ascending: true });
     
     if (assetsError) {
-      console.error('[build-zip] Assets query error:', assetsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch assets' },
-        { status: 500 }
-      );
+      console.error("[build-zip] Failed to fetch assets:", assetsError);
+      return NextResponse.json({ error: "Failed to fetch assets" }, { status: 500 });
     }
     
-    const allAssets = (assets || []) as Array<{
-      id: string;
-      asset_type: string;
-      storage_path: string | null;
-      storage_bucket: string;
-      page_number: number | null;
-      meta: Record<string, unknown>;
-    }>;
-    
-    if (allAssets.length === 0) {
-      return NextResponse.json(
-        { error: 'No assets to include in ZIP' },
-        { status: 400 }
-      );
+    if (!assets || assets.length === 0) {
+      return NextResponse.json({ error: "No assets found" }, { status: 404 });
     }
+    
+    console.log(`[build-zip] Found ${assets.length} assets`);
     
     const zip = new JSZip();
-    const pagesFolder = zip.folder('pages');
-    const frontFolder = zip.folder('front');
-    const exportFolder = zip.folder('export');
-    const metaFolder = zip.folder('meta');
+    const imagesFolder = zip.folder("images");
+    const frontMatterFolder = zip.folder("front-matter");
     
-    let downloadedCount = 0;
-    const prompts: Record<string, string> = {};
+    // Separate assets by type
+    const pageAssets = assets.filter(a => a.asset_type === "page_image");
+    const frontMatterAssets = assets.filter(a => a.asset_type === "front_matter");
+    const pdfAsset = assets.find(a => a.asset_type === "pdf");
     
-    // Helper to download and add file
-    async function addFileToZip(
-      asset: typeof allAssets[0],
-      folder: JSZip | null,
-      filename: string
-    ): Promise<boolean> {
-      if (!asset.storage_path || !folder) return false;
-      
+    // Download helper
+    async function downloadFile(storagePath: string): Promise<Buffer | null> {
       try {
-        const { data: fileData, error } = await supabase.storage
-          .from(asset.storage_bucket || 'colweb')
-          .download(asset.storage_path);
+        const signedUrl = await createSignedUrl("generated", storagePath);
+        if (!signedUrl) return null;
         
-        if (error || !fileData) {
-          console.error(`[build-zip] Failed to download ${asset.storage_path}:`, error);
-          return false;
-        }
+        const response = await fetch(signedUrl);
+        if (!response.ok) return null;
         
-        const arrayBuffer = await fileData.arrayBuffer();
-        folder.file(filename, arrayBuffer);
-        downloadedCount++;
-        return true;
+        return Buffer.from(await response.arrayBuffer());
       } catch (err) {
-        console.error(`[build-zip] Error adding ${filename}:`, err);
-        return false;
+        console.error(`[build-zip] Download failed:`, err);
+        return null;
       }
     }
     
-    // Process assets by type
-    for (const asset of allAssets) {
-      if (asset.asset_type === 'front_matter') {
-        const fmType = (asset.meta as { frontMatterType?: string })?.frontMatterType || 'unknown';
-        await addFileToZip(asset, frontFolder, `${fmType}.png`);
-        
-      } else if (asset.asset_type === 'page_image') {
-        const pageNum = String(asset.page_number || 0).padStart(3, '0');
-        await addFileToZip(asset, pagesFolder, `page-${pageNum}.png`);
-        
-        // Store prompt if available
-        const prompt = (asset.meta as { prompt?: string })?.prompt;
-        if (prompt) {
-          prompts[`page-${pageNum}`] = prompt;
-        }
-        
-      } else if (asset.asset_type === 'pdf' && data.includePdf) {
-        await addFileToZip(asset, exportFolder, 'book.pdf');
+    const metadata: {
+      title: string;
+      pageCount: number;
+      pages: Array<{
+        pageIndex: number;
+        filename: string;
+        title?: string;
+        prompt?: string;
+      }>;
+      exportDate: string;
+      format: string;
+    } = {
+      title: data.bookTitle,
+      pageCount: 0,
+      pages: [],
+      exportDate: new Date().toISOString(),
+      format: "US Letter (2550x3300 @ 300 DPI)",
+    };
+    
+    // Download and add page images
+    let processedCount = 0;
+    for (const asset of pageAssets) {
+      if (!asset.storage_path) continue;
+      
+      const buffer = await downloadFile(asset.storage_path);
+      if (!buffer) continue;
+      
+      const paddedIndex = String(asset.page_number || processedCount + 1).padStart(3, "0");
+      const title = asset.meta?.title;
+      const safeTitle = title ? String(title).replace(/[^a-z0-9]/gi, "-").slice(0, 30) : "";
+      const filename = safeTitle ? `page-${paddedIndex}-${safeTitle}.png` : `page-${paddedIndex}.png`;
+      
+      imagesFolder?.file(filename, buffer);
+      
+      metadata.pages.push({
+        pageIndex: asset.page_number || processedCount + 1,
+        filename,
+        title: asset.meta?.title,
+        prompt: asset.meta?.prompt,
+      });
+      
+      processedCount++;
+    }
+    
+    metadata.pageCount = processedCount;
+    
+    // Download and add front matter
+    for (const asset of frontMatterAssets) {
+      if (!asset.storage_path) continue;
+      
+      const buffer = await downloadFile(asset.storage_path);
+      if (!buffer) continue;
+      
+      const type = asset.meta?.frontMatterType || "unknown";
+      frontMatterFolder?.file(`${type}-page.png`, buffer);
+    }
+    
+    // Include PDF if requested and exists
+    if (data.includePdf && pdfAsset?.storage_path) {
+      const pdfBuffer = await downloadFile(pdfAsset.storage_path);
+      if (pdfBuffer) {
+        zip.file("book.pdf", pdfBuffer);
       }
     }
     
-    // Add prompts.json
-    if (Object.keys(prompts).length > 0 && metaFolder) {
-      metaFolder.file('prompts.json', JSON.stringify({
-        projectName: project.name,
-        exportDate: new Date().toISOString(),
-        prompts,
-      }, null, 2));
+    // Add metadata
+    if (data.includeMetadata) {
+      zip.file("metadata.json", JSON.stringify(metadata, null, 2));
     }
     
     // Add README
-    zip.file('README.txt', `# ${project.name || 'Coloring Book'}
+    const readme = `# ${data.bookTitle}
 
 Exported: ${new Date().toLocaleString()}
-Total Files: ${downloadedCount}
+Total Pages: ${processedCount}
 
-## Folders
-- pages/ - Coloring pages (PNG, US Letter @ 300 DPI)
-- front/ - Title, copyright, belongs-to pages (PNG)
-- export/ - Full PDF book (if generated)
-- meta/ - Prompts and settings (JSON)
+## Format
+All images are in US Letter format (2550x3300 pixels @ 300 DPI).
+Perfect for printing on standard US Letter paper (8.5" x 11").
 
-Created with ColorBook AI
-`);
+## Files
+- images/ - Contains all coloring pages as PNG files
+- front-matter/ - Title, copyright, and belongs-to pages
+${data.includeMetadata ? "- metadata.json - Page titles and prompts\n" : ""}
+`;
+    zip.file("README.txt", readme);
     
     // Generate ZIP
     const zipBuffer = await zip.generateAsync({
-      type: 'nodebuffer',
-      compression: 'DEFLATE',
+      type: "nodebuffer",
+      compression: "DEFLATE",
       compressionOptions: { level: 6 },
     });
     
-    console.log(`[build-zip] ZIP generated: ${zipBuffer.length} bytes, ${downloadedCount} files`);
-    
     // Upload to storage
-    const storagePath = `${data.userId}/${data.projectId}/export/book.zip`;
-    const { path, error: uploadError } = await uploadToStorage(
-      'colweb',
-      storagePath,
-      zipBuffer,
-      'application/zip'
-    );
+    const zipPath = `${data.userId}/${data.projectId}/exports/book.zip`;
+    const { error: uploadError } = await supabase.storage
+      .from("generated")
+      .upload(zipPath, zipBuffer, {
+        contentType: "application/zip",
+        upsert: true,
+      });
     
     if (uploadError) {
-      console.error('[build-zip] Upload error:', uploadError);
-      return NextResponse.json(
-        { error: 'Failed to upload ZIP' },
-        { status: 500 }
-      );
-    }
-    
-    // Upsert asset record
-    const { data: existingAsset } = await supabase
-      .from('generated_assets')
-      .select('id')
-      .eq('project_id', data.projectId)
-      .eq('asset_type', 'zip')
-      .single();
-    
-    if (existingAsset) {
-      await supabase
-        .from('generated_assets')
-        .update({
-          storage_path: path,
-          status: 'ready',
-          meta: {
-            fileCount: downloadedCount,
-            fileSize: zipBuffer.length,
-          },
-        })
-        .eq('id', existingAsset.id);
-    } else {
-      await supabase
-        .from('generated_assets')
-        .insert({
-          project_id: data.projectId,
-          user_id: data.userId,
-          asset_type: 'zip',
-          storage_bucket: 'colweb',
-          storage_path: path,
-          mime_type: 'application/zip',
-          status: 'ready',
-          meta: {
-            fileCount: downloadedCount,
-            fileSize: zipBuffer.length,
-          },
-        });
+      console.error("[build-zip] Failed to upload ZIP:", uploadError);
     }
     
     // Create signed URL for download
-    const signedUrl = await createSignedUrl('colweb', path, 3600);
+    const downloadUrl = await createSignedUrl("generated", zipPath, 3600);
     
-    return NextResponse.json({
-      success: true,
-      storagePath: path,
-      signedUrl,
-      fileCount: downloadedCount,
-      fileSize: zipBuffer.length,
+    const elapsed = Date.now() - startTime;
+    console.log(`[build-zip] Complete: ${processedCount} pages in ${elapsed}ms`);
+    
+    // Return ZIP as direct download (streaming)
+    const safeTitle = data.bookTitle.replace(/[^a-z0-9]/gi, "-");
+    
+    return new NextResponse(new Uint8Array(zipBuffer), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${safeTitle}-coloring-book.zip"`,
+        "X-File-Count": String(processedCount),
+        "X-Download-Url": downloadUrl || "",
+      },
     });
     
   } catch (error) {
-    console.error('[build-zip] Error:', error);
+    console.error("[build-zip] Error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'ZIP build failed' },
+      { error: error instanceof Error ? error.message : "ZIP generation failed" },
       { status: 500 }
     );
   }
 }
-
