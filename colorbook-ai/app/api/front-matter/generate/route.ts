@@ -203,7 +203,7 @@ async function renderPageToImage(
 
 /**
  * Create Title Page SVG
- * Uses simple fonts that sharp can render
+ * Using simple inline styles for maximum compatibility with sharp
  */
 function createTitlePageSVG(
   width: number, 
@@ -215,33 +215,57 @@ function createTitlePageSVG(
   const author = options.authorName ? escapeXml(options.authorName) : "";
   
   // Truncate title if too long
-  const displayTitle = title.length > 40 ? title.substring(0, 37) + "..." : title;
+  const displayTitle = title.length > 30 ? title.substring(0, 27) + "..." : title;
+  
+  // Calculate positions
+  const centerX = width / 2;
+  const titleY = height * 0.38;
+  const subtitleY = height * 0.48;
+  const lineY = height * 0.55;
+  const authorY = height * 0.65;
+  const footerY = height * 0.90;
   
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="100%" height="100%" fill="white"/>
+    <rect width="${width}" height="${height}" fill="#ffffff"/>
     
-    <rect x="50" y="50" width="${width - 100}" height="${height - 100}" 
-          fill="none" stroke="#e0e0e0" stroke-width="2" rx="10"/>
+    <!-- Decorative border -->
+    <rect x="60" y="60" width="${width - 120}" height="${height - 120}" 
+          fill="none" stroke="#d0d0d0" stroke-width="4" rx="20"/>
     
-    <text x="${width / 2}" y="${height * 0.35}" 
-          font-family="sans-serif" font-size="64" font-weight="bold" 
-          text-anchor="middle" fill="#333333">${displayTitle}</text>
+    <!-- Decorative corner elements -->
+    <circle cx="100" cy="100" r="8" fill="#333333"/>
+    <circle cx="${width - 100}" cy="100" r="8" fill="#333333"/>
+    <circle cx="100" cy="${height - 100}" r="8" fill="#333333"/>
+    <circle cx="${width - 100}" cy="${height - 100}" r="8" fill="#333333"/>
     
-    ${subtitle ? `<text x="${width / 2}" y="${height * 0.45}" 
-          font-family="sans-serif" font-size="32"
-          text-anchor="middle" fill="#666666">${subtitle}</text>` : ""}
+    <!-- Title -->
+    <text x="${centerX}" y="${titleY}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 72px; font-weight: bold; fill: #1a1a1a;"
+          text-anchor="middle" dominant-baseline="middle">${displayTitle}</text>
     
-    <line x1="${width * 0.3}" y1="${height * 0.52}" 
-          x2="${width * 0.7}" y2="${height * 0.52}" 
-          stroke="#cccccc" stroke-width="2"/>
+    ${subtitle ? `
+    <!-- Subtitle -->
+    <text x="${centerX}" y="${subtitleY}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 36px; fill: #4a4a4a;"
+          text-anchor="middle" dominant-baseline="middle">${subtitle}</text>
+    ` : ""}
     
-    ${author ? `<text x="${width / 2}" y="${height * 0.65}" 
-          font-family="sans-serif" font-size="28"
-          text-anchor="middle" fill="#555555">by ${author}</text>` : ""}
+    <!-- Decorative line -->
+    <line x1="${width * 0.25}" y1="${lineY}" x2="${width * 0.75}" y2="${lineY}" 
+          stroke="#888888" stroke-width="3"/>
+    <circle cx="${centerX}" cy="${lineY}" r="6" fill="#888888"/>
     
-    <text x="${width / 2}" y="${height * 0.92}" 
-          font-family="sans-serif" font-size="18"
-          text-anchor="middle" fill="#999999">A Coloring Book</text>
+    ${author ? `
+    <!-- Author -->
+    <text x="${centerX}" y="${authorY}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 32px; fill: #3a3a3a;"
+          text-anchor="middle" dominant-baseline="middle">by ${author}</text>
+    ` : ""}
+    
+    <!-- Footer -->
+    <text x="${centerX}" y="${footerY}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 24px; fill: #666666;"
+          text-anchor="middle" dominant-baseline="middle">A Coloring Book</text>
   </svg>`;
 }
 
@@ -254,28 +278,54 @@ function createCopyrightPageSVG(
   options: z.infer<typeof requestSchema>["options"]
 ): string {
   const title = escapeXml(options.bookTitle || "My Coloring Book");
-  const author = options.authorName ? escapeXml(options.authorName) : "Author";
+  const author = options.authorName ? escapeXml(options.authorName) : "";
   const year = options.year || new Date().getFullYear().toString();
   
-  const startY = height * 0.30;
-  const lineHeight = 40;
+  const centerX = width / 2;
+  const startY = height * 0.25;
+  const lineHeight = 55;
   
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="100%" height="100%" fill="white"/>
+    <rect width="${width}" height="${height}" fill="#ffffff"/>
     
-    <text x="${width / 2}" y="${startY}" font-family="sans-serif" font-size="28" font-weight="bold" text-anchor="middle" fill="#333333">${title}</text>
+    <!-- Title -->
+    <text x="${centerX}" y="${startY}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 42px; font-weight: bold; fill: #1a1a1a;"
+          text-anchor="middle">${title}</text>
     
-    <text x="${width / 2}" y="${startY + lineHeight * 2}" font-family="sans-serif" font-size="22" text-anchor="middle" fill="#333333">Copyright ${year} ${author}</text>
+    <!-- Decorative line -->
+    <line x1="${width * 0.3}" y1="${startY + 40}" x2="${width * 0.7}" y2="${startY + 40}" 
+          stroke="#cccccc" stroke-width="2"/>
     
-    <text x="${width / 2}" y="${startY + lineHeight * 3}" font-family="sans-serif" font-size="20" text-anchor="middle" fill="#333333">All rights reserved.</text>
+    <!-- Copyright notice -->
+    <text x="${centerX}" y="${startY + lineHeight * 2}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 32px; fill: #1a1a1a;"
+          text-anchor="middle">© ${year}${author ? ` ${author}` : ""}</text>
     
-    <text x="${width / 2}" y="${startY + lineHeight * 5}" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#555555">No part of this publication may be reproduced,</text>
-    <text x="${width / 2}" y="${startY + lineHeight * 6}" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#555555">distributed, or transmitted in any form</text>
-    <text x="${width / 2}" y="${startY + lineHeight * 7}" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#555555">without prior written permission.</text>
+    <text x="${centerX}" y="${startY + lineHeight * 3}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 28px; fill: #1a1a1a;"
+          text-anchor="middle">All Rights Reserved</text>
     
-    <text x="${width / 2}" y="${startY + lineHeight * 9}" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#555555">This is a coloring book for personal use.</text>
+    <!-- Legal text -->
+    <text x="${centerX}" y="${startY + lineHeight * 5}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 22px; fill: #4a4a4a;"
+          text-anchor="middle">No part of this publication may be</text>
+    <text x="${centerX}" y="${startY + lineHeight * 5.8}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 22px; fill: #4a4a4a;"
+          text-anchor="middle">reproduced, distributed, or transmitted</text>
+    <text x="${centerX}" y="${startY + lineHeight * 6.6}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 22px; fill: #4a4a4a;"
+          text-anchor="middle">without prior written permission.</text>
     
-    <text x="${width / 2}" y="${startY + lineHeight * 11}" font-family="sans-serif" font-size="16" text-anchor="middle" fill="#999999">Created with ColorBook AI</text>
+    <!-- Usage note -->
+    <text x="${centerX}" y="${startY + lineHeight * 8.5}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 24px; fill: #3a3a3a;"
+          text-anchor="middle">This coloring book is for personal use only.</text>
+    
+    <!-- Footer -->
+    <text x="${centerX}" y="${height * 0.88}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 20px; fill: #888888;"
+          text-anchor="middle">Created with ColorBook AI</text>
   </svg>`;
 }
 
@@ -288,31 +338,52 @@ function createBelongsToPageSVG(
   options: z.infer<typeof requestSchema>["options"]
 ): string {
   const name = options.belongsToName ? escapeXml(options.belongsToName) : "";
+  const centerX = width / 2;
   
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="100%" height="100%" fill="white"/>
+    <rect width="${width}" height="${height}" fill="#ffffff"/>
     
-    <rect x="100" y="100" width="${width - 200}" height="${height - 200}" 
-          fill="none" stroke="#e0e0e0" stroke-width="3" rx="20"/>
+    <!-- Decorative border -->
+    <rect x="80" y="80" width="${width - 160}" height="${height - 160}" 
+          fill="none" stroke="#d0d0d0" stroke-width="4" rx="30"/>
     
-    <circle cx="${width * 0.35}" cy="${height * 0.25}" r="15" fill="#FFD700"/>
-    <circle cx="${width * 0.5}" cy="${height * 0.25}" r="15" fill="#FFD700"/>
-    <circle cx="${width * 0.65}" cy="${height * 0.25}" r="15" fill="#FFD700"/>
+    <!-- Top decorative stars -->
+    <circle cx="${width * 0.30}" cy="${height * 0.18}" r="20" fill="#FFD700"/>
+    <circle cx="${width * 0.42}" cy="${height * 0.15}" r="15" fill="#FFA500"/>
+    <circle cx="${width * 0.50}" cy="${height * 0.18}" r="20" fill="#FFD700"/>
+    <circle cx="${width * 0.58}" cy="${height * 0.15}" r="15" fill="#FFA500"/>
+    <circle cx="${width * 0.70}" cy="${height * 0.18}" r="20" fill="#FFD700"/>
     
-    <text x="${width / 2}" y="${height * 0.4}" 
-          font-family="sans-serif" font-size="48" font-weight="bold"
-          text-anchor="middle" fill="#333333">This Book Belongs To</text>
+    <!-- Main title -->
+    <text x="${centerX}" y="${height * 0.38}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 58px; font-weight: bold; fill: #1a1a1a;"
+          text-anchor="middle">This Book</text>
+    <text x="${centerX}" y="${height * 0.46}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 58px; font-weight: bold; fill: #1a1a1a;"
+          text-anchor="middle">Belongs To:</text>
     
-    ${name ? `<text x="${width / 2}" y="${height * 0.55}" 
-          font-family="sans-serif" font-size="40"
-          text-anchor="middle" fill="#555555">${name}</text>` 
-    : `<line x1="${width * 0.25}" y1="${height * 0.55}" 
-          x2="${width * 0.75}" y2="${height * 0.55}" 
-          stroke="#333333" stroke-width="2"/>`}
+    ${name ? `
+    <!-- Name if provided -->
+    <text x="${centerX}" y="${height * 0.58}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 48px; fill: #333333;"
+          text-anchor="middle">${name}</text>
+    ` : `
+    <!-- Line for writing name -->
+    <line x1="${width * 0.20}" y1="${height * 0.58}" x2="${width * 0.80}" y2="${height * 0.58}" 
+          stroke="#1a1a1a" stroke-width="3"/>
+    `}
     
-    <circle cx="${width * 0.35}" cy="${height * 0.75}" r="12" fill="#FF6B6B"/>
-    <circle cx="${width * 0.5}" cy="${height * 0.75}" r="12" fill="#FF6B6B"/>
-    <circle cx="${width * 0.65}" cy="${height * 0.75}" r="12" fill="#FF6B6B"/>
+    <!-- Bottom decorative hearts -->
+    <circle cx="${width * 0.30}" cy="${height * 0.78}" r="18" fill="#FF6B6B"/>
+    <circle cx="${width * 0.42}" cy="${height * 0.80}" r="14" fill="#FF8C8C"/>
+    <circle cx="${width * 0.50}" cy="${height * 0.78}" r="18" fill="#FF6B6B"/>
+    <circle cx="${width * 0.58}" cy="${height * 0.80}" r="14" fill="#FF8C8C"/>
+    <circle cx="${width * 0.70}" cy="${height * 0.78}" r="18" fill="#FF6B6B"/>
+    
+    <!-- Date line (optional) -->
+    <text x="${centerX}" y="${height * 0.88}" 
+          style="font-family: Arial, Helvetica, sans-serif; font-size: 24px; fill: #666666;"
+          text-anchor="middle">Date: _________________</text>
   </svg>`;
 }
 
