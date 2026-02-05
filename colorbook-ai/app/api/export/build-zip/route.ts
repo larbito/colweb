@@ -195,22 +195,16 @@ ${data.includeMetadata ? "- metadata.json - Page titles and prompts\n" : ""}
     }
     
     // Create signed URL for download
-    const downloadUrl = await createSignedUrl("generated", zipPath, 3600);
+    const signedUrl = await createSignedUrl("generated", zipPath, 3600);
     
     const elapsed = Date.now() - startTime;
-    console.log(`[build-zip] Complete: ${processedCount} pages in ${elapsed}ms`);
+    console.log(`[build-zip] Complete: ${processedCount} pages, signedUrl: ${signedUrl ? 'yes' : 'no'}, in ${elapsed}ms`);
     
-    // Return ZIP as direct download (streaming)
-    const safeTitle = data.bookTitle.replace(/[^a-z0-9]/gi, "-");
-    
-    return new NextResponse(new Uint8Array(zipBuffer), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${safeTitle}-coloring-book.zip"`,
-        "X-File-Count": String(processedCount),
-        "X-Download-Url": downloadUrl || "",
-      },
+    return NextResponse.json({
+      success: true,
+      fileCount: processedCount,
+      signedUrl,
+      storagePath: zipPath,
     });
     
   } catch (error) {

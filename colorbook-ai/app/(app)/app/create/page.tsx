@@ -88,8 +88,10 @@ interface FrontMatterPage {
   enabled: boolean;
   status: FrontMatterStatus;
   imageBase64?: string;
+  signedUrl?: string; // URL from Supabase storage
   error?: string;
   attempts: number;
+  seed: number; // For generating different variants on regenerate
 }
 
 // Validation result info for debugging
@@ -604,6 +606,54 @@ function CreateColoringBookPageContent() {
     }
   };
 
+  /**
+   * Save a generated asset to Supabase Storage
+   * This persists the image for PDF/ZIP export and dashboard display
+   */
+  const saveAssetToStorage = async (
+    projId: string,
+    pageNumber: number,
+    imageBase64: string,
+    prompt?: string,
+    title?: string
+  ) => {
+    if (!userId || !projId) {
+      console.warn("[create] Cannot save asset - missing userId or projectId");
+      return null;
+    }
+    
+    try {
+      console.log(`[create] Saving page ${pageNumber} to storage for project ${projId}`);
+      
+      const response = await fetch("/api/assets/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: projId,
+          userId,
+          pageNumber,
+          assetType: "page_image",
+          imageBase64,
+          meta: { prompt, title },
+          skipSanitize: true, // Already sanitized by generate-one
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        console.error(`[create] Failed to save asset: ${data.error}`);
+        return null;
+      }
+      
+      console.log(`[create] Asset saved: ${data.assetId}`);
+      return data;
+    } catch (error) {
+      console.error("[create] Error saving asset:", error);
+      return null;
+    }
+  };
+
   // ============================================================
   // STEP 2: PROMPTS GENERATION (DIRECT FROM IDEA - NO SEPARATE IMPROVE STEP)
   // ============================================================
@@ -893,8 +943,11 @@ function CreateColoringBookPageContent() {
           ));
           successCount++;
           
-          // Update project image count in DB
+          // SAVE ASSET TO SUPABASE STORAGE (for PDF/ZIP export)
           if (projectId) {
+            saveAssetToStorage(projectId, pageItem.page, data.imageBase64, pageItem.prompt, pageItem.title);
+            
+            // Update project image count in DB
             updateProjectStatus(projectId, "generating", {
               imagesGeneratedCount: successCount,
             });
@@ -1092,6 +1145,13 @@ function CreateColoringBookPageContent() {
               }
             : p
         ));
+        
+        // Save to Supabase storage
+        if (projectId) {
+          const pageData = pages.find(p => p.page === pageNumber);
+          saveAssetToStorage(projectId, pageNumber, data.imageBase64, pageData?.prompt, pageData?.title);
+        }
+        
         toast.success(`Page ${pageNumber} generated!`);
       } else if (data.status === "paused") {
         // Non-retryable error (billing, etc) - show paused state
@@ -1210,6 +1270,11 @@ function CreateColoringBookPageContent() {
               : p
           ));
           successCount++;
+          
+          // Save to Supabase storage
+          if (projectId) {
+            saveAssetToStorage(projectId, pageItem.page, data.imageBase64, pageItem.prompt, pageItem.title);
+          }
         } else {
           // Keep in generating state with retry option
           setPages(prev => prev.map(p =>
@@ -1440,8 +1505,13 @@ function CreateColoringBookPageContent() {
     toast.success(`Downloading ${donePages.length} images...`);
   };
 
-  // Download all as ZIP (organized structure with metadata)
+  // Download all as ZIP (storage-backed, no base64 in request)
   const downloadAsZip = async () => {
+    if (!projectId || !userId) {
+      toast.error("Project not created yet. Please generate pages first.");
+      return;
+    }
+    
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
       toast.error("No images to download");
@@ -1454,40 +1524,17 @@ function CreateColoringBookPageContent() {
     try {
       const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
       
-      console.log("[ZIP Export] Creating ZIP with", donePages.length, "pages");
+      console.log("[ZIP Export] Using build-zip endpoint with projectId:", projectId);
       
-      // Collect extras (front matter pages)
-      const extras: { type: "title" | "copyright" | "belongs-to"; imageBase64: string }[] = [];
-      for (const fm of frontMatter) {
-        if (fm.enabled && fm.status === "done" && fm.imageBase64) {
-          extras.push({
-            type: fm.key === "belongsTo" ? "belongs-to" : fm.key,
-            imageBase64: fm.imageBase64,
-          });
-        }
-      }
-      
-      const zipResponse = await fetch("/api/export/zip", {
+      // Use storage-based ZIP export (no base64 in request body)
+      const zipResponse = await fetch("/api/export/build-zip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: bookTitle,
-          pages: donePages.map(p => ({
-            pageIndex: p.page,
-            imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
-            title: p.title,
-            prompt: p.prompt,
-          })),
-          extras,
-          metadata: {
-            bookType,
-            complexity,
-            pageSize: "US Letter (8.5x11)",
-            settings: {
-              pageCount,
-              orientation,
-            },
-          },
+          projectId,
+          userId,
+          includePdf: true, // Include PDF in ZIP if it exists
+          includeMetadata: true,
         }),
       });
 
@@ -1497,15 +1544,17 @@ function CreateColoringBookPageContent() {
         throw new Error(errorData.error || `Failed to create ZIP (${zipResponse.status})`);
       }
 
-      // Download ZIP blob
-      const blob = await zipResponse.blob();
+      const data = await zipResponse.json();
       
-      if (blob.size === 0) {
-        throw new Error("ZIP creation returned empty file");
+      if (!data.success || !data.signedUrl) {
+        throw new Error("ZIP creation returned no URL");
       }
       
-      const zipPageCount = zipResponse.headers.get("X-File-Count") || donePages.length;
-      console.log("[ZIP Export] ZIP created:", blob.size, "bytes,", zipPageCount, "files");
+      console.log("[ZIP Export] build-zip succeeded:", data.fileCount, "files");
+      
+      // Fetch the ZIP from signed URL and download it
+      const blobResponse = await fetch(data.signedUrl);
+      const blob = await blobResponse.blob();
       
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -1514,7 +1563,7 @@ function CreateColoringBookPageContent() {
       link.click();
       URL.revokeObjectURL(url);
 
-      toast.success(`ZIP downloaded! (${(blob.size / 1024 / 1024).toFixed(1)} MB, ${zipPageCount} files)`);
+      toast.success(`ZIP downloaded! (${data.fileCount} files)`);
     } catch (error) {
       console.error("[ZIP Export] Client error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to create ZIP");
@@ -1574,6 +1623,12 @@ function CreateColoringBookPageContent() {
               }
             : p
         ));
+        
+        // Save to Supabase storage
+        if (projectId) {
+          saveAssetToStorage(projectId, pageNumber, data.imageBase64, page.prompt, page.title);
+        }
+        
         toast.success(`Page ${pageNumber} regenerated!`);
       } else {
         // Keep in generating state with retry option
@@ -1608,53 +1663,67 @@ function CreateColoringBookPageContent() {
   
   // Front Matter state - previewed and regeneratable before PDF export
   const [frontMatter, setFrontMatter] = useState<FrontMatterPage[]>([
-    { key: "title", label: "Title Page", enabled: true, status: "pending", attempts: 0 },
-    { key: "copyright", label: "Copyright Page", enabled: true, status: "pending", attempts: 0 },
-    { key: "belongsTo", label: "Belongs To Page", enabled: true, status: "pending", attempts: 0 },
+    { key: "title", label: "Title Page", enabled: true, status: "pending", attempts: 0, seed: 0 },
+    { key: "copyright", label: "Copyright Page", enabled: true, status: "pending", attempts: 0, seed: 0 },
+    { key: "belongsTo", label: "Belongs To Page", enabled: true, status: "pending", attempts: 0, seed: 0 },
   ]);
   const [generatingFrontMatter, setGeneratingFrontMatter] = useState<FrontMatterKey | null>(null);
   
   // Front matter computed values
-  // A page is truly "ready" ONLY if status="done" AND imageBase64 exists
+  // A page is truly "ready" ONLY if status="done" AND signedUrl exists (storage-backed)
   const enabledFrontMatter = frontMatter.filter(fm => fm.enabled);
-  const doneFrontMatterCount = frontMatter.filter(fm => fm.enabled && fm.status === "done" && !!fm.imageBase64).length;
-  const frontMatterReady = enabledFrontMatter.every(fm => fm.status === "done" && !!fm.imageBase64);
+  const doneFrontMatterCount = frontMatter.filter(fm => fm.enabled && fm.status === "done" && !!fm.signedUrl).length;
+  const frontMatterReady = enabledFrontMatter.every(fm => fm.status === "done" && !!fm.signedUrl);
   
-  // Generate a single front matter page
-  const generateFrontMatterPage = async (key: FrontMatterKey) => {
+  // Generate a single front matter page using storage-backed /api/front-matter/build
+  const generateFrontMatterPage = async (key: FrontMatterKey, incrementSeed = false) => {
+    if (!projectId || !userId) {
+      toast.error("Project not created yet. Please generate pages first.");
+      return;
+    }
+    
     setGeneratingFrontMatter(key);
+    
+    // Get current seed and increment if this is a regenerate
+    const currentFm = frontMatter.find(fm => fm.key === key);
+    const newSeed = incrementSeed ? (currentFm?.seed || 0) + 1 : (currentFm?.seed || 0);
+    
     setFrontMatter(prev => prev.map(fm => 
-      fm.key === key ? { ...fm, status: "generating" as FrontMatterStatus } : fm
+      fm.key === key ? { ...fm, status: "generating" as FrontMatterStatus, seed: newSeed } : fm
     ));
     
     try {
-      const response = await fetch("/api/front-matter/generate", {
+      console.log(`[front-matter] Building ${key} page with seed=${newSeed}`);
+      
+      const response = await fetch("/api/front-matter/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          projectId,
+          userId,
           key,
-          options: {
-            bookTitle: storyConfig.title || generatedIdea?.title || "My Coloring Book",
-            authorName: pdfSettings.authorName,
-            year: new Date().getFullYear().toString(),
-            belongsToName: "", // Leave blank for write-in line
-          },
+          bookTitle: storyConfig.title || generatedIdea?.title || "My Coloring Book",
+          authorName: pdfSettings.authorName,
+          year: new Date().getFullYear().toString(),
+          belongsToName: "", // Leave blank for write-in line
+          seed: newSeed,
         }),
       });
       
       const data = await response.json();
       
-      if (response.ok && data.status === "done" && data.imageBase64) {
+      if (response.ok && data.success && data.signedUrl) {
+        console.log(`[front-matter] SUCCESS: ${key} page built (variant=${data.variant}, seed=${data.seed})`);
         setFrontMatter(prev => prev.map(fm =>
           fm.key === key
-            ? { ...fm, status: "done" as FrontMatterStatus, imageBase64: data.imageBase64, error: undefined }
+            ? { ...fm, status: "done" as FrontMatterStatus, signedUrl: data.signedUrl, error: undefined, seed: data.seed }
             : fm
         ));
         toast.success(`${key === "title" ? "Title" : key === "copyright" ? "Copyright" : "Belongs To"} page generated!`);
       } else {
         setFrontMatter(prev => prev.map(fm =>
           fm.key === key
-            ? { ...fm, status: "failed" as FrontMatterStatus, error: data.error || "Generation failed", attempts: fm.attempts + 1 }
+            ? { ...fm, status: "failed" as FrontMatterStatus, error: data.error || "Build failed", attempts: fm.attempts + 1 }
             : fm
         ));
         toast.error(`Failed to generate ${key} page`);
@@ -1673,9 +1742,9 @@ function CreateColoringBookPageContent() {
   
   // Generate all enabled front matter pages (also regenerate if image is missing)
   const generateAllFrontMatter = async () => {
-    const toGenerate = frontMatter.filter(fm => fm.enabled && (fm.status !== "done" || !fm.imageBase64));
+    const toGenerate = frontMatter.filter(fm => fm.enabled && (fm.status !== "done" || !fm.signedUrl));
     for (const fm of toGenerate) {
-      await generateFrontMatterPage(fm.key);
+      await generateFrontMatterPage(fm.key, false);
     }
   };
   
@@ -1687,6 +1756,11 @@ function CreateColoringBookPageContent() {
   };
 
   const generatePdfPreview = async () => {
+    if (!projectId || !userId) {
+      toast.error("Project not created yet. Please generate pages first.");
+      return;
+    }
+    
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
       toast.error("No pages to export");
@@ -1698,40 +1772,17 @@ function CreateColoringBookPageContent() {
     setPdfNeedsRefresh(false);
     
     try {
-      const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
+      console.log("[PDF Export] Using build-pdf endpoint with projectId:", projectId);
       
-      // Collect already-generated front matter images
-      const titlePage = frontMatter.find(fm => fm.key === "title" && fm.enabled && fm.status === "done");
-      const copyrightPage = frontMatter.find(fm => fm.key === "copyright" && fm.enabled && fm.status === "done");
-      const belongsToPage = frontMatter.find(fm => fm.key === "belongsTo" && fm.enabled && fm.status === "done");
-      
-      console.log("[PDF Export] Sending request with", donePages.length, "coloring pages +", 
-        [titlePage, copyrightPage, belongsToPage].filter(Boolean).length, "front matter pages");
-      
-      const response = await fetch("/api/export/pdf", {
+      // Use storage-based PDF export (no base64 in request body)
+      const response = await fetch("/api/export/build-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: bookTitle,
-          author: pdfSettings.authorName,
-          coloringPages: donePages.map(p => ({
-            page: p.page,
-            imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
-          })),
-          // Use pre-generated front matter images (no generation during export)
-          titlePageImage: titlePage?.imageBase64,
-          copyrightPageImage: copyrightPage?.imageBase64,
-          belongsToPageImage: belongsToPage?.imageBase64,
-          pageSize: "letter", // Always US Letter
-          orientation: orientation === "landscape" ? "landscape" : "portrait",
-          margin: 0.25,
-          returnBinary: true,
-          insertBlankPages: false,
-          includeBelongsTo: false,
-          includeTitlePage: pdfSettings.includeTitlePage,
-          includeCopyright: pdfSettings.includeCopyright,
+          projectId,
+          userId,
           includePageNumbers: pdfSettings.includePageNumbers,
-          includeCreatedWith: true,
+          previewMode: false, // Generate full PDF
         }),
       });
 
@@ -1743,27 +1794,24 @@ function CreateColoringBookPageContent() {
         throw new Error(errorMsg);
       }
 
-      // Create blob URL for preview
-      const blob = await response.blob();
+      const data = await response.json();
       
-      if (blob.size === 0) {
-        const emptyError = "PDF generation returned empty file";
+      if (!data.success || !data.signedUrl) {
+        const emptyError = "PDF generation returned no URL";
         setPdfError(emptyError);
         throw new Error(emptyError);
       }
       
-      console.log("[PDF Export] PDF generated:", blob.size, "bytes");
-      
-      const url = URL.createObjectURL(blob);
+      console.log("[PDF Export] build-pdf succeeded:", data.totalPages, "pages,", data.processedPages, "processed");
       
       // Clean up previous preview URL
       if (pdfPreviewUrl) {
         URL.revokeObjectURL(pdfPreviewUrl);
       }
       
-      setPdfPreviewUrl(url);
+      setPdfPreviewUrl(data.signedUrl);
       setPdfError(null);
-      toast.success(`PDF preview generated! (${(blob.size / 1024 / 1024).toFixed(1)} MB)`);
+      toast.success(`PDF generated! (${data.totalPages} pages)`);
     } catch (error) {
       console.error("[PDF Export] Client error:", error);
       const errorMsg = error instanceof Error ? error.message : "Failed to generate PDF";
@@ -1774,21 +1822,39 @@ function CreateColoringBookPageContent() {
     }
   };
 
-  const downloadPdf = () => {
+  const downloadPdf = async () => {
     if (!pdfPreviewUrl) {
       toast.error("Generate preview first");
       return;
     }
     
-    const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
-    const link = document.createElement("a");
-    link.href = pdfPreviewUrl;
-    link.download = `${bookTitle.replace(/[^a-zA-Z0-9]/g, "-")}.pdf`;
-    link.click();
-    toast.success("PDF downloaded!");
+    try {
+      const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
+      
+      // Fetch the PDF from signed URL and download it
+      const response = await fetch(pdfPreviewUrl);
+      const blob = await response.blob();
+      
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${bookTitle.replace(/[^a-zA-Z0-9]/g, "-")}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+      
+      toast.success("PDF downloaded!");
+    } catch (error) {
+      console.error("[PDF Download] Error:", error);
+      toast.error("Failed to download PDF");
+    }
   };
 
   const exportPDF = async () => {
+    if (!projectId || !userId) {
+      toast.error("Project not created yet. Please generate pages first.");
+      return;
+    }
+    
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
       toast.error("No pages to export");
@@ -1800,26 +1866,17 @@ function CreateColoringBookPageContent() {
     try {
       const bookTitle = storyConfig.title || generatedIdea?.title || "My Coloring Book";
       
-      const response = await fetch("/api/export/pdf", {
+      console.log("[PDF Export] Direct export using build-pdf with projectId:", projectId);
+      
+      // Use storage-based PDF export (no base64 in request body)
+      const response = await fetch("/api/export/build-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: bookTitle,
-          author: pdfSettings.authorName,
-          coloringPages: donePages.map(p => ({
-            page: p.page,
-            imageBase64: p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64,
-          })),
-          pageSize: "letter", // Always US Letter
-          orientation: orientation === "landscape" ? "landscape" : "portrait",
-          margin: 0.25,
-          returnBinary: true,
-          insertBlankPages: false,
-          includeBelongsTo: false,
-          includeTitlePage: pdfSettings.includeTitlePage,
-          includeCopyright: pdfSettings.includeCopyright,
+          projectId,
+          userId,
           includePageNumbers: pdfSettings.includePageNumbers,
-          includeCreatedWith: true,
+          previewMode: false,
         }),
       });
 
@@ -1828,8 +1885,15 @@ function CreateColoringBookPageContent() {
         throw new Error(errorData.error || "Failed to generate PDF");
       }
 
-      // Response is binary PDF
-      const blob = await response.blob();
+      const data = await response.json();
+      
+      if (!data.success || !data.signedUrl) {
+        throw new Error("PDF generation returned no URL");
+      }
+      
+      // Fetch PDF from signed URL and download
+      const blobResponse = await fetch(data.signedUrl);
+      const blob = await blobResponse.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -2782,9 +2846,9 @@ function CreateColoringBookPageContent() {
                       
                       {/* Preview Area - PaperPreview style */}
                       <div className="aspect-[8.5/11] relative bg-white border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden rounded-sm">
-                        {fm.imageBase64 ? (
+                        {fm.signedUrl ? (
                           <img
-                            src={fm.imageBase64.startsWith("data:") ? fm.imageBase64 : `data:image/png;base64,${fm.imageBase64}`}
+                            src={fm.signedUrl}
                             alt={fm.label}
                             className="w-full h-full object-contain"
                             style={{ backgroundColor: 'white' }}
@@ -2812,13 +2876,13 @@ function CreateColoringBookPageContent() {
                         <Button
                           size="sm"
                           className="w-full"
-                          variant={fm.status === "done" && fm.imageBase64 ? "outline" : "default"}
-                          onClick={() => generateFrontMatterPage(fm.key)}
-                          disabled={!fm.enabled || generatingFrontMatter === fm.key}
+                          variant={fm.status === "done" && fm.signedUrl ? "outline" : "default"}
+                          onClick={() => generateFrontMatterPage(fm.key, fm.status === "done" && !!fm.signedUrl)}
+                          disabled={!fm.enabled || generatingFrontMatter === fm.key || !projectId}
                         >
                           {generatingFrontMatter === fm.key ? (
                             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                          ) : fm.status === "done" && fm.imageBase64 ? (
+                          ) : fm.status === "done" && fm.signedUrl ? (
                             <><RefreshCw className="mr-2 h-4 w-4" /> Regenerate</>
                           ) : (
                             <><Sparkles className="mr-2 h-4 w-4" /> Generate</>
@@ -2829,15 +2893,17 @@ function CreateColoringBookPageContent() {
                   ))}
                 </div>
                 
-                {/* Generate All Button - show if any enabled page is not ready (status !== "done" OR missing imageBase64) */}
-                {enabledFrontMatter.some(fm => fm.status !== "done" || !fm.imageBase64) && (
+                {/* Generate All Button - show if any enabled page is not ready (status !== "done" OR missing signedUrl) */}
+                {enabledFrontMatter.some(fm => fm.status !== "done" || !fm.signedUrl) && (
                   <Button 
                     onClick={generateAllFrontMatter} 
-                    disabled={generatingFrontMatter !== null}
+                    disabled={generatingFrontMatter !== null || !projectId}
                     className="w-full"
                   >
                     {generatingFrontMatter ? (
                       <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating...</>
+                    ) : !projectId ? (
+                      <><AlertCircle className="mr-2 h-5 w-5" /> Generate Pages First</>
                     ) : (
                       <><Sparkles className="mr-2 h-5 w-5" /> Generate All Front Matter</>
                     )}
@@ -2855,7 +2921,7 @@ function CreateColoringBookPageContent() {
                         // Mark title page as needing regeneration
                         setFrontMatter(prev => prev.map(fm =>
                           fm.key === "title" && fm.status === "done" 
-                            ? { ...fm, status: "pending" as FrontMatterStatus, imageBase64: undefined }
+                            ? { ...fm, status: "pending" as FrontMatterStatus, signedUrl: undefined }
                             : fm
                         ));
                       }}
@@ -2871,7 +2937,7 @@ function CreateColoringBookPageContent() {
                         // Mark copyright page as needing regeneration
                         setFrontMatter(prev => prev.map(fm =>
                           (fm.key === "copyright" || fm.key === "title") && fm.status === "done"
-                            ? { ...fm, status: "pending" as FrontMatterStatus, imageBase64: undefined }
+                            ? { ...fm, status: "pending" as FrontMatterStatus, signedUrl: undefined }
                             : fm
                         ));
                       }}

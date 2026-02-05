@@ -266,7 +266,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Create signed URL for download
-    const downloadUrl = await createSignedUrl("generated", pdfPath, 3600);
+    const signedUrl = await createSignedUrl("generated", pdfPath, 3600);
     
     const elapsed = Date.now() - startTime;
     console.log(`[build-pdf] Complete: ${processedCount} pages in ${elapsed}ms`);
@@ -276,7 +276,7 @@ export async function POST(request: NextRequest) {
       totalPages: pageNumber,
       processedPages: processedCount,
       isPreview: data.previewMode,
-      downloadUrl,
+      signedUrl,
       storagePath: pdfPath,
     });
     
