@@ -1741,98 +1741,108 @@ function CreateColoringBookPageContent() {
   });
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   
-  // Front Matter state - previewed and regeneratable before PDF export
-  const [frontMatter, setFrontMatter] = useState<FrontMatterPage[]>([
-    { key: "title", label: "Title Page", enabled: true, status: "pending", attempts: 0, seed: 0 },
-    { key: "copyright", label: "Copyright Page", enabled: true, status: "pending", attempts: 0, seed: 0 },
-    { key: "belongsTo", label: "Belongs To Page", enabled: true, status: "pending", attempts: 0, seed: 0 },
-  ]);
-  const [generatingFrontMatter, setGeneratingFrontMatter] = useState<FrontMatterKey | null>(null);
+  // Front Matter state - Title/Copyright are text-based (always ready), only Belongs-To needs generation
+  const [belongsToPage, setBelongsToPage] = useState<{
+    enabled: boolean;
+    status: FrontMatterStatus;
+    signedUrl?: string;
+    imageBase64?: string;
+    error?: string;
+  }>({ enabled: false, status: "pending" });
+  const [generatingBelongsTo, setGeneratingBelongsTo] = useState(false);
   
-  // Front matter computed values
-  // A page is truly "ready" ONLY if status="done" AND signedUrl exists (storage-backed)
+  // PDF export options
+  const [includeTitlePage, setIncludeTitlePage] = useState(true);
+  const [includeCopyrightPage, setIncludeCopyrightPage] = useState(true);
+  
+  // Legacy frontMatter state (for backwards compatibility with any existing code)
+  const frontMatter = [
+    { key: "title" as FrontMatterKey, label: "Title Page", enabled: includeTitlePage, status: "done" as FrontMatterStatus, attempts: 0, seed: 0 },
+    { key: "copyright" as FrontMatterKey, label: "Copyright Page", enabled: includeCopyrightPage, status: "done" as FrontMatterStatus, attempts: 0, seed: 0 },
+    { key: "belongsTo" as FrontMatterKey, label: "Belongs To Page", enabled: belongsToPage.enabled, status: belongsToPage.status, signedUrl: belongsToPage.signedUrl, attempts: 0, seed: 0 },
+  ];
   const enabledFrontMatter = frontMatter.filter(fm => fm.enabled);
-  const doneFrontMatterCount = frontMatter.filter(fm => fm.enabled && fm.status === "done" && !!fm.signedUrl).length;
-  const frontMatterReady = enabledFrontMatter.every(fm => fm.status === "done" && !!fm.signedUrl);
+  // Title/Copyright are always ready (text-based), only belongsTo needs check
+  const belongsToReady = !belongsToPage.enabled || (belongsToPage.status === "done" && !!belongsToPage.signedUrl);
+  const frontMatterReady = belongsToReady;
   
-  // Generate a single front matter page using storage-backed /api/front-matter/build
-  const generateFrontMatterPage = async (key: FrontMatterKey, incrementSeed = false) => {
+  // Generate Belongs-To page using AI (theme-matching coloring page)
+  const generateBelongsToPage = async () => {
     if (!projectId || !userId) {
       toast.error("Project not created yet. Please generate pages first.");
       return;
     }
     
-    setGeneratingFrontMatter(key);
-    
-    // Get current seed and increment if this is a regenerate
-    const currentFm = frontMatter.find(fm => fm.key === key);
-    const newSeed = incrementSeed ? (currentFm?.seed || 0) + 1 : (currentFm?.seed || 0);
-    
-    setFrontMatter(prev => prev.map(fm => 
-      fm.key === key ? { ...fm, status: "generating" as FrontMatterStatus, seed: newSeed } : fm
-    ));
+    setGeneratingBelongsTo(true);
+    setBelongsToPage(prev => ({ ...prev, status: "generating" }));
     
     try {
-      console.log(`[front-matter] Building ${key} page with seed=${newSeed}`);
+      console.log(`[belongs-to] Generating AI coloring page`);
       
-      const response = await fetch("/api/front-matter/build", {
+      const response = await fetch("/api/front-matter/belongs-to", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
           userId,
-          key,
           bookTitle: storyConfig.title || generatedIdea?.title || "My Coloring Book",
-          authorName: pdfSettings.authorName,
-          year: new Date().getFullYear().toString(),
-          belongsToName: "", // Leave blank for write-in line
-          seed: newSeed,
+          mainCharacterDesc: generatedIdea?.mainCharacter,
+          theme: generatedIdea?.theme,
+          stylePreset: undefined, // Will use theme-based styling
+          complexity: complexity === "kids" ? "kids" : complexity === "detailed" || complexity === "ultra" ? "adult" : "medium",
         }),
       });
       
       const data = await response.json();
       
       if (response.ok && data.success && data.signedUrl) {
-        console.log(`[front-matter] SUCCESS: ${key} page built (variant=${data.variant}, seed=${data.seed})`);
-        setFrontMatter(prev => prev.map(fm =>
-          fm.key === key
-            ? { ...fm, status: "done" as FrontMatterStatus, signedUrl: data.signedUrl, error: undefined, seed: data.seed }
-            : fm
-        ));
-        toast.success(`${key === "title" ? "Title" : key === "copyright" ? "Copyright" : "Belongs To"} page generated!`);
+        console.log(`[belongs-to] SUCCESS: AI coloring page generated`);
+        setBelongsToPage({
+          enabled: true,
+          status: "done",
+          signedUrl: data.signedUrl,
+          imageBase64: data.imageBase64,
+        });
+        toast.success("Belongs To page generated!");
       } else {
-        setFrontMatter(prev => prev.map(fm =>
-          fm.key === key
-            ? { ...fm, status: "failed" as FrontMatterStatus, error: data.error || "Build failed", attempts: fm.attempts + 1 }
-            : fm
-        ));
-        toast.error(`Failed to generate ${key} page`);
+        setBelongsToPage(prev => ({
+          ...prev,
+          status: "failed",
+          error: data.error || "Generation failed",
+        }));
+        toast.error("Failed to generate Belongs To page");
       }
     } catch (error) {
-      setFrontMatter(prev => prev.map(fm =>
-        fm.key === key
-          ? { ...fm, status: "failed" as FrontMatterStatus, error: error instanceof Error ? error.message : "Error", attempts: fm.attempts + 1 }
-          : fm
-      ));
-      toast.error(`Error generating ${key} page`);
+      setBelongsToPage(prev => ({
+        ...prev,
+        status: "failed",
+        error: error instanceof Error ? error.message : "Error",
+      }));
+      toast.error("Error generating Belongs To page");
     } finally {
-      setGeneratingFrontMatter(null);
+      setGeneratingBelongsTo(false);
     }
   };
   
-  // Generate all enabled front matter pages (also regenerate if image is missing)
+  // Legacy function for backwards compat
+  const generateFrontMatterPage = async (key: FrontMatterKey) => {
+    if (key === "belongsTo") {
+      await generateBelongsToPage();
+    }
+    // Title and Copyright are text-based, no generation needed
+  };
+  
   const generateAllFrontMatter = async () => {
-    const toGenerate = frontMatter.filter(fm => fm.enabled && (fm.status !== "done" || !fm.signedUrl));
-    for (const fm of toGenerate) {
-      await generateFrontMatterPage(fm.key, false);
+    if (belongsToPage.enabled && belongsToPage.status !== "done") {
+      await generateBelongsToPage();
     }
   };
   
-  // Toggle front matter page enabled/disabled
+  // Legacy toggle
   const toggleFrontMatter = (key: FrontMatterKey) => {
-    setFrontMatter(prev => prev.map(fm =>
-      fm.key === key ? { ...fm, enabled: !fm.enabled } : fm
-    ));
+    if (key === "title") setIncludeTitlePage(prev => !prev);
+    else if (key === "copyright") setIncludeCopyrightPage(prev => !prev);
+    else if (key === "belongsTo") setBelongsToPage(prev => ({ ...prev, enabled: !prev.enabled }));
   };
 
   const generatePdfPreview = async () => {
@@ -1861,7 +1871,12 @@ function CreateColoringBookPageContent() {
         body: JSON.stringify({
           projectId,
           userId,
+          includeTitlePage,
+          includeCopyrightPage,
+          includeBelongsToPage: belongsToPage.enabled && belongsToPage.status === "done" && !!belongsToPage.signedUrl,
           includePageNumbers: pdfSettings.includePageNumbers,
+          bookTitle: storyConfig.title || generatedIdea?.title || "My Coloring Book",
+          authorName: pdfSettings.authorName,
           previewMode: false, // Generate full PDF
         }),
       });
@@ -1955,7 +1970,12 @@ function CreateColoringBookPageContent() {
         body: JSON.stringify({
           projectId,
           userId,
+          includeTitlePage,
+          includeCopyrightPage,
+          includeBelongsToPage: belongsToPage.enabled && belongsToPage.status === "done" && !!belongsToPage.signedUrl,
           includePageNumbers: pdfSettings.includePageNumbers,
+          bookTitle: storyConfig.title || generatedIdea?.title || "My Coloring Book",
+          authorName: pdfSettings.authorName,
           previewMode: false,
         }),
       });
@@ -2934,14 +2954,7 @@ function CreateColoringBookPageContent() {
                       <label className="text-sm font-medium mb-2 block">Book Title *</label>
                       <Input
                         value={storyConfig.title}
-                        onChange={(e) => {
-                          setStoryConfig({ ...storyConfig, title: e.target.value });
-                          setFrontMatter(prev => prev.map(fm =>
-                            fm.key === "title" && fm.status === "done" 
-                              ? { ...fm, status: "pending" as FrontMatterStatus, signedUrl: undefined }
-                              : fm
-                          ));
-                        }}
+                        onChange={(e) => setStoryConfig({ ...storyConfig, title: e.target.value })}
                         placeholder="My Coloring Book"
                       />
                     </div>
@@ -2949,14 +2962,7 @@ function CreateColoringBookPageContent() {
                       <label className="text-sm font-medium mb-2 block">Author / Publisher</label>
                       <Input
                         value={pdfSettings.authorName}
-                        onChange={(e) => {
-                          setPdfSettings({ ...pdfSettings, authorName: e.target.value });
-                          setFrontMatter(prev => prev.map(fm =>
-                            (fm.key === "copyright" || fm.key === "title") && fm.status === "done"
-                              ? { ...fm, status: "pending" as FrontMatterStatus, signedUrl: undefined }
-                              : fm
-                          ));
-                        }}
+                        onChange={(e) => setPdfSettings({ ...pdfSettings, authorName: e.target.value })}
                         placeholder="Your name (optional)"
                       />
                     </div>
@@ -2967,88 +2973,160 @@ function CreateColoringBookPageContent() {
               {/* Extras / Front Matter */}
               <Card className="border-border">
                 <CardContent className="p-6 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium">Include Extras</h3>
-                    {enabledFrontMatter.some(fm => fm.status !== "done" || !fm.signedUrl) && projectId && (
-                      <Button 
-                        size="sm"
-                        variant="outline"
-                        onClick={generateAllFrontMatter} 
-                        disabled={generatingFrontMatter !== null}
-                      >
-                        {generatingFrontMatter ? (
-                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                        ) : (
-                          <><Sparkles className="mr-2 h-4 w-4" /> Generate All</>
-                        )}
-                      </Button>
-                    )}
-                  </div>
+                  <h3 className="font-medium">Include Extras</h3>
                   
                   <div className="grid md:grid-cols-3 gap-4">
-                    {frontMatter.map((fm) => (
-                      <div key={fm.key} className={cn(
-                        "border rounded-lg overflow-hidden transition-all",
-                        !fm.enabled && "opacity-50"
-                      )}>
-                        {/* Toggle Header */}
-                        <div className="p-3 border-b flex items-center justify-between bg-muted/30">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={fm.enabled}
-                              onChange={() => toggleFrontMatter(fm.key)}
-                              className="h-4 w-4 rounded"
-                            />
-                            <span className="font-medium text-sm">{fm.label}</span>
-                          </label>
-                          {fm.status === "done" && fm.signedUrl && (
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          )}
+                    {/* Title Page - React Preview (no image generation) */}
+                    <div className={cn(
+                      "border rounded-lg overflow-hidden transition-all",
+                      !includeTitlePage && "opacity-50"
+                    )}>
+                      <div className="p-3 border-b flex items-center justify-between bg-muted/30">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={includeTitlePage}
+                            onChange={(e) => setIncludeTitlePage(e.target.checked)}
+                            className="h-4 w-4 rounded"
+                          />
+                          <span className="font-medium text-sm">Title Page</span>
+                        </label>
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      </div>
+                      
+                      {/* React Component Preview */}
+                      <div className="aspect-[8.5/11] bg-white relative max-h-32 overflow-hidden flex items-center justify-center p-2">
+                        <div className="text-center scale-[0.25] origin-center w-[400%]">
+                          <div className="border-2 border-gray-300 rounded-lg p-8" style={{ width: '500px', margin: '0 auto' }}>
+                            <p className="text-4xl font-bold text-black mb-4">
+                              {storyConfig.title || "My Coloring Book"}
+                            </p>
+                            <div className="w-1/2 h-px bg-gray-400 mx-auto my-4"></div>
+                            {pdfSettings.authorName && (
+                              <p className="text-xl text-gray-600">by {pdfSettings.authorName}</p>
+                            )}
+                            <p className="text-lg text-gray-400 mt-8">A Coloring Book</p>
+                          </div>
                         </div>
-                        
-                        {/* Compact Preview */}
-                        <div className="aspect-[8.5/11] bg-white relative max-h-32 overflow-hidden">
-                          {fm.signedUrl ? (
-                            <img
-                              src={fm.signedUrl}
-                              alt={fm.label}
-                              className="w-full h-full object-contain"
-                              style={{ backgroundColor: 'white' }}
-                            />
-                          ) : fm.status === "generating" ? (
-                            <div className="flex items-center justify-center h-full">
-                              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center h-full">
-                              <FileText className="h-6 w-6 text-muted-foreground/30" />
-                            </div>
-                          )}
+                      </div>
+                      
+                      <div className="p-2 border-t text-center">
+                        <span className="text-xs text-muted-foreground">Auto-generated in PDF</span>
+                      </div>
+                    </div>
+                    
+                    {/* Copyright Page - React Preview (no image generation) */}
+                    <div className={cn(
+                      "border rounded-lg overflow-hidden transition-all",
+                      !includeCopyrightPage && "opacity-50"
+                    )}>
+                      <div className="p-3 border-b flex items-center justify-between bg-muted/30">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={includeCopyrightPage}
+                            onChange={(e) => setIncludeCopyrightPage(e.target.checked)}
+                            className="h-4 w-4 rounded"
+                          />
+                          <span className="font-medium text-sm">Copyright Page</span>
+                        </label>
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      </div>
+                      
+                      {/* React Component Preview */}
+                      <div className="aspect-[8.5/11] bg-white relative max-h-32 overflow-hidden flex items-center justify-center p-2">
+                        <div className="text-center scale-[0.25] origin-center w-[400%]">
+                          <p className="text-2xl font-bold text-black mb-2">
+                            {storyConfig.title || "My Coloring Book"}
+                          </p>
+                          <div className="w-1/3 h-px bg-gray-300 mx-auto my-2"></div>
+                          <p className="text-lg text-black">
+                            © {new Date().getFullYear()} {pdfSettings.authorName || "Author"}
+                          </p>
+                          <p className="text-base text-black mt-1">All Rights Reserved</p>
+                          <p className="text-sm text-gray-500 mt-4">For personal use only.</p>
                         </div>
-                        
-                        {/* Regenerate Button */}
-                        {fm.enabled && (
-                          <div className="p-2 border-t">
-                            <Button
-                              size="sm"
-                              className="w-full h-8 text-xs"
-                              variant="ghost"
-                              onClick={() => generateFrontMatterPage(fm.key, true)}
-                              disabled={generatingFrontMatter === fm.key || !projectId}
-                            >
-                              {generatingFrontMatter === fm.key ? (
-                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                              ) : (
-                                <RefreshCw className="mr-1 h-3 w-3" />
-                              )}
-                              {fm.signedUrl ? "Regenerate" : "Generate"}
-                            </Button>
+                      </div>
+                      
+                      <div className="p-2 border-t text-center">
+                        <span className="text-xs text-muted-foreground">Auto-generated in PDF</span>
+                      </div>
+                    </div>
+                    
+                    {/* Belongs To Page - AI Generated Image */}
+                    <div className={cn(
+                      "border rounded-lg overflow-hidden transition-all",
+                      !belongsToPage.enabled && "opacity-50"
+                    )}>
+                      <div className="p-3 border-b flex items-center justify-between bg-muted/30">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={belongsToPage.enabled}
+                            onChange={(e) => setBelongsToPage(prev => ({ ...prev, enabled: e.target.checked }))}
+                            className="h-4 w-4 rounded"
+                          />
+                          <span className="font-medium text-sm">Belongs To Page</span>
+                        </label>
+                        {belongsToPage.status === "done" && belongsToPage.signedUrl && (
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        )}
+                      </div>
+                      
+                      {/* AI Image Preview */}
+                      <div className="aspect-[8.5/11] bg-white relative max-h-32 overflow-hidden">
+                        {belongsToPage.signedUrl ? (
+                          <img
+                            src={belongsToPage.signedUrl}
+                            alt="Belongs To Page"
+                            className="w-full h-full object-contain"
+                            style={{ backgroundColor: 'white' }}
+                          />
+                        ) : belongsToPage.status === "generating" ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2">
+                            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                            <span className="text-xs text-muted-foreground">Generating...</span>
+                          </div>
+                        ) : belongsToPage.enabled ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
+                            <Sparkles className="h-6 w-6 text-muted-foreground/50" />
+                            <span className="text-xs text-muted-foreground text-center">
+                              AI-generated coloring page with theme
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-full">
+                            <FileText className="h-6 w-6 text-muted-foreground/30" />
                           </div>
                         )}
                       </div>
-                    ))}
+                      
+                      {/* Generate Button */}
+                      {belongsToPage.enabled && (
+                        <div className="p-2 border-t">
+                          <Button
+                            size="sm"
+                            className="w-full h-8 text-xs"
+                            variant={belongsToPage.signedUrl ? "ghost" : "default"}
+                            onClick={generateBelongsToPage}
+                            disabled={generatingBelongsTo || !projectId}
+                          >
+                            {generatingBelongsTo ? (
+                              <><Loader2 className="mr-1 h-3 w-3 animate-spin" /> Generating...</>
+                            ) : belongsToPage.signedUrl ? (
+                              <><RefreshCw className="mr-1 h-3 w-3" /> Regenerate</>
+                            ) : (
+                              <><Sparkles className="mr-1 h-3 w-3" /> Generate</>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
+                  
+                  {belongsToPage.error && (
+                    <p className="text-sm text-destructive">{belongsToPage.error}</p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -3256,3 +3334,4 @@ export default function CreateColoringBookPage() {
     </Suspense>
   );
 }
+

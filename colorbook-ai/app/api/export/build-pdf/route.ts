@@ -6,8 +6,14 @@ import { getSupabaseServerClient, createSignedUrl } from "@/lib/supabase/server"
 /**
  * Server-side PDF Generation
  * 
- * Fetches images from Supabase storage and builds PDF.
- * Avoids 413 errors by not receiving images in request body.
+ * Creates a complete coloring book PDF with:
+ * 1. Title page (pdf-lib vector text - no images)
+ * 2. Copyright page (pdf-lib vector text - no images)
+ * 3. Belongs-To page (AI-generated image - optional)
+ * 4. All coloring pages (images from storage)
+ * 
+ * Title and Copyright are rendered using pdf-lib fonts to avoid
+ * SVG→PNG font rendering issues on serverless platforms.
  */
 export const maxDuration = 300;
 
@@ -19,6 +25,7 @@ const requestSchema = z.object({
   includeCopyrightPage: z.boolean().default(true),
   includeBelongsToPage: z.boolean().default(false),
   includePageNumbers: z.boolean().default(true),
+  // Book info
   bookTitle: z.string().default("My Coloring Book"),
   authorName: z.string().optional(),
   // Preview mode
@@ -26,9 +33,10 @@ const requestSchema = z.object({
   previewPageCount: z.number().default(5),
 });
 
-// PDF dimensions (72 DPI)
+// PDF dimensions (72 DPI = 1 point per pixel)
 const PDF_WIDTH = 612;  // 8.5"
 const PDF_HEIGHT = 792; // 11"
+const MARGIN = 54;      // 0.75" margin
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -55,198 +63,240 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch assets" }, { status: 500 });
     }
     
-    if (!assets || assets.length === 0) {
-      return NextResponse.json({ error: "No assets found for this project" }, { status: 404 });
+    // Separate assets by type
+    const pageAssets = (assets || []).filter(a => a.asset_type === "page_image").sort((a, b) => (a.page_number || 0) - (b.page_number || 0));
+    const belongsToAsset = (assets || []).find(a => a.asset_type === "front_matter" && a.meta?.frontMatterType === "belongsTo");
+    
+    if (pageAssets.length === 0) {
+      return NextResponse.json({ error: "No coloring pages found for this project" }, { status: 404 });
     }
     
-    console.log(`[build-pdf] Found ${assets.length} assets`);
-    
-    // Separate assets by type
-    const pageAssets = assets.filter(a => a.asset_type === "page_image").sort((a, b) => (a.page_number || 0) - (b.page_number || 0));
-    const frontMatterAssets = assets.filter(a => a.asset_type === "front_matter");
+    console.log(`[build-pdf] Found ${pageAssets.length} coloring pages, belongsTo: ${belongsToAsset ? "yes" : "no"}`);
     
     // Limit for preview mode
     const pagesToProcess = data.previewMode ? pageAssets.slice(0, data.previewPageCount) : pageAssets;
     
-    // Create PDF
+    // Create PDF document
     const pdfDoc = await PDFDocument.create();
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     
-    let pageNumber = 0;
+    // Embed standard fonts (these always work - no custom fonts needed)
+    const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const timesRoman = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    const timesRomanBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
     
-    // Helper to download and embed image
-    async function embedImage(storagePath: string): Promise<Awaited<ReturnType<typeof pdfDoc.embedPng>> | null> {
-      try {
-        const signedUrl = await createSignedUrl("generated", storagePath);
-        if (!signedUrl) {
-          console.error(`[build-pdf] Failed to get signed URL for ${storagePath}`);
-          return null;
-        }
-        
-        const response = await fetch(signedUrl);
-        if (!response.ok) {
-          console.error(`[build-pdf] Failed to fetch image: ${response.status}`);
-          return null;
-        }
-        
-        const buffer = await response.arrayBuffer();
-        return await pdfDoc.embedPng(buffer);
-      } catch (err) {
-        console.error(`[build-pdf] Error embedding image:`, err);
-        return null;
-      }
-    }
+    let currentPageNum = 0;
     
-    // Add front matter pages first
-    // 1. Title page
-    const titleAsset = frontMatterAssets.find(a => a.meta?.frontMatterType === "title");
+    // ========================================
+    // 1. TITLE PAGE (pdf-lib vector text)
+    // ========================================
     if (data.includeTitlePage) {
-      if (titleAsset?.storage_path) {
-        const img = await embedImage(titleAsset.storage_path);
-        if (img) {
-          const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
-          pageNumber++;
-          const scale = Math.min(PDF_WIDTH / img.width, PDF_HEIGHT / img.height);
-          const w = img.width * scale;
-          const h = img.height * scale;
-          page.drawImage(img, {
-            x: (PDF_WIDTH - w) / 2,
-            y: (PDF_HEIGHT - h) / 2,
-            width: w,
-            height: h,
-          });
-        }
-      } else {
-        // Generate simple title page
-        const titlePage = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
-        pageNumber++;
-        const titleSize = 36;
-        const titleWidth = boldFont.widthOfTextAtSize(data.bookTitle, titleSize);
-        titlePage.drawText(data.bookTitle, {
-          x: (PDF_WIDTH - titleWidth) / 2,
-          y: PDF_HEIGHT / 2 + 50,
-          size: titleSize,
-          font: boldFont,
-          color: rgb(0, 0, 0),
+      const titlePage = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+      currentPageNum++;
+      
+      // Draw decorative border
+      titlePage.drawRectangle({
+        x: MARGIN - 10,
+        y: MARGIN - 10,
+        width: PDF_WIDTH - (MARGIN - 10) * 2,
+        height: PDF_HEIGHT - (MARGIN - 10) * 2,
+        borderColor: rgb(0.7, 0.7, 0.7),
+        borderWidth: 2,
+      });
+      titlePage.drawRectangle({
+        x: MARGIN,
+        y: MARGIN,
+        width: PDF_WIDTH - MARGIN * 2,
+        height: PDF_HEIGHT - MARGIN * 2,
+        borderColor: rgb(0.85, 0.85, 0.85),
+        borderWidth: 1,
+      });
+      
+      // Title
+      const title = data.bookTitle;
+      const titleFontSize = title.length > 25 ? 28 : title.length > 18 ? 32 : 38;
+      const titleWidth = timesRomanBold.widthOfTextAtSize(title, titleFontSize);
+      titlePage.drawText(title, {
+        x: (PDF_WIDTH - titleWidth) / 2,
+        y: PDF_HEIGHT * 0.55,
+        size: titleFontSize,
+        font: timesRomanBold,
+        color: rgb(0, 0, 0),
+      });
+      
+      // Decorative line
+      const lineY = PDF_HEIGHT * 0.48;
+      const lineWidth = Math.min(titleWidth + 60, PDF_WIDTH - MARGIN * 2 - 40);
+      titlePage.drawLine({
+        start: { x: (PDF_WIDTH - lineWidth) / 2, y: lineY },
+        end: { x: (PDF_WIDTH + lineWidth) / 2, y: lineY },
+        thickness: 1.5,
+        color: rgb(0.4, 0.4, 0.4),
+      });
+      
+      // Author (if provided)
+      if (data.authorName) {
+        const authorText = `by ${data.authorName}`;
+        const authorWidth = timesRoman.widthOfTextAtSize(authorText, 18);
+        titlePage.drawText(authorText, {
+          x: (PDF_WIDTH - authorWidth) / 2,
+          y: PDF_HEIGHT * 0.40,
+          size: 18,
+          font: timesRoman,
+          color: rgb(0.2, 0.2, 0.2),
         });
-        if (data.authorName) {
-          const authorText = `by ${data.authorName}`;
-          const authorWidth = regularFont.widthOfTextAtSize(authorText, 18);
-          titlePage.drawText(authorText, {
-            x: (PDF_WIDTH - authorWidth) / 2,
-            y: PDF_HEIGHT / 2 - 20,
-            size: 18,
-            font: regularFont,
-            color: rgb(0.3, 0.3, 0.3),
-          });
-        }
       }
+      
+      // Footer
+      const footerText = "A Coloring Book";
+      const footerWidth = helvetica.widthOfTextAtSize(footerText, 14);
+      titlePage.drawText(footerText, {
+        x: (PDF_WIDTH - footerWidth) / 2,
+        y: MARGIN + 30,
+        size: 14,
+        font: helvetica,
+        color: rgb(0.5, 0.5, 0.5),
+      });
     }
     
-    // 2. Copyright page
-    const copyrightAsset = frontMatterAssets.find(a => a.meta?.frontMatterType === "copyright");
+    // ========================================
+    // 2. COPYRIGHT PAGE (pdf-lib vector text)
+    // ========================================
     if (data.includeCopyrightPage) {
-      if (copyrightAsset?.storage_path) {
-        const img = await embedImage(copyrightAsset.storage_path);
+      const copyrightPage = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+      currentPageNum++;
+      
+      const year = new Date().getFullYear();
+      const author = data.authorName || "The Author";
+      
+      // Title of book
+      const titleForCopyright = data.bookTitle;
+      const titleSize = titleForCopyright.length > 30 ? 20 : 24;
+      const titleWidth = timesRomanBold.widthOfTextAtSize(titleForCopyright, titleSize);
+      copyrightPage.drawText(titleForCopyright, {
+        x: (PDF_WIDTH - titleWidth) / 2,
+        y: PDF_HEIGHT - MARGIN - 50,
+        size: titleSize,
+        font: timesRomanBold,
+        color: rgb(0, 0, 0),
+      });
+      
+      // Separator line
+      copyrightPage.drawLine({
+        start: { x: MARGIN + 100, y: PDF_HEIGHT - MARGIN - 70 },
+        end: { x: PDF_WIDTH - MARGIN - 100, y: PDF_HEIGHT - MARGIN - 70 },
+        thickness: 0.5,
+        color: rgb(0.7, 0.7, 0.7),
+      });
+      
+      // Copyright text - centered block
+      const copyrightLines = [
+        { text: `© ${year} ${author}`, size: 16, bold: false, spacing: 35 },
+        { text: "All Rights Reserved", size: 14, bold: false, spacing: 50 },
+        { text: "No part of this publication may be reproduced,", size: 11, bold: false, spacing: 18 },
+        { text: "distributed, or transmitted in any form or by any means,", size: 11, bold: false, spacing: 18 },
+        { text: "without the prior written permission of the author.", size: 11, bold: false, spacing: 40 },
+        { text: "This coloring book is intended for personal use only.", size: 12, bold: false, spacing: 25 },
+        { text: "Commercial use is strictly prohibited.", size: 12, bold: false, spacing: 0 },
+      ];
+      
+      let y = PDF_HEIGHT - MARGIN - 130;
+      for (const line of copyrightLines) {
+        const font = line.bold ? timesRomanBold : timesRoman;
+        const width = font.widthOfTextAtSize(line.text, line.size);
+        copyrightPage.drawText(line.text, {
+          x: (PDF_WIDTH - width) / 2,
+          y,
+          size: line.size,
+          font,
+          color: rgb(0.15, 0.15, 0.15),
+        });
+        y -= line.spacing;
+      }
+      
+      // Footer
+      const footerText = "Created with ColorBook AI";
+      const footerWidth = helvetica.widthOfTextAtSize(footerText, 10);
+      copyrightPage.drawText(footerText, {
+        x: (PDF_WIDTH - footerWidth) / 2,
+        y: MARGIN + 20,
+        size: 10,
+        font: helvetica,
+        color: rgb(0.6, 0.6, 0.6),
+      });
+    }
+    
+    // ========================================
+    // 3. BELONGS-TO PAGE (AI-generated image)
+    // ========================================
+    if (data.includeBelongsToPage && belongsToAsset?.storage_path) {
+      try {
+        const img = await embedImageFromStorage(pdfDoc, supabase, belongsToAsset.storage_path);
         if (img) {
-          const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
-          pageNumber++;
-          const scale = Math.min(PDF_WIDTH / img.width, PDF_HEIGHT / img.height);
+          const belongsPage = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+          currentPageNum++;
+          
+          // Scale image to fit page with margin
+          const maxW = PDF_WIDTH - MARGIN * 2;
+          const maxH = PDF_HEIGHT - MARGIN * 2;
+          const scale = Math.min(maxW / img.width, maxH / img.height);
           const w = img.width * scale;
           const h = img.height * scale;
-          page.drawImage(img, {
-            x: (PDF_WIDTH - w) / 2,
-            y: (PDF_HEIGHT - h) / 2,
-            width: w,
-            height: h,
-          });
+          const x = (PDF_WIDTH - w) / 2;
+          const y = (PDF_HEIGHT - h) / 2;
+          
+          belongsPage.drawImage(img, { x, y, width: w, height: h });
         }
-      } else {
-        // Generate simple copyright page
-        const copyrightPage = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
-        pageNumber++;
-        const year = new Date().getFullYear();
-        const lines = [
-          `© ${year} ${data.authorName || "Author"}`,
-          "All rights reserved.",
-          "",
-          "This coloring book is for personal use only.",
-        ];
-        let y = PDF_HEIGHT - 100;
-        for (const line of lines) {
-          copyrightPage.drawText(line, {
-            x: 72,
-            y,
-            size: 12,
-            font: regularFont,
-            color: rgb(0.2, 0.2, 0.2),
-          });
-          y -= 20;
-        }
+      } catch (err) {
+        console.error("[build-pdf] Failed to embed belongs-to image:", err);
       }
     }
     
-    // 3. Belongs To page
-    const belongsAsset = frontMatterAssets.find(a => a.meta?.frontMatterType === "belongsTo");
-    if (data.includeBelongsToPage && belongsAsset?.storage_path) {
-      const img = await embedImage(belongsAsset.storage_path);
-      if (img) {
-        const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
-        pageNumber++;
-        const scale = Math.min(PDF_WIDTH / img.width, PDF_HEIGHT / img.height);
-        const w = img.width * scale;
-        const h = img.height * scale;
-        page.drawImage(img, {
-          x: (PDF_WIDTH - w) / 2,
-          y: (PDF_HEIGHT - h) / 2,
-          width: w,
-          height: h,
-        });
-      }
-    }
-    
-    // Add coloring pages
+    // ========================================
+    // 4. COLORING PAGES (images from storage)
+    // ========================================
     let processedCount = 0;
+    const frontMatterPages = currentPageNum; // Track how many front matter pages
+    
     for (const asset of pagesToProcess) {
       if (!asset.storage_path) continue;
       
-      const img = await embedImage(asset.storage_path);
-      if (!img) continue;
-      
-      const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
-      pageNumber++;
-      
-      // Scale to fit with small margin
-      const margin = 18;
-      const maxWidth = PDF_WIDTH - margin * 2;
-      const maxHeight = PDF_HEIGHT - margin * 2 - (data.includePageNumbers ? 20 : 0);
-      
-      const scaleX = maxWidth / img.width;
-      const scaleY = maxHeight / img.height;
-      const scale = Math.min(scaleX, scaleY);
-      
-      const w = img.width * scale;
-      const h = img.height * scale;
-      const x = (PDF_WIDTH - w) / 2;
-      const y = data.includePageNumbers ? (PDF_HEIGHT - h) / 2 + 10 : (PDF_HEIGHT - h) / 2;
-      
-      page.drawImage(img, { x, y, width: w, height: h });
-      
-      // Page number
-      if (data.includePageNumbers) {
-        const numText = `- ${pageNumber} -`;
-        const numWidth = regularFont.widthOfTextAtSize(numText, 10);
-        page.drawText(numText, {
-          x: (PDF_WIDTH - numWidth) / 2,
-          y: 30,
-          size: 10,
-          font: regularFont,
-          color: rgb(0.5, 0.5, 0.5),
-        });
+      try {
+        const img = await embedImageFromStorage(pdfDoc, supabase, asset.storage_path);
+        if (!img) continue;
+        
+        const page = pdfDoc.addPage([PDF_WIDTH, PDF_HEIGHT]);
+        currentPageNum++;
+        
+        // Scale to fit with margin
+        const maxW = PDF_WIDTH - MARGIN * 2;
+        const maxH = PDF_HEIGHT - MARGIN * 2 - (data.includePageNumbers ? 25 : 0);
+        const scale = Math.min(maxW / img.width, maxH / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        const x = (PDF_WIDTH - w) / 2;
+        const y = data.includePageNumbers ? (PDF_HEIGHT - h) / 2 + 12 : (PDF_HEIGHT - h) / 2;
+        
+        page.drawImage(img, { x, y, width: w, height: h });
+        
+        // Page number (for coloring pages only, starting from 1)
+        if (data.includePageNumbers) {
+          const pageNum = currentPageNum - frontMatterPages;
+          const numText = `- ${pageNum} -`;
+          const numWidth = helvetica.widthOfTextAtSize(numText, 10);
+          page.drawText(numText, {
+            x: (PDF_WIDTH - numWidth) / 2,
+            y: 28,
+            size: 10,
+            font: helvetica,
+            color: rgb(0.5, 0.5, 0.5),
+          });
+        }
+        
+        processedCount++;
+      } catch (err) {
+        console.error(`[build-pdf] Failed to process page ${asset.page_number}:`, err);
       }
-      
-      processedCount++;
     }
     
     // Generate PDF bytes
@@ -269,12 +319,13 @@ export async function POST(request: NextRequest) {
     const signedUrl = await createSignedUrl("generated", pdfPath, 3600);
     
     const elapsed = Date.now() - startTime;
-    console.log(`[build-pdf] Complete: ${processedCount} pages in ${elapsed}ms`);
+    console.log(`[build-pdf] Complete: ${processedCount} pages + ${frontMatterPages} front matter in ${elapsed}ms`);
     
     return NextResponse.json({
       success: true,
-      totalPages: pageNumber,
-      processedPages: processedCount,
+      totalPages: currentPageNum,
+      coloringPages: processedCount,
+      frontMatterPages,
       isPreview: data.previewMode,
       signedUrl,
       storagePath: pdfPath,
@@ -286,5 +337,35 @@ export async function POST(request: NextRequest) {
       { error: error instanceof Error ? error.message : "PDF generation failed" },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Helper to download and embed PNG image from Supabase storage
+ */
+async function embedImageFromStorage(
+  pdfDoc: PDFDocument,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  storagePath: string
+): Promise<Awaited<ReturnType<typeof pdfDoc.embedPng>> | null> {
+  try {
+    const signedUrl = await createSignedUrl("generated", storagePath);
+    if (!signedUrl) {
+      console.error(`[build-pdf] No signed URL for ${storagePath}`);
+      return null;
+    }
+    
+    const response = await fetch(signedUrl);
+    if (!response.ok) {
+      console.error(`[build-pdf] Failed to fetch ${storagePath}: ${response.status}`);
+      return null;
+    }
+    
+    const buffer = await response.arrayBuffer();
+    return await pdfDoc.embedPng(buffer);
+  } catch (err) {
+    console.error(`[build-pdf] Error embedding ${storagePath}:`, err);
+    return null;
   }
 }
