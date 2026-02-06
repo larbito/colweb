@@ -24,7 +24,7 @@ export function AppShell({ children }: AppShellProps) {
       <MobileSidebar />
       
       {/* Main content area - offset by sidebar width on lg screens, and top padding for mobile header */}
-      <div className="lg:pl-72 min-h-screen flex flex-col pt-16 lg:pt-0">
+      <div className="lg:pl-64 min-h-screen flex flex-col pt-14 lg:pt-0">
         {children}
       </div>
     </div>

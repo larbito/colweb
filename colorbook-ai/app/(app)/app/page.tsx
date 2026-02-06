@@ -3,28 +3,19 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PageContainer } from "@/components/app/app-shell";
-import { PageHeader } from "@/components/app/page-header";
-import { ProjectCard } from "@/components/app/project-card";
-import { EmptyState } from "@/components/app/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
-  Sparkles, 
+  PenTool,
   Quote, 
-  Boxes, 
-  Copy, 
   FolderOpen, 
   Image, 
-  Download, 
+  FileText, 
   ArrowRight,
-  TrendingUp,
-  Lightbulb,
-  BookOpen,
-  Zap,
-  LayoutDashboard,
-  Loader2,
+  Clock,
+  Play,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,113 +24,25 @@ interface DBProject {
   id: string;
   name: string;
   project_type: "coloring_book" | "quote_book";
-  book_type?: string;
-  idea?: string;
   pages_requested: number;
   prompts_generated_count: number;
   images_generated_count: number;
   status: "draft" | "generating" | "ready" | "failed" | "expired" | "partial";
   created_at: string;
   updated_at: string;
-  expires_at?: string;
   canResume?: boolean;
-  isExpired?: boolean;
 }
 
-// Quick action card component
-interface QuickActionProps {
-  icon: React.ElementType;
-  title: string;
-  description: string;
-  href: string;
-  badge?: string;
-  gradient?: string;
-}
-
-function QuickAction({ icon: Icon, title, description, href, badge, gradient }: QuickActionProps) {
-  return (
-    <Link href={href} className="group">
-      <Card className="h-full border-border/50 bg-card/80 backdrop-blur transition-all duration-200 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 hover:-translate-y-0.5">
-        <CardContent className="p-5">
-          <div className="flex items-start gap-4">
-            <div className={cn(
-              "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-all duration-200 group-hover:scale-110 group-hover:shadow-lg",
-              gradient || "bg-primary/10 text-primary"
-            )}>
-              <Icon className="h-5 w-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">
-                  {title}
-                </h3>
-                {badge && (
-                  <Badge 
-                    variant="secondary" 
-                    className={cn(
-                      "text-[10px] px-1.5 py-0 font-medium",
-                      badge === "New" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-                      badge === "Beta" && "bg-purple-500/15 text-purple-600 dark:text-purple-400"
-                    )}
-                  >
-                    {badge}
-                  </Badge>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                {description}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
-  );
-}
-
-// Stat card component
-interface StatCardProps {
-  icon: React.ElementType;
-  label: string;
-  value: number | string;
-  trend?: string;
-  trendUp?: boolean;
-}
-
-function StatCard({ icon: Icon, label, value, trend, trendUp }: StatCardProps) {
-  return (
-    <Card className="border-border/50 bg-card/80 backdrop-blur">
-      <CardContent className="p-5">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-muted">
-            <Icon className="h-5 w-5 text-muted-foreground" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-muted-foreground truncate">{label}</p>
-            <div className="flex items-baseline gap-2 mt-0.5">
-              <span className="text-2xl font-bold tracking-tight">{value}</span>
-              {trend && (
-                <span className={cn(
-                  "text-xs font-medium",
-                  trendUp ? "text-emerald-500" : "text-muted-foreground"
-                )}>
-                  {trend}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
+/**
+ * Premium Dashboard - Clean, symmetric, professional
+ * Linear/Vercel style design
+ */
 export default function DashboardPage() {
   const [userId, setUserId] = useState<string>("");
   const [projects, setProjects] = useState<DBProject[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Initialize userId and fetch projects from DB
+  // Initialize userId and fetch projects
   useEffect(() => {
     let id = localStorage.getItem("colweb_user_id");
     if (!id) {
@@ -148,7 +51,6 @@ export default function DashboardPage() {
     }
     setUserId(id);
     
-    // Fetch projects from DB
     const fetchProjects = async () => {
       try {
         const response = await fetch(`/api/projects?userId=${id}`);
@@ -166,248 +68,271 @@ export default function DashboardPage() {
     fetchProjects();
   }, []);
   
-  // Compute stats from real project data
-  const recentProjects = projects.slice(0, 4);
+  // Compute stats
+  const recentProjects = projects.slice(0, 6);
   const stats = {
     totalProjects: projects.length,
     totalPages: projects.reduce((sum, p) => sum + (p.images_generated_count || 0), 0),
-    readyPages: projects.reduce((sum, p) => sum + (p.status === "ready" ? p.images_generated_count : 0), 0),
     exports: projects.filter(p => p.status === "ready").length,
   };
   
-  // Convert DB project to ProjectCard format
-  const mapProjectToCard = (p: DBProject): {
-    id: string;
-    name: string;
-    type: "coloring" | "quote";
-    status: "draft" | "in_progress" | "complete";
-    pageCount: number;
-    createdAt: string;
-    updatedAt: string;
-    progress: number;
-    canResume: boolean;
-    promptsCount: number;
-    imagesCount: number;
-  } => ({
-    id: p.id,
-    name: p.name,
-    type: p.project_type === "quote_book" ? "quote" : "coloring",
-    status: p.status === "ready" ? "complete" : p.status === "generating" || p.status === "partial" ? "in_progress" : "draft",
-    pageCount: p.pages_requested,
-    createdAt: p.created_at,
-    updatedAt: p.updated_at,
-    progress: p.pages_requested > 0 
-      ? Math.round((p.images_generated_count / p.pages_requested) * 100) 
-      : 0,
-    canResume: p.canResume || false,
-    promptsCount: p.prompts_generated_count,
-    imagesCount: p.images_generated_count,
-  });
+  // Format relative time
+  const formatRelativeTime = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
 
   return (
-    <main className="flex-1 pt-16 lg:pt-0">
+    <main className="flex-1">
       <PageContainer maxWidth="2xl">
-        <div className="space-y-8">
-          {/* Welcome Section */}
-          <PageHeader
-            title={`Welcome back!`}
-            subtitle="Create beautiful coloring books with AI assistance"
-            icon={LayoutDashboard}
-            size="lg"
-          />
+        <div className="py-8 space-y-10">
+          
+          {/* Page Header */}
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+            <p className="text-muted-foreground mt-1">Create and manage your coloring books</p>
+          </div>
 
-          {/* Quick Actions */}
+          {/* Quick Create - Two Big Cards */}
           <section>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-semibold">Quick Actions</h2>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href="/app/new" className="text-primary">
-                  View all tools
-                  <ArrowRight className="ml-1 h-4 w-4" />
-                </Link>
-              </Button>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger-children">
-              <QuickAction
-                icon={Sparkles}
-                title="Coloring Book"
-                description="Create a full coloring book with AI"
-                href="/app/create"
-                gradient="bg-violet-500/15 text-violet-600 dark:text-violet-400"
-              />
-              <QuickAction
-                icon={Quote}
-                title="Quote Book"
-                description="Typography-based coloring pages"
-                href="/app/quote-book"
-                gradient="bg-blue-500/15 text-blue-600 dark:text-blue-400"
-              />
-              <QuickAction
-                icon={Boxes}
-                title="Bulk Create"
-                description="Generate multiple books at once"
-                href="/app/bulk"
-                badge="New"
-                gradient="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-              />
-              <QuickAction
-                icon={Copy}
-                title="Style Clone"
-                description="Match your reference art style"
-                href="/app/style-clone"
-                badge="Beta"
-                gradient="bg-orange-500/15 text-orange-600 dark:text-orange-400"
-              />
+            <h2 className="text-sm font-medium text-muted-foreground mb-4 uppercase tracking-wider">
+              Quick Create
+            </h2>
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Coloring Book Card */}
+              <Link href="/app/create" className="group">
+                <Card className="h-full border-border hover:border-foreground/20 transition-colors">
+                  <CardContent className="p-6 flex items-center gap-5">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-muted group-hover:bg-foreground/10 transition-colors">
+                      <PenTool className="h-6 w-6 text-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground">Coloring Book</h3>
+                      <p className="text-sm text-muted-foreground mt-0.5">
+                        Full coloring books with AI-generated illustrations
+                      </p>
+                    </div>
+                    <Button size="sm" className="shrink-0">
+                      Start
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Link>
+
+              {/* Quote Book Card */}
+              <Link href="/app/quote-book" className="group">
+                <Card className="h-full border-border hover:border-foreground/20 transition-colors">
+                  <CardContent className="p-6 flex items-center gap-5">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-muted group-hover:bg-foreground/10 transition-colors">
+                      <Quote className="h-6 w-6 text-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground">Quote Book</h3>
+                      <p className="text-sm text-muted-foreground mt-0.5">
+                        Typography-based pages with decorative frames
+                      </p>
+                    </div>
+                    <Button size="sm" className="shrink-0">
+                      Start
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Link>
             </div>
           </section>
 
-          {/* Stats */}
+          {/* Stats Row */}
           <section>
-            <h2 className="text-lg font-semibold mb-5">Your Stats</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StatCard 
-                icon={FolderOpen} 
-                label="Total Projects" 
-                value={stats.totalProjects}
-                trend="+2 this week"
-                trendUp
-              />
-              <StatCard 
-                icon={Image} 
-                label="Pages Generated" 
-                value={stats.totalPages}
-                trend="+12 this week"
-                trendUp
-              />
-              <StatCard 
-                icon={Zap} 
-                label="Pages Enhanced" 
-                value={stats.readyPages}
-              />
-              <StatCard 
-                icon={Download} 
-                label="PDFs Exported" 
-                value={stats.exports}
-              />
-            </div>
-          </section>
-
-          {/* Main Content Grid */}
-          <section className="grid gap-6 lg:grid-cols-3">
-            {/* Recent Projects */}
-            <div className="lg:col-span-2">
-              <Card className="border-border/50 bg-card/80 backdrop-blur">
-                <div className="flex items-center justify-between p-6 pb-0">
-                  <h2 className="text-lg font-semibold">Recent Projects</h2>
-                  <Button asChild variant="ghost" size="sm">
-                    <Link href="/app/projects">
-                      View all <ArrowRight className="ml-1 h-4 w-4" />
-                    </Link>
-                  </Button>
-                </div>
-                <CardContent className="p-6">
-                  {loading ? (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {[1, 2, 3, 4].map((i) => (
-                        <Skeleton key={i} className="h-32 w-full rounded-lg" />
-                      ))}
-                    </div>
-                  ) : recentProjects.length === 0 ? (
-                    <EmptyState
-                      icon={FolderOpen}
-                      title="No projects yet"
-                      description="Create your first coloring book to get started."
-                      actionLabel="Create Book"
-                      actionHref="/app/new"
-                    />
-                  ) : (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {recentProjects.map((project) => (
-                        <ProjectCard key={project.id} project={mapProjectToCard(project)} />
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Tips & Help */}
-            <div className="space-y-4">
-              {/* Tips Card */}
-              <Card className="border-border/50 bg-gradient-to-br from-primary/5 via-card to-card">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                      <Lightbulb className="h-5 w-5 text-primary" />
-                    </div>
-                    <h3 className="font-semibold">Pro Tips</h3>
-                  </div>
-                  <ul className="space-y-3 text-sm">
-                    <li className="flex items-start gap-2.5">
-                      <span className="text-primary mt-0.5 text-lg">•</span>
-                      <span className="text-muted-foreground">
-                        Use specific character descriptions for consistent storybooks
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2.5">
-                      <span className="text-primary mt-0.5 text-lg">•</span>
-                      <span className="text-muted-foreground">
-                        Enhance images before export for print-ready quality
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2.5">
-                      <span className="text-primary mt-0.5 text-lg">•</span>
-                      <span className="text-muted-foreground">
-                        Try Bulk Create for faster multi-book production
-                      </span>
-                    </li>
-                  </ul>
-                </CardContent>
-              </Card>
-
-              {/* Getting Started */}
-              <Card className="border-border/50 bg-card/80 backdrop-blur">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                      <BookOpen className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <h3 className="font-semibold">Getting Started</h3>
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    New to ColorBook AI? Learn how to create your first book.
-                  </p>
-                  <Button variant="outline" size="sm" className="w-full">
-                    View Tutorial
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* What's New */}
-              <Card className="border-border/50 bg-card/80 backdrop-blur">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10">
-                      <TrendingUp className="h-5 w-5 text-emerald-500" />
+            <div className="grid gap-4 grid-cols-3">
+              <Card className="border-border">
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                      <FolderOpen className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <div>
-                      <h3 className="font-semibold">What's New</h3>
-                      <Badge variant="secondary" className="text-[10px] mt-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                        v2.0
-                      </Badge>
+                      <p className="text-2xl font-semibold">{stats.totalProjects}</p>
+                      <p className="text-xs text-muted-foreground">Projects</p>
                     </div>
                   </div>
-                  <ul className="space-y-2 text-sm">
-                    <li className="text-muted-foreground">• Bulk book creation (10 books at once)</li>
-                    <li className="text-muted-foreground">• Style cloning from reference images</li>
-                    <li className="text-muted-foreground">• Improved quote book text-only mode</li>
-                  </ul>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border">
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                      <Image className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-semibold">{stats.totalPages}</p>
+                      <p className="text-xs text-muted-foreground">Pages Generated</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border">
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                      <FileText className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-semibold">{stats.exports}</p>
+                      <p className="text-xs text-muted-foreground">PDFs Exported</p>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </div>
           </section>
+
+          {/* Recent Projects */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                Recent Projects
+              </h2>
+              {projects.length > 0 && (
+                <Button asChild variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+                  <Link href="/app/projects">
+                    View all <ArrowRight className="ml-1 h-4 w-4" />
+                  </Link>
+                </Button>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <Skeleton key={i} className="h-24 w-full rounded-lg" />
+                ))}
+              </div>
+            ) : recentProjects.length === 0 ? (
+              <Card className="border-border border-dashed">
+                <CardContent className="p-12 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mx-auto mb-4">
+                    <FolderOpen className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <h3 className="font-medium text-foreground mb-1">No projects yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Create your first coloring book to get started
+                  </p>
+                  <Button asChild>
+                    <Link href="/app/create">Create Book</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {recentProjects.map((project) => (
+                  <ProjectRow key={project.id} project={project} formatTime={formatRelativeTime} />
+                ))}
+              </div>
+            )}
+          </section>
+
         </div>
       </PageContainer>
     </main>
+  );
+}
+
+// Project Row Component
+function ProjectRow({ 
+  project, 
+  formatTime 
+}: { 
+  project: DBProject; 
+  formatTime: (s: string) => string;
+}) {
+  const progress = project.pages_requested > 0 
+    ? Math.round((project.images_generated_count / project.pages_requested) * 100)
+    : 0;
+  
+  const statusLabel = {
+    draft: "Draft",
+    generating: "In Progress",
+    partial: "Incomplete",
+    ready: "Complete",
+    failed: "Error",
+    expired: "Expired",
+  }[project.status] || "Draft";
+  
+  const statusColor = {
+    draft: "text-muted-foreground",
+    generating: "text-yellow-500",
+    partial: "text-yellow-500",
+    ready: "text-green-500",
+    failed: "text-red-500",
+    expired: "text-muted-foreground",
+  }[project.status] || "text-muted-foreground";
+
+  const href = project.status === "ready" 
+    ? `/app/projects/${project.id}`
+    : `/app/create?projectId=${project.id}`;
+
+  return (
+    <Link href={href} className="group">
+      <Card className="border-border hover:border-foreground/20 transition-colors">
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex-1 min-w-0">
+              <h3 className="font-medium text-foreground truncate group-hover:text-foreground/80">
+                {project.name || "Untitled Project"}
+              </h3>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={cn("text-xs font-medium", statusColor)}>
+                  {statusLabel}
+                </span>
+                <span className="text-xs text-muted-foreground">•</span>
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {formatTime(project.updated_at)}
+                </span>
+              </div>
+            </div>
+            
+            {/* Action Button */}
+            {project.status === "ready" ? (
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                <Download className="h-4 w-4" />
+              </Button>
+            ) : project.canResume ? (
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                <Play className="h-4 w-4" />
+              </Button>
+            ) : null}
+          </div>
+
+          {/* Progress Bar */}
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            <div 
+              className={cn(
+                "h-full rounded-full transition-all duration-300",
+                project.status === "ready" ? "bg-green-500" : "bg-foreground/50"
+              )}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="flex justify-between mt-1.5">
+            <span className="text-xs text-muted-foreground">
+              {project.images_generated_count}/{project.pages_requested} pages
+            </span>
+            <span className="text-xs text-muted-foreground">{progress}%</span>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }

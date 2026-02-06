@@ -50,6 +50,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
   BatchPromptsResponse,
@@ -1402,6 +1410,78 @@ function CreateColoringBookPageContent() {
     toast.success(`Enhanced ${successCount} pages!`);
   };
 
+  // Enhance a single page
+  const enhanceSinglePage = async (pageNumber: number) => {
+    const page = pages.find(p => p.page === pageNumber);
+    if (!page || !page.imageBase64) {
+      toast.error("Page not ready for enhancement");
+      return;
+    }
+    if (page.enhanceStatus === "enhanced") {
+      toast.info("Page already enhanced");
+      return;
+    }
+
+    setPages(prev => prev.map(p =>
+      p.page === pageNumber ? { ...p, enhanceStatus: "enhancing" as EnhanceStatus } : p
+    ));
+    toast.info(`Enhancing page ${pageNumber}...`);
+
+    try {
+      const response = await fetch("/api/image/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: page.imageBase64, scale: 2 }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.enhancedImageBase64) {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber
+            ? { ...p, enhancedImageBase64: data.enhancedImageBase64, enhanceStatus: "enhanced" as EnhanceStatus, activeVersion: "enhanced" as const }
+            : p
+        ));
+        toast.success(`Page ${pageNumber} enhanced!`);
+      } else {
+        setPages(prev => prev.map(p =>
+          p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+        ));
+        toast.error(`Failed to enhance page ${pageNumber}`);
+      }
+    } catch {
+      setPages(prev => prev.map(p =>
+        p.page === pageNumber ? { ...p, enhanceStatus: "failed" as EnhanceStatus } : p
+      ));
+      toast.error(`Error enhancing page ${pageNumber}`);
+    }
+  };
+
+  // Download a single page as PNG
+  const downloadSinglePage = (pageNumber: number) => {
+    const page = pages.find(p => p.page === pageNumber);
+    if (!page) {
+      toast.error("Page not found");
+      return;
+    }
+
+    // Use the best available version
+    const imageBase64 = page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64;
+    if (!imageBase64) {
+      toast.error("Page has no image to download");
+      return;
+    }
+
+    // Create download link
+    const link = document.createElement("a");
+    link.href = `data:image/png;base64,${imageBase64}`;
+    link.download = `page-${String(pageNumber).padStart(3, "0")}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Downloaded page ${pageNumber}`);
+  };
+
   const processAllPages = async () => {
     const pagesToProcess = pages.filter(p => p.status === "done" && p.imageBase64 && p.finalLetterStatus !== "done");
     if (pagesToProcess.length === 0) {
@@ -1987,61 +2067,70 @@ function CreateColoringBookPageContent() {
           />
 
           {/* Wizard Step Navigation - Sticky header */}
-          <div className="sticky top-0 z-40 -mx-6 px-6 py-4 bg-background/95 backdrop-blur-sm border-b border-border">
-            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          {/* Sticky Stepper - Clean Linear/Vercel style */}
+          <div className="sticky top-0 z-40 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-3 bg-background border-b border-border">
+            <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar">
             {[
-              { step: 0, label: "Type", icon: Book },
-              { step: 1, label: "Idea", icon: Lightbulb },
-              { step: 2, label: "Prompts", icon: FileText },
-              { step: 3, label: "Generate", icon: ImageIcon },
-              { step: 4, label: "Review", icon: Eye },
-              { step: 5, label: "Front Matter", icon: Users },
-              { step: 6, label: "Export", icon: FileDown },
-            ].map(({ step, label, icon: Icon }, idx) => {
-              const isAccessible = step <= currentStep || 
+              { step: 1, label: "Setup" },
+              { step: 2, label: "Prompts" },
+              { step: 3, label: "Generate" },
+              { step: 4, label: "Export" },
+            ].map(({ step, label }, idx) => {
+              // Map old steps to new simplified flow
+              const mappedCurrent = currentStep <= 1 ? 1 : currentStep === 2 ? 2 : currentStep <= 4 ? 3 : 4;
+              const isCurrent = step === mappedCurrent;
+              const isCompleted = step < mappedCurrent;
+              const isAccessible = step <= mappedCurrent || 
                 (step === 2 && pages.length > 0) || 
-                (step >= 3 && doneCount > 0) ||
-                (step === 5 && doneCount >= pages.length && pages.length > 0) ||
-                (step === 6 && doneCount >= pages.length && pages.length > 0);
-              const isCompleted = step < currentStep || 
-                (step === 2 && pages.length > 0 && currentStep > 2) ||
-                (step === 3 && doneCount >= pages.length && currentStep > 3);
+                (step === 3 && pages.length > 0) ||
+                (step === 4 && doneCount > 0);
               
               return (
-              <button
-                key={step}
-                onClick={() => {
-                  if (isAccessible) {
-                    setCurrentStep(step as CreateStep);
-                  }
-                }}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-medium transition-all whitespace-nowrap",
-                  currentStep === step
-                    ? "bg-primary text-primary-foreground"
-                    : isCompleted
-                      ? "bg-success/15 text-success hover:bg-success/20"
-                    : isAccessible
-                      ? "bg-muted text-foreground/75 hover:bg-muted/80"
-                      : "bg-muted/50 text-muted-foreground cursor-not-allowed"
-                )}
-              >
-                {isCompleted && step !== currentStep ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                <Icon className="h-4 w-4" />
-                )}
-                <span className="hidden sm:inline">{label}</span>
-                {step === 2 && pages.length > 0 && (
-                  <span className="bg-primary/10 text-xs px-1.5 py-0.5 rounded-md">{pages.length}</span>
-                )}
-                {step === 3 && pages.length > 0 && (
-                  <span className="bg-primary/10 text-xs px-1.5 py-0.5 rounded-md">{doneCount}/{pages.length}</span>
-                )}
-              </button>
+                <div key={step} className="flex items-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isAccessible) {
+                        // Map back to actual step
+                        const actualStep = step === 1 ? (bookType ? 1 : 0) : step === 2 ? 2 : step === 3 ? 3 : 5;
+                        setCurrentStep(actualStep as CreateStep);
+                      }
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                      isCurrent && "bg-foreground text-background",
+                      isCompleted && "text-foreground hover:bg-muted",
+                      !isCurrent && !isCompleted && "text-muted-foreground",
+                      isAccessible && !isCurrent && "hover:bg-muted cursor-pointer",
+                      !isAccessible && "cursor-default opacity-50"
+                    )}
+                  >
+                    <span className={cn(
+                      "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
+                      isCurrent && "bg-background text-foreground",
+                      isCompleted && "bg-green-500 text-white",
+                      !isCurrent && !isCompleted && "bg-muted text-muted-foreground"
+                    )}>
+                      {isCompleted ? <Check className="h-3.5 w-3.5" /> : step}
+                    </span>
+                    <span className="whitespace-nowrap">{label}</span>
+                    {step === 2 && pages.length > 0 && (
+                      <span className="text-xs opacity-70">({pages.length})</span>
+                    )}
+                    {step === 3 && pages.length > 0 && (
+                      <span className="text-xs opacity-70">({doneCount}/{pages.length})</span>
+                    )}
+                  </button>
+                  {idx < 3 && (
+                    <div className={cn(
+                      "w-6 h-px mx-1",
+                      isCompleted ? "bg-foreground/30" : "bg-border"
+                    )} />
+                  )}
+                </div>
               );
             })}
-            </div>
+            </nav>
           </div>
 
           {/* Progress Panel */}
@@ -2668,16 +2757,39 @@ function CreateColoringBookPageContent() {
                               alt={`Page ${page.page}`}
                               className="w-full h-full object-contain"
                             />
-                            {/* Regenerate button on hover for done pages */}
-                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            {/* Hover overlay with actions */}
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                               <Button 
                                 size="sm" 
                                 variant="secondary"
-                                onClick={(e) => { e.stopPropagation(); generateSinglePage(page.page); }}
+                                onClick={(e) => { e.stopPropagation(); openViewer(page.page); }}
                               >
-                                <RefreshCw className="mr-1 h-3 w-3" /> Regenerate
-                  </Button>
-                </div>
+                                <Eye className="h-3.5 w-3.5" />
+                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button size="sm" variant="secondary" onClick={(e) => e.stopPropagation()}>
+                                    <MoreHorizontal className="h-3.5 w-3.5" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="center">
+                                  <DropdownMenuItem onClick={() => openViewer(page.page)}>
+                                    <Eye className="mr-2 h-4 w-4" /> View Full Size
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => generateSinglePage(page.page)}>
+                                    <RefreshCw className="mr-2 h-4 w-4" /> Regenerate
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => enhanceSinglePage(page.page)}>
+                                    <Sparkles className="mr-2 h-4 w-4" /> Enhance
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => downloadSinglePage(page.page)}>
+                                    <Download className="mr-2 h-4 w-4" /> Download PNG
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
                           </>
                         ) : page.status === "queued" ? (
                           <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
@@ -2787,14 +2899,9 @@ function CreateColoringBookPageContent() {
                   <Button variant="outline" onClick={() => setCurrentStep(2)}>
                     <ArrowLeft className="mr-2 h-4 w-4" /> Back to Prompts
                   </Button>
-                  {doneCount === pages.length && (
+                  {doneCount > 0 && (
                     <Button onClick={() => setCurrentStep(5)} className="flex-1" size="lg">
-                      <FileDown className="mr-2 h-5 w-5" /> Continue to Front Matter
-                    </Button>
-                  )}
-                  {doneCount > 0 && doneCount < pages.length && (
-                    <Button variant="outline" onClick={() => setCurrentStep(5)}>
-                      <FileDown className="mr-2 h-4 w-4" /> Preview Front Matter ({doneCount} pages ready)
+                      <FileDown className="mr-2 h-5 w-5" /> Continue to Export
                     </Button>
                   )}
                 </div>
@@ -2802,489 +2909,201 @@ function CreateColoringBookPageContent() {
             </SectionCard>
           )}
 
-          {/* ==================== STEP 5: EXPORT ==================== */}
-          {/* ==================== STEP 5: FRONT MATTER ==================== */}
+          {/* ==================== STEP 5: COMBINED EXPORT (with Front Matter) ==================== */}
           {currentStep === 5 && doneCount > 0 && (
-            <SectionCard
-              title="Book Pages (Extras)"
-              description="Preview and customize your title page, copyright page, and belongs-to page before export"
-              icon={Book}
-              iconColor="text-indigo-500"
-              iconBg="bg-indigo-500/10"
-              headerActions={
-                <Badge variant="outline" className="text-sm">
-                  {doneFrontMatterCount} / {enabledFrontMatter.length} ready
-                </Badge>
-              }
-            >
-              <div className="space-y-6">
-                {/* Front Matter Cards */}
-                <div className="grid md:grid-cols-3 gap-4">
-                  {frontMatter.map((fm) => (
-                    <Card key={fm.key} className={cn(
-                      "overflow-hidden transition-all",
-                      !fm.enabled && "opacity-50"
-                    )}>
-                      {/* Toggle Header */}
-                      <div className="p-3 border-b flex items-center justify-between bg-muted/30">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={fm.enabled}
-                            onChange={() => toggleFrontMatter(fm.key)}
-                            className="h-4 w-4 rounded"
-                          />
-                          <span className="font-medium text-sm">{fm.label}</span>
-                        </label>
-                        {fm.status === "done" && (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        )}
-                        {fm.status === "failed" && (
-                          <AlertCircle className="h-4 w-4 text-red-500" />
-                        )}
-                      </div>
-                      
-                      {/* Preview Area - PaperPreview style */}
-                      <div className="aspect-[8.5/11] relative bg-white border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden rounded-sm">
-                        {fm.signedUrl ? (
-                          <img
-                            src={fm.signedUrl}
-                            alt={fm.label}
-                            className="w-full h-full object-contain"
-                            style={{ backgroundColor: 'white' }}
-                          />
-                        ) : fm.status === "generating" ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                            <span className="text-xs text-muted-foreground">Generating...</span>
-                          </div>
-                        ) : fm.status === "failed" ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4">
-                            <AlertCircle className="h-8 w-8 text-red-500" />
-                            <span className="text-xs text-red-500 text-center">{fm.error || "Failed"}</span>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
-                            <FileText className="h-8 w-8 text-muted-foreground/30" />
-                            <span className="text-xs text-muted-foreground">Not generated yet</span>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Actions */}
-                      <div className="p-3 border-t">
-                        <Button
-                          size="sm"
-                          className="w-full"
-                          variant={fm.status === "done" && fm.signedUrl ? "outline" : "default"}
-                          onClick={() => generateFrontMatterPage(fm.key, fm.status === "done" && !!fm.signedUrl)}
-                          disabled={!fm.enabled || generatingFrontMatter === fm.key || !projectId}
-                        >
-                          {generatingFrontMatter === fm.key ? (
-                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-                          ) : fm.status === "done" && fm.signedUrl ? (
-                            <><RefreshCw className="mr-2 h-4 w-4" /> Regenerate</>
-                          ) : (
-                            <><Sparkles className="mr-2 h-4 w-4" /> Generate</>
-                          )}
-                        </Button>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-                
-                {/* Generate All Button - show if any enabled page is not ready (status !== "done" OR missing signedUrl) */}
-                {enabledFrontMatter.some(fm => fm.status !== "done" || !fm.signedUrl) && (
-                  <Button 
-                    onClick={generateAllFrontMatter} 
-                    disabled={generatingFrontMatter !== null || !projectId}
-                    className="w-full"
-                  >
-                    {generatingFrontMatter ? (
-                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating...</>
-                    ) : !projectId ? (
-                      <><AlertCircle className="mr-2 h-5 w-5" /> Generate Pages First</>
-                    ) : (
-                      <><Sparkles className="mr-2 h-5 w-5" /> Generate All Front Matter</>
-                    )}
-                  </Button>
-                )}
-                
-                {/* Edit Options */}
-                <div className="grid md:grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Book Title</label>
-                    <Input
-                      value={storyConfig.title}
-                      onChange={(e) => {
-                        setStoryConfig({ ...storyConfig, title: e.target.value });
-                        // Mark title page as needing regeneration
-                        setFrontMatter(prev => prev.map(fm =>
-                          fm.key === "title" && fm.status === "done" 
-                            ? { ...fm, status: "pending" as FrontMatterStatus, signedUrl: undefined }
-                            : fm
-                        ));
-                      }}
-                      placeholder="My Coloring Book"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Author / Publisher</label>
-                    <Input
-                      value={pdfSettings.authorName}
-                      onChange={(e) => {
-                        setPdfSettings({ ...pdfSettings, authorName: e.target.value });
-                        // Mark copyright page as needing regeneration
-                        setFrontMatter(prev => prev.map(fm =>
-                          (fm.key === "copyright" || fm.key === "title") && fm.status === "done"
-                            ? { ...fm, status: "pending" as FrontMatterStatus, signedUrl: undefined }
-                            : fm
-                        ));
-                      }}
-                      placeholder="Your name (optional)"
-                    />
-                  </div>
-                </div>
-                
-                {/* Navigation */}
-                <div className="flex gap-3 pt-4 border-t">
-                  <Button variant="outline" onClick={() => setCurrentStep(4)}>
-                    <ArrowLeft className="mr-2 h-4 w-4" /> Back to Images
-                  </Button>
-                  <Button 
-                    onClick={() => setCurrentStep(6)}
-                    disabled={!frontMatterReady}
-                    className="flex-1"
-                    size="lg"
-                  >
-                    {frontMatterReady ? (
-                      <><FileDown className="mr-2 h-5 w-5" /> Continue to Export</>
-                    ) : (
-                      <><AlertCircle className="mr-2 h-5 w-5" /> Generate Front Matter First</>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </SectionCard>
-          )}
-
-          {/* ==================== STEP 6: EXPORT ==================== */}
-          {currentStep === 6 && doneCount > 0 && (
-            <SectionCard
-              title="Preview & Export"
-              description="Configure your coloring book PDF and download"
-              icon={FileDown}
-              iconColor="text-purple-500"
-              iconBg="bg-purple-500/10"
-            >
-              <div className="space-y-6">
-                {/* Book Info */}
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Book Title *</label>
-                    <Input
-                      value={storyConfig.title}
-                      onChange={(e) => setStoryConfig({ ...storyConfig, title: e.target.value })}
-                      placeholder="My Coloring Book"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium mb-2 block">Author / Publisher</label>
-                    <Input
-                      value={pdfSettings.authorName}
-                      onChange={(e) => setPdfSettings({ ...pdfSettings, authorName: e.target.value })}
-                      placeholder="Your name (optional)"
-                    />
-                  </div>
-                </div>
-
-                {/* PDF Options */}
+            <div className="space-y-6">
+              {/* Export Header */}
+              <div className="flex items-center justify-between">
                 <div>
-                  <label className="text-sm font-medium mb-3 block">PDF Options</label>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50">
-                      <input
-                        type="checkbox"
-                        checked={pdfSettings.includeTitlePage}
-                        onChange={(e) => setPdfSettings({ ...pdfSettings, includeTitlePage: e.target.checked })}
-                        className="h-4 w-4 rounded"
+                  <h2 className="text-xl font-semibold">Export Your Book</h2>
+                  <p className="text-muted-foreground mt-1">
+                    Configure extras and download your coloring book
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-base px-4 py-2">
+                  {doneCount} pages ready
+                </Badge>
+              </div>
+
+              {/* Book Details */}
+              <Card className="border-border">
+                <CardContent className="p-6 space-y-4">
+                  <h3 className="font-medium">Book Details</h3>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Book Title *</label>
+                      <Input
+                        value={storyConfig.title}
+                        onChange={(e) => {
+                          setStoryConfig({ ...storyConfig, title: e.target.value });
+                          setFrontMatter(prev => prev.map(fm =>
+                            fm.key === "title" && fm.status === "done" 
+                              ? { ...fm, status: "pending" as FrontMatterStatus, signedUrl: undefined }
+                              : fm
+                          ));
+                        }}
+                        placeholder="My Coloring Book"
                       />
-                      <div>
-                        <p className="text-sm font-medium">Title Page</p>
-                        <p className="text-xs text-muted-foreground">Book title & author</p>
-                      </div>
-                    </label>
-                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50">
-                      <input
-                        type="checkbox"
-                        checked={pdfSettings.includeCopyright}
-                        onChange={(e) => setPdfSettings({ ...pdfSettings, includeCopyright: e.target.checked })}
-                        className="h-4 w-4 rounded"
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Author / Publisher</label>
+                      <Input
+                        value={pdfSettings.authorName}
+                        onChange={(e) => {
+                          setPdfSettings({ ...pdfSettings, authorName: e.target.value });
+                          setFrontMatter(prev => prev.map(fm =>
+                            (fm.key === "copyright" || fm.key === "title") && fm.status === "done"
+                              ? { ...fm, status: "pending" as FrontMatterStatus, signedUrl: undefined }
+                              : fm
+                          ));
+                        }}
+                        placeholder="Your name (optional)"
                       />
-                      <div>
-                        <p className="text-sm font-medium">Copyright Page</p>
-                        <p className="text-xs text-muted-foreground">Legal notice</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Extras / Front Matter */}
+              <Card className="border-border">
+                <CardContent className="p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-medium">Include Extras</h3>
+                    {enabledFrontMatter.some(fm => fm.status !== "done" || !fm.signedUrl) && projectId && (
+                      <Button 
+                        size="sm"
+                        variant="outline"
+                        onClick={generateAllFrontMatter} 
+                        disabled={generatingFrontMatter !== null}
+                      >
+                        {generatingFrontMatter ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+                        ) : (
+                          <><Sparkles className="mr-2 h-4 w-4" /> Generate All</>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                  
+                  <div className="grid md:grid-cols-3 gap-4">
+                    {frontMatter.map((fm) => (
+                      <div key={fm.key} className={cn(
+                        "border rounded-lg overflow-hidden transition-all",
+                        !fm.enabled && "opacity-50"
+                      )}>
+                        {/* Toggle Header */}
+                        <div className="p-3 border-b flex items-center justify-between bg-muted/30">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={fm.enabled}
+                              onChange={() => toggleFrontMatter(fm.key)}
+                              className="h-4 w-4 rounded"
+                            />
+                            <span className="font-medium text-sm">{fm.label}</span>
+                          </label>
+                          {fm.status === "done" && fm.signedUrl && (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          )}
+                        </div>
+                        
+                        {/* Compact Preview */}
+                        <div className="aspect-[8.5/11] bg-white relative max-h-32 overflow-hidden">
+                          {fm.signedUrl ? (
+                            <img
+                              src={fm.signedUrl}
+                              alt={fm.label}
+                              className="w-full h-full object-contain"
+                              style={{ backgroundColor: 'white' }}
+                            />
+                          ) : fm.status === "generating" ? (
+                            <div className="flex items-center justify-center h-full">
+                              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-center h-full">
+                              <FileText className="h-6 w-6 text-muted-foreground/30" />
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Regenerate Button */}
+                        {fm.enabled && (
+                          <div className="p-2 border-t">
+                            <Button
+                              size="sm"
+                              className="w-full h-8 text-xs"
+                              variant="ghost"
+                              onClick={() => generateFrontMatterPage(fm.key, true)}
+                              disabled={generatingFrontMatter === fm.key || !projectId}
+                            >
+                              {generatingFrontMatter === fm.key ? (
+                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              ) : (
+                                <RefreshCw className="mr-1 h-3 w-3" />
+                              )}
+                              {fm.signedUrl ? "Regenerate" : "Generate"}
+                            </Button>
+                          </div>
+                        )}
                       </div>
-                    </label>
-                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50">
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* PDF Options */}
+              <Card className="border-border">
+                <CardContent className="p-6 space-y-4">
+                  <h3 className="font-medium">PDF Options</h3>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={pdfSettings.includePageNumbers}
                         onChange={(e) => setPdfSettings({ ...pdfSettings, includePageNumbers: e.target.checked })}
                         className="h-4 w-4 rounded"
                       />
-                      <div>
-                        <p className="text-sm font-medium">Page Numbers</p>
-                        <p className="text-xs text-muted-foreground">At bottom of pages</p>
-                      </div>
+                      <span className="text-sm">Include page numbers</span>
                     </label>
                   </div>
-                </div>
+                </CardContent>
+              </Card>
 
-                {/* Page Summary */}
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/50">
-                    <Badge variant="outline" className="text-base px-4 py-2">
-                      {doneCount} coloring pages
-                    </Badge>
-                    {pdfSettings.includeTitlePage && (
-                      <Badge variant="secondary">+ Title page</Badge>
-                    )}
-                    {pdfSettings.includeCopyright && (
-                      <Badge variant="secondary">+ Copyright page</Badge>
-                    )}
-                    <span className="text-sm text-muted-foreground ml-auto">
-                      Format: US Letter (8.5" × 11")
-                    </span>
-                  </div>
-                  
-                  {/* Warnings about pages needing retry */}
-                  {needsRetryCount > 0 && (
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
-                      <RefreshCw className="h-5 w-5 text-amber-500 shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                          {needsRetryCount} page{needsRetryCount > 1 ? "s" : ""} need{needsRetryCount === 1 ? "s" : ""} retry
-                        </p>
-                        <p className="text-xs text-amber-600 dark:text-amber-500">
-                          These pages are still being improved. Retry or wait for better results.
-                        </p>
-                      </div>
-                      <Button size="sm" variant="outline" onClick={() => setCurrentStep(3)}>
-                        <ArrowLeft className="mr-1 h-3 w-3" /> Go Back
-                      </Button>
-                    </div>
+              {/* Export Actions */}
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button variant="outline" onClick={() => setCurrentStep(3)} className="sm:w-auto">
+                  <ArrowLeft className="mr-2 h-4 w-4" /> Back to Images
+                </Button>
+                <div className="flex-1" />
+                <Button 
+                  variant="outline" 
+                  onClick={downloadAsZip} 
+                  disabled={isDownloadingZip || doneCount === 0}
+                  className="sm:w-auto"
+                >
+                  {isDownloadingZip ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating ZIP...</>
+                  ) : (
+                    <><Archive className="mr-2 h-4 w-4" /> Download ZIP</>
                   )}
-                  
-                  {pagesWithWarnings > 0 && needsRetryCount === 0 && (
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
-                      <AlertCircle className="h-5 w-5 text-amber-500 shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                          {pagesWithWarnings} page{pagesWithWarnings > 1 ? "s have" : " has"} quality warnings
-                        </p>
-                        <p className="text-xs text-amber-600 dark:text-amber-500">
-                          Images passed but may have minor issues. Consider regenerating for best results.
-                        </p>
-                      </div>
-                    </div>
+                </Button>
+                <Button 
+                  onClick={exportPDF}
+                  disabled={isExporting || doneCount === 0}
+                  className="sm:w-auto"
+                  size="lg"
+                >
+                  {isExporting ? (
+                    <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Exporting PDF...</>
+                  ) : (
+                    <><FileDown className="mr-2 h-5 w-5" /> Export PDF</>
                   )}
-                </div>
-
-                {/* Page Preview Strip with Regenerate */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-sm font-medium">Page Preview</label>
-                    <span className="text-xs text-muted-foreground">Click page to view, hover for actions</span>
-                  </div>
-                  <div className="flex gap-3 overflow-x-auto pb-3">
-                    {pages.filter(p => p.imageBase64).map((page) => (
-                      <div
-                      key={page.page}
-                        className="shrink-0 group relative"
-                      >
-                        <div 
-                          className="w-20 h-28 rounded-lg overflow-hidden border-2 border-transparent group-hover:border-primary transition-all cursor-pointer"
-                          onClick={() => openViewer(page.page)}
-                        >
-                          <img
-                            src={`data:image/png;base64,${page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64}`}
-                            alt={`Page ${page.page}`}
-                            className="w-full h-full object-cover"
-                          />
-                          {regeneratingInExport === page.page && (
-                            <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
-                              <Loader2 className="h-5 w-5 animate-spin" />
-                            </div>
-                          )}
-                        </div>
-                        <p className="text-xs text-center mt-1 text-muted-foreground">Page {page.page}</p>
-                        {/* Regenerate button on hover */}
-                        <button
-                          className="absolute -top-1 -right-1 h-6 w-6 rounded-full bg-background border shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            regeneratePageInExport(page.page);
-                          }}
-                          disabled={regeneratingInExport === page.page}
-                          title="Regenerate this page"
-                        >
-                          <RotateCcw className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* PDF Preview or Error */}
-                {pdfError && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800 p-4">
-                    <div className="flex items-start gap-3">
-                      <AlertCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
-                      <div className="flex-1">
-                        <p className="font-medium text-red-700 dark:text-red-400">PDF Generation Failed</p>
-                        <p className="text-sm text-red-600 dark:text-red-300 mt-1">{pdfError}</p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="mt-3"
-                          onClick={generatePdfPreview}
-                          disabled={isExporting}
-                        >
-                          <RefreshCw className="mr-2 h-3 w-3" /> Try Again
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {pdfNeedsRefresh && pdfPreviewUrl && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4">
-                    <div className="flex items-center gap-3">
-                      <AlertCircle className="h-5 w-5 text-amber-500 shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-sm text-amber-700 dark:text-amber-300">
-                          Pages have changed. Regenerate PDF preview to see updates.
-                        </p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={generatePdfPreview}
-                        disabled={isExporting}
-                      >
-                        <RefreshCw className="mr-2 h-3 w-3" /> Refresh
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                
-                {pdfPreviewUrl && !pdfError && (
-                  <div>
-                    <label className="text-sm font-medium mb-3 block">PDF Preview</label>
-                    <div className="border rounded-xl overflow-hidden bg-muted/30">
-                      <iframe
-                        src={pdfPreviewUrl}
-                        className="w-full h-[500px]"
-                        title="PDF Preview"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Enhancement Options */}
-                <div className="grid md:grid-cols-2 gap-4">
-                  <Card className="p-4">
-                    <h4 className="font-medium mb-3 flex items-center gap-2">
-                      <ZoomIn className="h-4 w-4" />
-                      Enhancement
-                    </h4>
-                    <p className="text-sm text-muted-foreground mb-3">
-                      Upscale images for better print quality
-                    </p>
-                    <Button
-                      variant="outline"
-                      onClick={enhanceAllPages}
-                      disabled={isEnhancing || enhancedCount === doneCount}
-                      className="w-full"
-                    >
-                      {isEnhancing ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Enhancing...</>
-                      ) : enhancedCount === doneCount ? (
-                        <><Check className="mr-2 h-4 w-4 text-green-500" /> All Enhanced</>
-                      ) : (
-                        <><Sparkles className="mr-2 h-4 w-4" /> Enhance {doneCount - enhancedCount} Pages</>
-                      )}
-                    </Button>
-                  </Card>
-
-                  <Card className="p-4">
-                    <h4 className="font-medium mb-3 flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      Letter Format
-                    </h4>
-                    <p className="text-sm text-muted-foreground mb-3">
-                      Optimize images for US Letter size
-                    </p>
-                    <Button
-                      variant="outline"
-                      onClick={processAllPages}
-                      disabled={isProcessing || processedCount === doneCount}
-                      className="w-full"
-                    >
-                      {isProcessing ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</>
-                      ) : processedCount === doneCount ? (
-                        <><Check className="mr-2 h-4 w-4 text-green-500" /> All Processed</>
-                      ) : (
-                        <><FileText className="mr-2 h-4 w-4" /> Process {doneCount - processedCount} Pages</>
-                      )}
-                    </Button>
-                  </Card>
-                </div>
-
-                {/* Export Actions */}
-                <div className="flex flex-col gap-3 pt-4 border-t">
-                  <div className="flex gap-3 flex-wrap">
-                    <Button variant="outline" onClick={() => setCurrentStep(5)}>
-                      <ArrowLeft className="mr-2 h-4 w-4" /> Back to Front Matter
-                    </Button>
-                    <Button variant="outline" onClick={downloadAll}>
-                      <Download className="mr-2 h-4 w-4" /> Download PNGs
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      onClick={downloadAsZip}
-                      disabled={isDownloadingZip}
-                    >
-                      {isDownloadingZip ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating ZIP...</>
-                      ) : (
-                        <><Archive className="mr-2 h-4 w-4" /> Download ZIP</>
-                      )}
-                    </Button>
-                  </div>
-                  <div className="flex gap-3">
-                    {!pdfPreviewUrl || pdfNeedsRefresh ? (
-                      <Button onClick={generatePdfPreview} disabled={isExporting} className="flex-1" size="lg">
-                        {isExporting ? (
-                          <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Preview...</>
-                        ) : pdfNeedsRefresh ? (
-                          <><RefreshCw className="mr-2 h-5 w-5" /> Refresh PDF Preview</>
-                        ) : (
-                          <><Eye className="mr-2 h-5 w-5" /> Generate PDF Preview</>
-                        )}
-                      </Button>
-                    ) : (
-                      <Button onClick={downloadPdf} className="flex-1" size="lg">
-                        <FileDown className="mr-2 h-5 w-5" /> Download PDF ({doneCount} pages)
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                </Button>
               </div>
-            </SectionCard>
+            </div>
           )}
+
 
           {/* Info Card */}
           <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4">
