@@ -768,45 +768,54 @@ export default function QuoteBookPage() {
     }
   };
 
-  // ==================== Download ====================
+  // ==================== Download Functions ====================
+  
+  // ZIP download state
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
 
+  // Download a single page (by page number)
   const downloadSinglePage = (pageNumber: number) => {
     const page = pages.find(p => p.page === pageNumber);
-    if (!page || !page.imageBase64) return;
-
+    if (!page || !page.imageBase64) {
+      toast.error("Page not ready for download");
+      return;
+    }
+    
     const imageData = page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64;
     const link = document.createElement("a");
     link.href = `data:image/png;base64,${imageData}`;
-    link.download = `quote-page-${page.page}.png`;
+    link.download = `quote-page-${String(page.page).padStart(3, "0")}.png`;
     link.click();
-    toast.success(`Downloaded page ${pageNumber}`);
+    toast.success(`Downloaded page ${page.page}`);
   };
 
-  const downloadAll = () => {
+  // Download all pages as individual files (fallback if ZIP fails)
+  const downloadAllIndividually = async () => {
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
       toast.error("No images to download");
       return;
     }
 
-    donePages.forEach((page, i) => {
-      setTimeout(() => {
-        const imageData = page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64;
-        const link = document.createElement("a");
-        link.href = `data:image/png;base64,${imageData}`;
-        link.download = `quote-page-${page.page}.png`;
-        link.click();
-      }, i * 500);
-    });
-
-    toast.success(`Downloading ${donePages.length} images...`);
+    toast.info(`Downloading ${donePages.length} images...`);
+    
+    for (const page of donePages) {
+      const imageData = page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64;
+      if (!imageData) continue;
+      
+      const link = document.createElement("a");
+      link.href = `data:image/png;base64,${imageData}`;
+      link.download = `quote-page-${String(page.page).padStart(3, "0")}.png`;
+      link.click();
+      
+      // Small delay between downloads
+      await new Promise(r => setTimeout(r, 300));
+    }
+    
+    toast.success(`Downloaded ${donePages.length} images!`);
   };
 
-  // ZIP download state
-  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
-
-  // ==================== Download ZIP ====================
-
+  // Download ZIP
   const downloadZip = async () => {
     const donePages = pages.filter(p => p.status === "done" && p.imageBase64);
     if (donePages.length === 0) {
@@ -815,9 +824,24 @@ export default function QuoteBookPage() {
     }
 
     setIsDownloadingZip(true);
-    toast.info("Creating ZIP file...");
+    toast.info(`Creating ZIP file with ${donePages.length} pages...`);
 
     try {
+      // Check total payload size - if too large, warn user
+      const estimatedSize = donePages.reduce((sum, p) => {
+        const img = p.finalLetterBase64 || p.enhancedImageBase64 || p.imageBase64;
+        return sum + (img?.length || 0);
+      }, 0);
+      
+      console.log(`[ZIP] Estimated payload size: ${(estimatedSize / 1024 / 1024).toFixed(2)} MB`);
+      
+      // If payload is very large (>50MB), use individual downloads instead
+      if (estimatedSize > 50 * 1024 * 1024) {
+        toast.warning("Large file - downloading individually instead");
+        await downloadAllIndividually();
+        return;
+      }
+
       const response = await fetch("/api/export/zip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -829,6 +853,8 @@ export default function QuoteBookPage() {
             title: p.title,
             prompt: p.prompt,
           })),
+          processToLetter: true,
+          includeMetadata: true,
           metadata: {
             bookType: bookType,
             pageSize: "US Letter (8.5x11)",
@@ -842,11 +868,25 @@ export default function QuoteBookPage() {
       });
 
       if (!response.ok) {
+        // Check for specific error codes
+        if (response.status === 413) {
+          toast.error("File too large - downloading individually instead");
+          await downloadAllIndividually();
+          return;
+        }
+        
+        const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        throw new Error(error.error || "Failed to create ZIP");
+      }
+
+      // Check if response is JSON (error) or blob (success)
+      const contentType = response.headers.get("content-type");
+      if (contentType?.includes("application/json")) {
         const error = await response.json();
         throw new Error(error.error || "Failed to create ZIP");
       }
 
-      // Download the ZIP
+      // Download the ZIP blob
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -858,7 +898,14 @@ export default function QuoteBookPage() {
       toast.success(`Downloaded ZIP with ${donePages.length} pages!`);
     } catch (error) {
       console.error("ZIP download error:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to download ZIP");
+      const errorMsg = error instanceof Error ? error.message : "Failed to download ZIP";
+      toast.error(errorMsg);
+      
+      // Offer fallback
+      if (donePages.length <= 10) {
+        toast.info("Trying individual download as fallback...");
+        await downloadAllIndividually();
+      }
     } finally {
       setIsDownloadingZip(false);
     }
@@ -1332,7 +1379,7 @@ export default function QuoteBookPage() {
                         size="sm"
                         className="rounded-xl"
                         onClick={downloadZip}
-                        disabled={isDownloadingZip}
+                        disabled={isDownloadingZip || doneCount === 0}
                       >
                         {isDownloadingZip ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1342,9 +1389,20 @@ export default function QuoteBookPage() {
                         {isDownloadingZip ? "Creating ZIP..." : "Download ZIP"}
                       </Button>
                       <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-xl"
+                        onClick={downloadAllIndividually}
+                        disabled={isDownloadingZip || doneCount === 0}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Download All
+                      </Button>
+                      <Button
                         size="sm"
                         className="ml-auto rounded-xl"
                         onClick={() => setShowExportModal(true)}
+                        disabled={doneCount === 0}
                       >
                         <FileDown className="mr-2 h-4 w-4" />
                         Export PDF
