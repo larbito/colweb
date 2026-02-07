@@ -119,7 +119,11 @@ export async function POST(request: NextRequest) {
 
     // Step 3: Convert scenes to full prompts with ALL constraints
     const imageSize = (size || "1024x1792") as ImageSize;
-    const pages: PagePromptItem[] = scenePlan.scenes.map((scene) => {
+    
+    // CRITICAL: Ensure we only process exactly `count` scenes
+    const scenesToProcess = scenePlan.scenes.slice(0, count);
+    
+    const pages: PagePromptItem[] = scenesToProcess.map((scene, index) => {
       const fullPrompt = buildFullPagePrompt({
         scene,
         creativeBrief,
@@ -132,7 +136,7 @@ export async function POST(request: NextRequest) {
       });
 
       return {
-        page: scene.pageNumber,
+        page: index + 1, // Force sequential page numbers from 1 to count
         title: scene.title,
         prompt: fullPrompt,
         sceneDescription: `${scene.action} in ${scene.location} with ${scene.props.slice(0, 4).join(", ")}`,
@@ -141,7 +145,12 @@ export async function POST(request: NextRequest) {
 
     // Validate scene diversity for storybook mode
     if (mode === "storybook") {
-      validateSceneDiversity(scenePlan.scenes);
+      validateSceneDiversity(scenesToProcess);
+    }
+    
+    // Final validation: ensure exact count
+    if (pages.length !== count) {
+      console.warn(`[batch/prompts] MISMATCH: requested ${count} pages, returning ${pages.length}`);
     }
 
     const result: BatchPromptsResponse & { characterIdentityProfile?: CharacterIdentityProfile } = {
@@ -151,7 +160,7 @@ export async function POST(request: NextRequest) {
       characterIdentityProfile,
     };
 
-    console.log(`[batch/prompts] Generated ${pages.length} prompts in ${mode} mode`);
+    console.log(`[batch/prompts] Generated EXACTLY ${pages.length} prompts (requested: ${count}) in ${mode} mode`);
 
     return NextResponse.json(result);
 
@@ -195,9 +204,38 @@ async function buildCreativeBrief(params: {
   // Detect special themes first
   const themeReqs = detectThemeRequirements(ideaText);
   
+  // Parse user's idea for key requirements
+  const ideaLower = ideaText.toLowerCase();
+  const hasKawaiiStyle = ideaLower.includes("kawaii") || ideaLower.includes("cute") || ideaLower.includes("chibi");
+  const hasMultipleCharacters = ideaLower.match(/two|2|both|pair|couple|friends|together/i);
+  const animalsOnly = (ideaLower.includes("animal") || ideaLower.includes("animals")) && !ideaLower.includes("kid") && !ideaLower.includes("child") && !ideaLower.includes("person");
+  const noHumans = animalsOnly || ideaLower.includes("no human") || ideaLower.includes("no people") || ideaLower.includes("no kid") || ideaLower.includes("animals only");
+  
   const prompt = `You are creating a creative brief for a ${bookType === "storybook" ? "STORYBOOK (same character on every page)" : "THEME COLLECTION (varied subjects)"} coloring book.
 
-USER'S IDEA: "${ideaText}"
+USER'S EXACT REQUEST: "${ideaText}"
+
+=== ANALYZE USER'S REQUEST CAREFULLY ===
+${hasKawaiiStyle ? `
+⚠️ STYLE REQUIREMENT: User wants KAWAII/CUTE style
+- Use rounded, soft shapes
+- Big heads with large eyes
+- Small bodies (chibi proportions)
+- Friendly, adorable expressions
+- This style MUST be consistent on ALL pages
+` : ""}
+${hasMultipleCharacters ? `
+⚠️ CHARACTER COUNT: User wants MULTIPLE characters (two or more)
+- EVERY scene MUST include at least TWO characters together
+- Both characters must be visible and interacting
+- DO NOT show just one character alone
+` : ""}
+${noHumans ? `
+⚠️ NO HUMANS: User wants ANIMALS ONLY
+- NO human children, kids, or people
+- Focus ONLY on animal characters
+- No human hands, faces, or figures
+` : ""}
 
 ${themeReqs.isSpecialTheme ? `
 DETECTED THEME: ${themeReqs.themeName}
@@ -214,18 +252,20 @@ ${complexity === "ultra" ? "IMPORTANT: Create intricate, detailed designs suitab
 
 SETTING: ${settingConstraint || "mixed"}
 
-CRITICAL RULES:
+CRITICAL RULES - FOLLOW EXACTLY:
 1. NEVER add generic templates (bedroom, kitchen, school, bathroom) unless user explicitly asked
 2. Every element must connect to "${ideaText}"
 3. ${themeReqs.isSpecialTheme ? `Every scene must include ${themeReqs.themeName} motifs` : "Scenes must match the user's actual theme"}
 4. Avoid generic filler: ${FORBIDDEN_FILLERS.slice(0, 8).join(", ")}
+${noHumans ? `5. NO HUMANS - only show the animals/characters user requested` : ""}
+${hasMultipleCharacters ? `6. ALWAYS show MULTIPLE characters together - NEVER just one` : ""}
 ${bookType === "storybook" ? `
-5. Create ONE main character with strict consistency rules
-6. Character must have "alwaysInclude" traits (e.g., "both arms visible")
-7. List what "neverChange" - traits that stay identical
+7. Create ${hasMultipleCharacters ? "TWO main characters that are ALWAYS together" : "ONE main character"} with strict consistency rules
+8. Character(s) must have "alwaysInclude" traits (e.g., "both characters visible")
+9. List what "neverChange" - traits that stay identical
 ` : `
-5. Define varied subjects that fit the theme
-6. No forced main character - variety is key
+7. Define varied subjects that fit the theme
+8. No forced main character - variety is key
 `}
 
 Return ONLY valid JSON matching this structure:
@@ -234,33 +274,42 @@ Return ONLY valid JSON matching this structure:
   "themeDescription": "2-3 sentences describing the theme",
   "targetAudience": "${targetAge || "all-ages"}",
   "mood": "cheerful/adventurous/cozy/magical/etc",
-  "visualStyleHints": ["hint1", "hint2", "hint3"],
+  "artStyle": "${hasKawaiiStyle ? "kawaii/cute - rounded shapes, big eyes, chibi proportions" : "standard coloring book style"}",
+  "visualStyleHints": ["hint1", "hint2", "hint3"${hasKawaiiStyle ? ', "kawaii", "chibi proportions", "big cute eyes"' : ""}],
   "lineThickness": "thin/medium/thick",
   "complexity": "simple/medium/detailed",
   "settingWorld": "describe the world/setting derived from the idea",
   "primaryLocations": ["5-10 specific locations that fit THIS theme - NOT generic bedrooms/kitchens"],
   "timeOfDayOptions": ["morning", "afternoon", "evening"],
+  "characterCount": ${hasMultipleCharacters ? 2 : 1},
+  "noHumans": ${noHumans},
   ${bookType === "storybook" ? `
   "mainCharacter": {
     "name": "optional name",
-    "species": "specific type (e.g., 'baby unicorn' not just 'unicorn')",
+    "species": "specific type (e.g., 'baby unicorn' not just 'unicorn')${noHumans ? " - MUST be an animal, NOT a human" : ""}",
     "visualTraits": ["trait1", "trait2", "trait3", "trait4", "trait5"],
     "outfit": "description or null",
     "accessories": ["accessory1", "accessory2"],
-    "proportions": "chibi with large head / realistic / etc",
-    "alwaysInclude": ["both arms/hands visible", "horn on head", "fluffy tail", "etc"],
-    "neverChange": ["face shape", "eye style", "body proportions", "horn shape", "etc"]
+    "proportions": "${hasKawaiiStyle ? "kawaii/chibi - large head, small body, big eyes" : "chibi with large head / realistic / etc"}",
+    "alwaysInclude": ["both arms/hands visible", "${hasMultipleCharacters ? "BOTH characters always together" : "full body visible"}", "etc"],
+    "neverChange": ["face shape", "eye style", "body proportions", "${hasKawaiiStyle ? "kawaii style" : "character design"}", "etc"]
   },
+  ${hasMultipleCharacters ? `"secondCharacter": {
+    "name": "optional name",
+    "species": "specific type${noHumans ? " - MUST be an animal, NOT a human" : ""}",
+    "visualTraits": ["trait1", "trait2"],
+    "relationship": "how they relate to main character"
+  },` : ""}
   "supportingCast": [{"type": "type", "role": "role"}],
   ` : `
   "mainCharacter": null,
   `}
-  "mustInclude": ${JSON.stringify(themeReqs.requiredMotifs.length > 0 ? themeReqs.requiredMotifs : ["items that MUST appear based on the idea"])},
-  "mustAvoid": ${JSON.stringify([...themeReqs.forbiddenContent, ...FORBIDDEN_FILLERS.slice(0, 5)])},
+  "mustInclude": ${JSON.stringify(themeReqs.requiredMotifs.length > 0 ? themeReqs.requiredMotifs : ["items that MUST appear based on the idea"])}${hasMultipleCharacters ? '.concat(["both characters together in every scene"])' : ""},
+  "mustAvoid": ${JSON.stringify([...themeReqs.forbiddenContent, ...FORBIDDEN_FILLERS.slice(0, 5)])}${noHumans ? '.concat(["human children", "kids", "human figures", "people"])' : ""},
   "forbiddenFillers": ${JSON.stringify(FORBIDDEN_FILLERS.slice(0, 10))},
   "varietyPlan": {
     "sceneTypes": ["action scene", "quiet moment", "discovery", "celebration", "nature scene"],
-    "actionsPool": ["10-15 specific actions that fit THIS theme"],
+    "actionsPool": ["10-15 specific actions that fit THIS theme${hasMultipleCharacters ? " - actions for TWO characters together" : ""}"],
     "propsPool": ["15-25 theme-appropriate props - NOT generic toys/balls/rocks"],
     "compositionStyles": ["close-up face", "medium shot with background", "wide scene", "looking up at", "looking down at"]
   },
@@ -424,12 +473,19 @@ RECENTLY USED (avoid repeating):
 - Props: ${[...new Set(previousScenes.flatMap(s => s.props?.slice(0, 2) || []))].slice(0, 10).join(", ")}
 ` : "";
   
+  // Extract style and character requirements from brief
+  const artStyle = (brief as { artStyle?: string }).artStyle || "";
+  const characterCount = (brief as { characterCount?: number }).characterCount || 1;
+  const noHumans = (brief as { noHumans?: boolean }).noHumans || false;
+  const isKawaii = artStyle.toLowerCase().includes("kawaii") || artStyle.toLowerCase().includes("cute");
+  
   const prompt = `You are planning ${chunkSize} UNIQUE coloring book scenes (pages ${startPageNumber} to ${startPageNumber + chunkSize - 1}).
 
 CREATIVE BRIEF:
 - Theme: ${brief.themeTitle}
 - Setting World: ${brief.settingWorld}
 - Mood: ${brief.mood}
+${artStyle ? `- Art Style: ${artStyle}` : ""}
 - Available Locations: ${brief.primaryLocations.join(", ")}
 - Available Actions: ${brief.varietyPlan.actionsPool.join(", ")}
 - Props Pool: ${brief.varietyPlan.propsPool.join(", ")}
@@ -438,6 +494,28 @@ ${previousContext}
 ${brief.isHolidayTheme ? `
 HOLIDAY THEME: ${brief.holidayName}
 REQUIRED MOTIFS (include 2-4 in EVERY scene): ${brief.holidayMotifs?.join(", ")}
+` : ""}
+
+${isKawaii ? `
+⚠️ KAWAII/CUTE STYLE REQUIRED:
+- All characters must have kawaii/chibi proportions
+- Big heads, small bodies, large cute eyes
+- Rounded, soft shapes
+- Adorable expressions
+` : ""}
+
+${characterCount > 1 ? `
+⚠️ TWO CHARACTERS REQUIRED IN EVERY SCENE:
+- BOTH characters must appear together in EVERY single scene
+- Show them interacting, playing, or doing activities together
+- NEVER show just one character alone
+` : ""}
+
+${noHumans ? `
+⚠️ NO HUMANS ALLOWED:
+- Only show animal characters
+- NO human children, kids, or people
+- NO human hands, faces, or figures
 ` : ""}
 
 ${mode === "storybook" && brief.mainCharacter ? `
@@ -460,6 +538,8 @@ CRITICAL RULES:
 5. Each scene must have at least 2 props not used in the previous scenes
 6. Vary composition: alternate close-up, medium, wide
 ${brief.isHolidayTheme ? `7. EVERY scene MUST include ${brief.holidayName} motifs (hearts, pumpkins, etc.)` : ""}
+${characterCount > 1 ? `8. EVERY scene MUST show BOTH characters together - this is MANDATORY` : ""}
+${noHumans ? `9. NO HUMANS - only animal characters allowed` : ""}
 
 Return ONLY valid JSON:
 {
@@ -468,19 +548,23 @@ Return ONLY valid JSON:
       "pageNumber": 1,
       "title": "Short Title",
       "location": "specific location from the list",
-      "action": "specific action",
+      "action": "specific action${characterCount > 1 ? " for BOTH characters together" : ""}",
       "props": ["prop1 (position)", "prop2 (position)", "prop3", "prop4", "prop5"],
       "composition": "close-up / medium shot / wide scene",
       "timeOfDay": "morning/afternoon/evening",
       "mood": "scene mood",
       "themeMotifs": ["motif1", "motif2"]${mode === "storybook" ? `,
-      "characterAction": "what the character is doing",
-      "characterExpression": "happy/curious/excited/peaceful"` : ""}
+      "characterAction": "what the character${characterCount > 1 ? "s are" : " is"} doing",
+      "characterExpression": "happy/curious/excited/peaceful"${characterCount > 1 ? `,
+      "bothCharactersPresent": true` : ""}` : ""}
     }
   ]
 }
 
-Generate exactly ${chunkSize} scenes starting at page ${startPageNumber} with UNIQUE locations, actions, and props.`;
+IMPORTANT: Generate EXACTLY ${chunkSize} scenes (not more, not less) starting at page ${startPageNumber}.
+${characterCount > 1 ? "⚠️ EVERY scene MUST have BOTH characters visible and interacting." : ""}
+${noHumans ? "⚠️ NO human characters allowed - only animals." : ""}
+${isKawaii ? "⚠️ All characters must be drawn in kawaii/cute style with chibi proportions." : ""}`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -498,12 +582,21 @@ Generate exactly ${chunkSize} scenes starting at page ${startPageNumber} with UN
 
   try {
     const parsed = JSON.parse(responseText);
-    const scenes: PlannedScene[] = parsed.scenes || [];
+    let scenes: PlannedScene[] = parsed.scenes || [];
     
-    // Validate we got the expected number
-    if (scenes.length < chunkSize) {
+    // CRITICAL: Ensure we have EXACTLY the requested number of scenes
+    if (scenes.length > chunkSize) {
+      console.warn(`[batch/prompts] Chunk returned ${scenes.length} scenes, but only ${chunkSize} requested - TRUNCATING`);
+      scenes = scenes.slice(0, chunkSize);
+    } else if (scenes.length < chunkSize) {
       console.warn(`[batch/prompts] Chunk returned ${scenes.length} scenes, expected ${chunkSize}`);
     }
+    
+    // Fix page numbering - ensure sequential starting from 1
+    scenes = scenes.map((scene, index) => ({
+      ...scene,
+      pageNumber: index + 1, // Force sequential numbering within chunk
+    }));
     
     // Calculate diversity metrics for this chunk
     const usedLocations = [...new Set(scenes.map(s => s.location).filter(Boolean))];
@@ -514,7 +607,7 @@ Generate exactly ${chunkSize} scenes starting at page ${startPageNumber} with UN
     const propDiversity = usedProps.length / (allProps.length || 1);
     const diversityScore = Math.round((locationDiversity * 50 + propDiversity * 50));
     
-    console.log(`[batch/prompts] Chunk diversity: ${usedLocations.length} locations, ${usedProps.length} unique props`);
+    console.log(`[batch/prompts] Chunk generated: ${scenes.length} scenes (requested ${chunkSize}), ${usedLocations.length} locations, ${usedProps.length} unique props`);
     
     return { scenes, usedLocations, usedProps, diversityScore };
   } catch (e) {
@@ -586,14 +679,50 @@ function buildFullPagePrompt(params: {
 }): string {
   const { scene, creativeBrief, styleProfile, characterProfile, characterConsistencyBlock, characterBible, size = "1024x1792", complexity = "medium" } = params;
 
+  // Extract extended brief properties
+  const artStyle = (creativeBrief as { artStyle?: string }).artStyle || "";
+  const characterCount = (creativeBrief as { characterCount?: number }).characterCount || 1;
+  const noHumans = (creativeBrief as { noHumans?: boolean }).noHumans || false;
+  const isKawaii = artStyle.toLowerCase().includes("kawaii") || artStyle.toLowerCase().includes("cute");
+
   const parts: string[] = [];
 
-  // Title line with complexity context
+  // Title line with complexity context and style
   const audienceContext = complexity === "kids" ? "for toddlers (ages 3-6)" : 
                           complexity === "simple" ? "for young children (ages 6-9)" :
                           complexity === "ultra" ? "for adults (stress-relief style)" :
                           complexity === "detailed" ? "for teens and adults" : "";
-  parts.push(`Create a ${audienceContext ? audienceContext + " " : ""}coloring book page in clean black-and-white OUTLINE line art (no filled areas, no grayscale).`);
+  const styleContext = isKawaii ? "KAWAII/CUTE style with chibi proportions, big eyes, rounded shapes " : "";
+  parts.push(`Create a ${styleContext}${audienceContext ? audienceContext + " " : ""}coloring book page in clean black-and-white OUTLINE line art (no filled areas, no grayscale).`);
+
+  // Add style requirements
+  if (isKawaii) {
+    parts.push(`
+=== KAWAII/CUTE STYLE REQUIRED ===
+- All characters must have KAWAII/CHIBI proportions
+- Large heads (2-3x body size), big round eyes
+- Small bodies, short limbs
+- Rounded, soft shapes everywhere
+- Adorable, friendly expressions`);
+  }
+
+  // Add character count requirements
+  if (characterCount > 1) {
+    parts.push(`
+=== TWO CHARACTERS REQUIRED ===
+- BOTH characters must be visible in this scene
+- Show them together, interacting or side by side
+- Do NOT show just one character alone`);
+  }
+
+  // Add no-humans requirement
+  if (noHumans) {
+    parts.push(`
+=== NO HUMANS ===
+- Only animal characters allowed
+- NO human children, kids, people, or human figures
+- NO human hands, faces, or bodies`);
+  }
 
   // Add complexity-specific instructions
   parts.push(COMPLEXITY_INSTRUCTIONS[complexity]);
@@ -673,7 +802,27 @@ Artwork fills 90-95% of canvas with minimal margins.`);
     ...styleProfile.mustAvoid.slice(0, 3),
     ...NEGATIVE_PROMPT_LIST.slice(0, 10)
   ];
+  
+  // Add no-humans constraint if applicable
+  if (noHumans) {
+    avoidList.push("human children", "kids", "people", "human figures", "human hands", "human faces");
+  }
+  
+  // Add character count constraint
+  if (characterCount > 1) {
+    avoidList.push("single character alone", "only one character");
+  }
+  
   parts.push(`\nAVOID: ${[...new Set(avoidList)].join(", ")}.`);
+  
+  // Final reminder for critical requirements
+  if (isKawaii || characterCount > 1 || noHumans) {
+    const reminders: string[] = [];
+    if (isKawaii) reminders.push("kawaii/chibi style with big eyes");
+    if (characterCount > 1) reminders.push("BOTH characters visible together");
+    if (noHumans) reminders.push("NO humans - animals only");
+    parts.push(`\nCRITICAL REMINDER: ${reminders.join(", ")}.`);
+  }
 
   return parts.join("\n");
 }
