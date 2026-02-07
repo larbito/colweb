@@ -135,11 +135,16 @@ export async function POST(request: NextRequest) {
         complexity, // Pass complexity for detail level instructions
       });
 
+      // Get subject for variety themes
+      const sceneSubject = (scene as { subject?: string }).subject;
+      
       return {
         page: index + 1, // Force sequential page numbers from 1 to count
         title: scene.title,
         prompt: fullPrompt,
-        sceneDescription: `${scene.action} in ${scene.location} with ${scene.props.slice(0, 4).join(", ")}`,
+        sceneDescription: sceneSubject 
+          ? `${sceneSubject} - ${scene.action} in ${scene.location}` 
+          : `${scene.action} in ${scene.location} with ${scene.props.slice(0, 4).join(", ")}`,
       };
     });
 
@@ -211,6 +216,29 @@ async function buildCreativeBrief(params: {
   const animalsOnly = (ideaLower.includes("animal") || ideaLower.includes("animals")) && !ideaLower.includes("kid") && !ideaLower.includes("child") && !ideaLower.includes("person");
   const noHumans = animalsOnly || ideaLower.includes("no human") || ideaLower.includes("no people") || ideaLower.includes("no kid") || ideaLower.includes("animals only");
   
+  // Detect if user wants VARIETY (different subjects on each page)
+  // "cute animals" = many different animals, not the same one repeated
+  const wantsVariety = (
+    ideaLower.includes("animals") || // plural = variety
+    ideaLower.includes("different") ||
+    ideaLower.includes("variety") ||
+    ideaLower.includes("various") ||
+    ideaLower.includes("collection") ||
+    (bookType === "theme") // theme mode implies variety
+  );
+  
+  // Detect specific animal categories for smart variety
+  const animalCategory = 
+    ideaLower.includes("farm") ? "farm" :
+    ideaLower.includes("jungle") || ideaLower.includes("safari") || ideaLower.includes("wild") ? "wild" :
+    ideaLower.includes("ocean") || ideaLower.includes("sea") || ideaLower.includes("underwater") ? "ocean" :
+    ideaLower.includes("forest") || ideaLower.includes("woodland") ? "forest" :
+    ideaLower.includes("pet") || ideaLower.includes("domestic") ? "pets" :
+    ideaLower.includes("bird") ? "birds" :
+    ideaLower.includes("dinosaur") || ideaLower.includes("dino") ? "dinosaurs" :
+    ideaLower.includes("insect") || ideaLower.includes("bug") ? "insects" :
+    "mixed"; // Default to a mix of all cute animals
+  
   const prompt = `You are creating a creative brief for a ${bookType === "storybook" ? "STORYBOOK (same character on every page)" : "THEME COLLECTION (varied subjects)"} coloring book.
 
 USER'S EXACT REQUEST: "${ideaText}"
@@ -235,6 +263,13 @@ ${noHumans ? `
 - NO human children, kids, or people
 - Focus ONLY on animal characters
 - No human hands, faces, or figures
+` : ""}
+${wantsVariety ? `
+⚠️ VARIETY REQUIRED: User wants DIFFERENT subjects on each page
+- Do NOT repeat the same animal/subject on multiple pages
+- Each page should feature a DIFFERENT animal or character
+- Create a diverse pool of subjects that fit the theme
+- Category hint: ${animalCategory}
 ` : ""}
 
 ${themeReqs.isSpecialTheme ? `
@@ -311,7 +346,8 @@ Return ONLY valid JSON matching this structure:
     "sceneTypes": ["action scene", "quiet moment", "discovery", "celebration", "nature scene"],
     "actionsPool": ["10-15 specific actions that fit THIS theme${hasMultipleCharacters ? " - actions for TWO characters together" : ""}"],
     "propsPool": ["15-25 theme-appropriate props - NOT generic toys/balls/rocks"],
-    "compositionStyles": ["close-up face", "medium shot with background", "wide scene", "looking up at", "looking down at"]
+    "compositionStyles": ["close-up face", "medium shot with background", "wide scene", "looking up at", "looking down at"]${wantsVariety ? `,
+    "subjectsPool": ["LIST 25-40 DIFFERENT ${animalCategory === "mixed" ? "cute animals" : animalCategory + " animals/subjects"} - each page will feature ONE different subject from this pool. Include: mammals, birds, sea creatures, etc. as appropriate. Make them diverse and creative!"]` : ""}
   },
   "isHolidayTheme": ${themeReqs.isSpecialTheme},
   "holidayName": ${themeReqs.isSpecialTheme ? `"${themeReqs.themeName}"` : "null"},
@@ -357,6 +393,7 @@ Return ONLY valid JSON matching this structure:
         actionsPool: parsed.varietyPlan?.actionsPool || [],
         propsPool: parsed.varietyPlan?.propsPool || [],
         compositionStyles: parsed.varietyPlan?.compositionStyles || ["close-up", "medium shot", "wide scene"],
+        subjectsPool: parsed.varietyPlan?.subjectsPool || [],
       },
       isHolidayTheme: parsed.isHolidayTheme || themeReqs.isSpecialTheme,
       holidayName: parsed.holidayName || themeReqs.themeName,
@@ -466,8 +503,10 @@ async function planScenesChunk(
 ): Promise<{ scenes: PlannedScene[]; usedLocations: string[]; usedProps: string[]; diversityScore: number }> {
   
   // Build context from previous scenes to avoid repetition
+  const usedSubjects = [...new Set(previousScenes.map(s => (s as { subject?: string }).subject).filter(Boolean))];
   const previousContext = previousScenes.length > 0 ? `
-RECENTLY USED (avoid repeating):
+RECENTLY USED (DO NOT REPEAT):
+${usedSubjects.length > 0 ? `- ⚠️ ALREADY USED SUBJECTS (DO NOT USE AGAIN): ${usedSubjects.join(", ")}` : ""}
 - Locations: ${[...new Set(previousScenes.map(s => s.location))].join(", ")}
 - Actions: ${[...new Set(previousScenes.map(s => s.action))].join(", ")}
 - Props: ${[...new Set(previousScenes.flatMap(s => s.props?.slice(0, 2) || []))].slice(0, 10).join(", ")}
@@ -478,6 +517,10 @@ RECENTLY USED (avoid repeating):
   const characterCount = (brief as { characterCount?: number }).characterCount || 1;
   const noHumans = (brief as { noHumans?: boolean }).noHumans || false;
   const isKawaii = artStyle.toLowerCase().includes("kawaii") || artStyle.toLowerCase().includes("cute");
+  
+  // Get subjects pool for variety (if available)
+  const subjectsPool = brief.varietyPlan?.subjectsPool || [];
+  const hasSubjectsPool = subjectsPool.length > 0;
   
   const prompt = `You are planning ${chunkSize} UNIQUE coloring book scenes (pages ${startPageNumber} to ${startPageNumber + chunkSize - 1}).
 
@@ -490,6 +533,10 @@ ${artStyle ? `- Art Style: ${artStyle}` : ""}
 - Available Actions: ${brief.varietyPlan.actionsPool.join(", ")}
 - Props Pool: ${brief.varietyPlan.propsPool.join(", ")}
 - Composition Styles: ${brief.varietyPlan.compositionStyles.join(", ")}
+${hasSubjectsPool ? `
+⚠️ SUBJECTS POOL (use DIFFERENT subject on each page):
+${subjectsPool.join(", ")}
+RULE: Each page MUST feature a DIFFERENT subject from this pool. NO REPEATS!` : ""}
 ${previousContext}
 ${brief.isHolidayTheme ? `
 HOLIDAY THEME: ${brief.holidayName}
@@ -537,16 +584,18 @@ CRITICAL RULES:
 4. Each scene needs 4-8 SPECIFIC props (named and positioned)
 5. Each scene must have at least 2 props not used in the previous scenes
 6. Vary composition: alternate close-up, medium, wide
-${brief.isHolidayTheme ? `7. EVERY scene MUST include ${brief.holidayName} motifs (hearts, pumpkins, etc.)` : ""}
-${characterCount > 1 ? `8. EVERY scene MUST show BOTH characters together - this is MANDATORY` : ""}
-${noHumans ? `9. NO HUMANS - only animal characters allowed` : ""}
+${hasSubjectsPool ? `7. ⚠️ EACH PAGE MUST HAVE A DIFFERENT SUBJECT/ANIMAL - pick from the subjects pool, NO REPEATING the same animal twice!` : ""}
+${brief.isHolidayTheme ? `8. EVERY scene MUST include ${brief.holidayName} motifs (hearts, pumpkins, etc.)` : ""}
+${characterCount > 1 ? `9. EVERY scene MUST show BOTH characters together - this is MANDATORY` : ""}
+${noHumans ? `10. NO HUMANS - only animal characters allowed` : ""}
 
 Return ONLY valid JSON:
 {
   "scenes": [
     {
       "pageNumber": 1,
-      "title": "Short Title",
+      "title": "Short Title",${hasSubjectsPool ? `
+      "subject": "SPECIFIC animal/subject from the pool - DIFFERENT for each page",` : ""}
       "location": "specific location from the list",
       "action": "specific action${characterCount > 1 ? " for BOTH characters together" : ""}",
       "props": ["prop1 (position)", "prop2 (position)", "prop3", "prop4", "prop5"],
@@ -562,6 +611,7 @@ Return ONLY valid JSON:
 }
 
 IMPORTANT: Generate EXACTLY ${chunkSize} scenes (not more, not less) starting at page ${startPageNumber}.
+${hasSubjectsPool ? "⚠️ CRITICAL: Each page MUST feature a DIFFERENT animal/subject - DO NOT repeat!" : ""}
 ${characterCount > 1 ? "⚠️ EVERY scene MUST have BOTH characters visible and interacting." : ""}
 ${noHumans ? "⚠️ NO human characters allowed - only animals." : ""}
 ${isKawaii ? "⚠️ All characters must be drawn in kawaii/cute style with chibi proportions." : ""}`;
@@ -727,11 +777,15 @@ function buildFullPagePrompt(params: {
   // Add complexity-specific instructions
   parts.push(COMPLEXITY_INSTRUCTIONS[complexity]);
 
+  // Get subject if this is a variety theme
+  const sceneSubject = (scene as { subject?: string }).subject;
+  
   // Scene description with specific props
   const propsText = scene.props.slice(0, 6).join(", ");
   parts.push(`
 Scene:
-${scene.title} - ${scene.action} in ${scene.location}.
+${scene.title}${sceneSubject ? ` - featuring a ${sceneSubject}` : ""} - ${scene.action} in ${scene.location}.
+${sceneSubject ? `MAIN SUBJECT: A cute ${sceneSubject} (this specific animal/subject is the star of this page).` : ""}
 Props: ${propsText}.
 Composition: ${scene.composition} view.
 ${scene.mood ? `Mood: ${scene.mood}.` : ""}

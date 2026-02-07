@@ -70,6 +70,7 @@ export const creativeBriefSchema = z.object({
     actionsPool: z.array(z.string()), // e.g., "picking flowers", "having tea party"
     propsPool: z.array(z.string()), // Theme-appropriate props
     compositionStyles: z.array(z.string()), // "close-up", "medium shot", "wide scene"
+    subjectsPool: z.array(z.string()).optional(), // For variety themes: pool of different animals/subjects
   }),
   
   // Theme-specific flags
@@ -87,6 +88,7 @@ export type CreativeBrief = z.infer<typeof creativeBriefSchema>;
 export const plannedSceneSchema = z.object({
   pageNumber: z.number(),
   title: z.string(),
+  subject: z.string().optional(), // For variety themes: specific animal/subject for this page
   location: z.string(),
   action: z.string(),
   props: z.array(z.string()), // 4-8 specific props
