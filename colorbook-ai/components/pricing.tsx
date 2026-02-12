@@ -34,49 +34,51 @@ const tiers = [
 
 export function Pricing() {
   return (
-    <section id="pricing" className="mx-auto max-w-5xl px-6 py-24">
-      <div className="mb-16 text-center">
-        <p className="mb-2 text-sm font-medium text-muted-foreground">Pricing</p>
-        <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+    <section id="pricing" className="mx-auto max-w-5xl px-6 py-32">
+      <div className="mb-20 text-center">
+        <p className="mb-4 text-sm font-medium uppercase tracking-widest text-muted-foreground/70">
+          Pricing
+        </p>
+        <h2 className="text-4xl font-bold tracking-tight sm:text-5xl">
           Simple, transparent pricing
         </h2>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-8 lg:grid-cols-3">
         {tiers.map((tier, i) => (
           <motion.div
             key={tier.name}
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-50px" }}
-            transition={{ duration: 0.4, delay: i * 0.1 }}
-            className={`relative rounded-2xl border p-6 transition-all duration-300 hover:shadow-xl backdrop-blur-sm ${
+            transition={{ duration: 0.5, delay: i * 0.1 }}
+            className={`relative rounded-[24px] border p-10 transition-all duration-300 ${
               tier.popular
-                ? "border-primary/50 bg-primary/[0.06] shadow-lg shadow-primary/5 hover:border-primary/70"
-                : "border-border/50 bg-card/50 hover:border-primary/20"
+                ? "border-foreground/20 bg-card shadow-2xl dark:shadow-none dark:border-white/10 scale-[1.02]"
+                : "border-border/50 dark:border-transparent bg-card"
             }`}
           >
             {tier.popular && (
-              <div className="absolute -top-3 left-6 rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">
+              <div className="absolute -top-3.5 left-8 rounded-full bg-foreground px-4 py-1 text-xs font-semibold text-background">
                 Popular
               </div>
             )}
 
-            <div className="mb-4">
+            <div className="mb-2">
               <h3 className="text-lg font-semibold">{tier.name}</h3>
               <p className="text-sm text-muted-foreground">{tier.description}</p>
             </div>
 
-            <div className="mb-6">
-              <span className="text-4xl font-semibold">{tier.price}</span>
-              {tier.period && <span className="text-muted-foreground">{tier.period}</span>}
+            <div className="mb-8 mt-6">
+              <span className="text-5xl font-bold tracking-tight">{tier.price}</span>
+              {tier.period && <span className="text-muted-foreground text-lg">{tier.period}</span>}
             </div>
 
-            <ul className="mb-6 space-y-3 text-sm">
+            <ul className="mb-10 space-y-4 text-[15px]">
               {tier.features.map((feature) => (
-                <li key={feature} className="flex items-center gap-2">
-                  <Check className="h-4 w-4 text-primary" />
-                  {feature}
+                <li key={feature} className="flex items-center gap-3">
+                  <Check className="h-4 w-4 text-foreground shrink-0" />
+                  <span className="text-muted-foreground">{feature}</span>
                 </li>
               ))}
             </ul>
@@ -85,6 +87,7 @@ export function Pricing() {
               asChild
               className="w-full rounded-full"
               variant={tier.popular ? "default" : "outline"}
+              size="lg"
             >
               <Link href="/auth">{tier.cta}</Link>
             </Button>
@@ -94,4 +97,3 @@ export function Pricing() {
     </section>
   );
 }
-

@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import defaultTheme from "tailwindcss/defaultTheme";
 
 const config: Config = {
   darkMode: ["class", ".dark"],
@@ -8,12 +9,16 @@ const config: Config = {
       center: true,
       padding: "1.5rem",
       screens: {
-        "2xl": "1280px",
+        "2xl": "1320px",
       },
     },
     extend: {
+      fontFamily: {
+        sans: ["var(--font-inter)", ...defaultTheme.fontFamily.sans],
+      },
       borderRadius: {
-        "2xl": "1rem",
+        "2xl": "1.25rem",
+        "3xl": "1.5rem",
       },
       keyframes: {
         "accordion-down": {
@@ -66,9 +71,6 @@ const config: Config = {
       },
       boxShadow: {
         soft: "0 1px 0 rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.08)",
-        "glow-primary": "0 0 40px hsl(239 84% 55% / 0.15)",
-        "card-hover": "0 4px 24px rgba(0,0,0,.08), 0 2px 8px rgba(0,0,0,.04)",
-        "card-elevated": "0 8px 32px rgba(0,0,0,.12), 0 2px 8px rgba(0,0,0,.06)",
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
@@ -79,4 +81,3 @@ const config: Config = {
 };
 
 export default config;
-

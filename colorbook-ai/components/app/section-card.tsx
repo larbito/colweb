@@ -5,16 +5,6 @@ import { Badge } from "@/components/ui/badge";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/**
- * SectionCard - Consistent card styling for dashboard sections
- * 
- * Design system:
- * - 16px radius (rounded-2xl)
- * - 24px padding
- * - 44x44 icon container with 12px radius
- * - 18px section title
- */
-
 interface SectionCardProps {
   title: string;
   description?: string;
@@ -47,48 +37,43 @@ export function SectionCard({
   variant = "default",
 }: SectionCardProps) {
   const variantStyles = {
-    default: "border-border bg-card",
-    bordered: "border-border bg-card",
+    default: "",
+    bordered: "",
     ghost: "border-transparent bg-transparent shadow-none",
   };
 
   return (
-    <Card className={cn(variantStyles[variant], "overflow-hidden rounded-2xl", className)}>
-      <CardHeader className="pb-4 p-6">
+    <Card className={cn(variantStyles[variant], "overflow-hidden", className)}>
+      <CardHeader className="pb-6">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             {Icon && (
               <div className={cn(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+                "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl",
                 iconBg
               )}>
-                <Icon className={cn("h-5 w-5", iconColor)} />
+                <Icon className={cn("h-6 w-6", iconColor)} />
               </div>
             )}
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-lg">{title}</h3>
+                <h3 className="font-semibold text-xl tracking-tight">{title}</h3>
                 {badge && (
-                  <Badge variant={badgeVariant} className="text-[10px] px-2 py-0.5">
-                    {badge}
-                  </Badge>
+                  <Badge variant={badgeVariant} className="text-[10px] px-2 py-0.5">{badge}</Badge>
                 )}
               </div>
               {description && (
-                <p className="text-sm text-muted-foreground">{description}</p>
+                <p className="text-[15px] text-muted-foreground">{description}</p>
               )}
             </div>
           </div>
           {headerActions && (
-            <div className="flex items-center gap-2 shrink-0">
-              {headerActions}
-            </div>
+            <div className="flex items-center gap-2 shrink-0">{headerActions}</div>
           )}
         </div>
       </CardHeader>
       <CardContent className={cn(
-        "p-6 pt-0",
-        noPadding && "p-0 pt-0", 
+        noPadding && "p-0 pt-0",
         contentClassName
       )}>
         {children}
@@ -97,7 +82,6 @@ export function SectionCard({
   );
 }
 
-// Simpler sub-section for grouping form fields
 interface SubSectionProps {
   title?: string;
   description?: string;
@@ -119,7 +103,6 @@ export function SubSection({ title, description, children, className = "" }: Sub
   );
 }
 
-// Compact info card for displaying key-value pairs
 interface InfoCardProps {
   label: string;
   value: React.ReactNode;
@@ -130,11 +113,11 @@ interface InfoCardProps {
 export function InfoCard({ label, value, icon: Icon, className }: InfoCardProps) {
   return (
     <div className={cn(
-      "flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3",
+      "flex items-center gap-3 rounded-[14px] border border-border/50 dark:border-transparent bg-muted/30 p-4",
       className
     )}>
       {Icon && (
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-background">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background">
           <Icon className="h-4 w-4 text-muted-foreground" />
         </div>
       )}

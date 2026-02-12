@@ -11,13 +11,15 @@ const items = [
 
 export function BuiltForStrip() {
   return (
-    <section className="border-y border-border/40 bg-muted/30">
-      <div className="mx-auto max-w-6xl px-6 py-8">
-        <p className="mb-6 text-center text-sm font-medium text-muted-foreground">Built for KDP creators</p>
-        <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
+    <section className="border-y border-border/30">
+      <div className="mx-auto max-w-6xl px-6 py-12">
+        <p className="mb-8 text-center text-sm font-medium uppercase tracking-widest text-muted-foreground/70">
+          Built for KDP creators
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-x-12 gap-y-6">
           {items.map((item) => (
-            <div key={item.label} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
-              <item.icon className="h-4 w-4 text-primary/70" />
+            <div key={item.label} className="flex items-center gap-2.5 text-[15px] text-muted-foreground">
+              <item.icon className="h-[18px] w-[18px]" />
               <span>{item.label}</span>
             </div>
           ))}
@@ -26,4 +28,3 @@ export function BuiltForStrip() {
     </section>
   );
 }
-

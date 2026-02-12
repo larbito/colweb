@@ -3,47 +3,33 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+
 export function FinalCTA() {
   return (
-    <section className="mx-auto max-w-4xl px-6 pb-24">
+    <section className="mx-auto max-w-4xl px-6 py-40">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
-        transition={{ duration: 0.5 }}
-        className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card p-10 text-center shadow-lg shadow-primary/5 backdrop-blur-sm md:p-14"
+        transition={{ duration: 0.6 }}
+        className="text-center"
       >
-        {/* Gradient border effect */}
-        <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/20 via-transparent to-transparent opacity-50" />
+        <h2 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+          Ship your first book today
+        </h2>
 
-        <div className="relative">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
-            <Sparkles className="h-4 w-4" />
-            Ready to create?
-          </div>
+        <p className="mx-auto mb-12 max-w-lg text-lg text-muted-foreground leading-relaxed">
+          Join creators who are publishing KDP coloring books faster with AI-powered workflows.
+        </p>
 
-          <h2 className="mb-4 text-3xl font-bold tracking-tight sm:text-4xl">
-            Ship your first coloring book today
-          </h2>
-
-          <p className="mx-auto mb-8 max-w-lg text-muted-foreground">
-            Join creators who are publishing KDP coloring books faster with AI-powered workflows.
-          </p>
-
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button asChild size="lg" className="rounded-full shadow-md">
-              <Link href="/auth">
-                Start Creating Free <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="lg" className="rounded-full">
-              <Link href="#pricing">View Pricing</Link>
-            </Button>
-          </div>
-        </div>
+        <Button asChild size="lg" className="rounded-full px-10 h-14 text-base">
+          <Link href="/auth">
+            Start Creating Free
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Link>
+        </Button>
       </motion.div>
     </section>
   );
 }
-

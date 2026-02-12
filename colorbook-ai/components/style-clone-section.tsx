@@ -66,9 +66,9 @@ const previewSteps = [
     preview: (
       <div className="bg-white rounded-lg p-3 aspect-[3/4] flex items-center justify-center border border-border/50">
         <div className="text-center">
-                  <FileCheck className="h-8 w-8 mx-auto text-primary mb-2" />
+          <FileCheck className="h-8 w-8 mx-auto text-green-500 mb-2" />
           <p className="text-xs text-muted-foreground">40 Pages</p>
-          <Badge variant="default" className="mt-2 text-[10px]">KDP Ready</Badge>
+          <Badge variant="default" className="mt-2 text-[10px] bg-green-500">KDP Ready</Badge>
         </div>
       </div>
     ),
@@ -87,7 +87,7 @@ export function StyleCloneSection() {
             viewport={{ once: true }}
             transition={{ duration: 0.5 }}
           >
-            <Badge variant="secondary" className="mb-4 bg-primary/10 text-primary border-primary/20">
+            <Badge variant="secondary" className="mb-4">
               ✨ New Feature
             </Badge>
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl mb-4">
@@ -203,12 +203,12 @@ export function StyleCloneSection() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.4, delay: 0.8 }}
-                className="mt-6 p-4 rounded-xl bg-primary/10 border border-primary/20"
+                className="mt-6 p-4 rounded-xl bg-green-500/10 border border-green-500/20"
               >
                 <div className="flex items-center gap-3">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  <ShieldCheck className="h-5 w-5 text-green-500" />
                   <div>
-                    <p className="font-medium text-primary">All Pages Pass Quality Gates</p>
+                    <p className="font-medium text-green-700 dark:text-green-400">All Pages Pass Quality Gates</p>
                     <p className="text-xs text-muted-foreground">Print-safe, no fills, consistent style</p>
                   </div>
                 </div>

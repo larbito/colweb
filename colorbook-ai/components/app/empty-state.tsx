@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { FolderOpen, Plus, Image, Sparkles, FileX } from "lucide-react";
+import { FolderOpen, Plus, Image, FileX } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -34,40 +34,39 @@ export function EmptyState({
   className,
 }: EmptyStateProps) {
   const variantStyles = {
-    default: "px-6 py-16",
-    compact: "px-4 py-8",
-    card: "px-6 py-12 border border-dashed border-border bg-card/30",
+    default: "px-6 py-20",
+    compact: "px-4 py-10",
+    card: "px-6 py-16 border border-dashed border-border/50 bg-card/30 rounded-[20px]",
   };
 
   return (
     <div className={cn(
-      "flex flex-col items-center justify-center rounded-2xl text-center animate-fade-in",
+      "flex flex-col items-center justify-center text-center animate-fade-in",
       variantStyles[variant],
       className
     )}>
       <div className={cn(
-        "mb-5 flex items-center justify-center rounded-2xl bg-muted/80",
-        variant === "compact" ? "h-12 w-12" : "h-20 w-20"
+        "mb-6 flex items-center justify-center rounded-2xl bg-muted",
+        variant === "compact" ? "h-14 w-14" : "h-20 w-20"
       )}>
         <Icon className={cn(
           "text-muted-foreground",
-          variant === "compact" ? "h-5 w-5" : "h-8 w-8"
+          variant === "compact" ? "h-6 w-6" : "h-8 w-8"
         )} />
       </div>
       <h3 className={cn(
-        "mb-1 font-semibold",
-        variant === "compact" ? "text-base" : "text-lg"
+        "mb-2 font-semibold",
+        variant === "compact" ? "text-lg" : "text-xl"
       )}>
         {title}
       </h3>
       <p className={cn(
-        "mb-6 max-w-sm text-muted-foreground",
-        variant === "compact" ? "text-xs" : "text-sm"
+        "mb-8 max-w-sm text-muted-foreground",
+        variant === "compact" ? "text-sm" : "text-[15px]"
       )}>
         {description}
       </p>
-      
-      {/* Actions */}
+
       {(actionLabel || secondaryActionLabel) && (
         <div className="flex items-center gap-3">
           {actionLabel && (actionHref || onAction) && (
@@ -88,9 +87,7 @@ export function EmptyState({
           {secondaryActionLabel && (secondaryActionHref || onSecondaryAction) && (
             secondaryActionHref ? (
               <Button asChild variant="outline" size={variant === "compact" ? "sm" : "default"}>
-                <Link href={secondaryActionHref}>
-                  {secondaryActionLabel}
-                </Link>
+                <Link href={secondaryActionHref}>{secondaryActionLabel}</Link>
               </Button>
             ) : (
               <Button onClick={onSecondaryAction} variant="outline" size={variant === "compact" ? "sm" : "default"}>
@@ -104,7 +101,6 @@ export function EmptyState({
   );
 }
 
-// Preset empty states for common scenarios
 export function NoProjectsEmptyState({ actionHref = "/app/new" }: { actionHref?: string }) {
   return (
     <EmptyState

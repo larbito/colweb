@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
 
 const links = {
   product: [
@@ -20,57 +19,65 @@ const links = {
 
 export function Footer() {
   return (
-    <footer className="border-t border-border/40 bg-muted/30">
-      <div className="mx-auto max-w-6xl px-6 py-16">
-        <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
+    <footer className="border-t border-border/30">
+      <div className="mx-auto max-w-6xl px-6 py-20">
+        <div className="grid gap-12 sm:grid-cols-2 md:grid-cols-4">
           <div>
-            <Link href="/" className="flex items-center gap-2.5 font-bold">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                <Sparkles className="h-5 w-5" />
-              </div>
+            <Link href="/" className="flex items-center gap-2.5 font-semibold text-lg">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="text-primary">
+                <rect width="28" height="28" rx="8" fill="currentColor" fillOpacity="0.15"/>
+                <path d="M8 10C8 8.89543 8.89543 8 10 8H18C19.1046 8 20 8.89543 20 10V18C20 19.1046 19.1046 20 18 20H10C8.89543 20 8 19.1046 8 18V10Z" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M11 12H17M11 15H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
               ColorBook AI
             </Link>
-            <p className="mt-3 text-sm text-muted-foreground">
+            <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
               Generate KDP-ready coloring books with AI.
             </p>
           </div>
 
           <div>
-            <p className="mb-3 text-sm font-medium">Product</p>
-            <ul className="space-y-2 text-sm text-muted-foreground">
+            <p className="mb-4 text-sm font-semibold">Product</p>
+            <ul className="space-y-3 text-[15px] text-muted-foreground">
               {links.product.map((link) => (
                 <li key={link.label}>
-                  <Link href={link.href} className="transition-colors duration-200 hover:text-foreground">{link.label}</Link>
+                  <Link href={link.href} className="transition-colors duration-300 hover:text-foreground">
+                    {link.label}
+                  </Link>
                 </li>
               ))}
             </ul>
           </div>
 
           <div>
-            <p className="mb-3 text-sm font-medium">Company</p>
-            <ul className="space-y-2 text-sm text-muted-foreground">
+            <p className="mb-4 text-sm font-semibold">Company</p>
+            <ul className="space-y-3 text-[15px] text-muted-foreground">
               {links.company.map((link) => (
                 <li key={link.label}>
-                  <Link href={link.href} className="transition-colors duration-200 hover:text-foreground">{link.label}</Link>
+                  <Link href={link.href} className="transition-colors duration-300 hover:text-foreground">
+                    {link.label}
+                  </Link>
                 </li>
               ))}
             </ul>
           </div>
 
           <div>
-            <p className="mb-3 text-sm font-medium">Legal</p>
-            <ul className="space-y-2 text-sm text-muted-foreground">
+            <p className="mb-4 text-sm font-semibold">Legal</p>
+            <ul className="space-y-3 text-[15px] text-muted-foreground">
               {links.legal.map((link) => (
                 <li key={link.label}>
-                  <Link href={link.href} className="transition-colors duration-200 hover:text-foreground">{link.label}</Link>
+                  <Link href={link.href} className="transition-colors duration-300 hover:text-foreground">
+                    {link.label}
+                  </Link>
                 </li>
               ))}
             </ul>
           </div>
         </div>
 
-        <div className="mt-12 border-t border-border pt-8 text-center text-sm text-muted-foreground">
-          © {new Date().getFullYear()} ColorBook AI. All rights reserved.
+        <div className="mt-16 border-t border-border/30 pt-8 text-center text-sm text-muted-foreground">
+          &copy; {new Date().getFullYear()} ColorBook AI. All rights reserved.
         </div>
       </div>
     </footer>

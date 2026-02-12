@@ -3,63 +3,27 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-/**
- * Button Design System - ColorBook AI
- * 
- * Consistent button styling:
- * - Border radius: 12px (rounded-xl)
- * - Heights: 36px (sm), 44px (default), 48px (lg)
- * - 3 main variants: primary, secondary (outline), ghost
- * - Plus: destructive, success, link
- */
-
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 rounded-xl active:scale-[0.98]",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 rounded-[14px]",
   {
     variants: {
       variant: {
-        // Primary: Uses theme primary (black in light, white in dark)
-        default: "bg-primary text-primary-foreground hover:opacity-90 shadow-sm hover:shadow-md transition-shadow",
-        
-        // Destructive: Red variant for dangerous actions
-        destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
-        
-        // Outline/Secondary: Transparent with border
-        outline: "border border-border bg-transparent text-foreground hover:bg-muted hover:border-primary/30",
-        
-        // Secondary: Subtle background
+        default: "bg-primary text-primary-foreground hover:opacity-85",
+        destructive: "bg-destructive text-destructive-foreground hover:opacity-85",
+        outline: "border border-border bg-transparent text-foreground hover:bg-muted",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        
-        // Ghost: No background, no border
         ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
-        
-        // Link: Text only with underline on hover
         link: "text-foreground underline-offset-4 hover:underline p-0 h-auto",
-        
-        // Success: Green for positive actions
-        success: "bg-success text-success-foreground hover:opacity-90",
+        success: "bg-success text-success-foreground hover:opacity-85",
       },
       size: {
-        // Default: 44px height
-        default: "h-11 px-5 text-[15px]",
-        
-        // Small: 36px height
-        sm: "h-9 px-4 text-sm",
-        
-        // Large: 48px height
-        lg: "h-12 px-6 text-base",
-        
-        // Extra small: 32px for compact UI
-        xs: "h-8 px-3 text-xs",
-        
-        // Icon only: 44px square
-        icon: "h-11 w-11",
-        
-        // Icon small: 36px square
-        "icon-sm": "h-9 w-9",
-        
-        // Icon extra small: 32px square
-        "icon-xs": "h-8 w-8",
+        default: "h-12 px-6 text-[15px]",
+        sm: "h-10 px-4 text-sm",
+        lg: "h-14 px-8 text-base",
+        xs: "h-8 px-3 text-xs rounded-lg",
+        icon: "h-12 w-12",
+        "icon-sm": "h-10 w-10",
+        "icon-xs": "h-8 w-8 rounded-lg",
       },
     },
     defaultVariants: {

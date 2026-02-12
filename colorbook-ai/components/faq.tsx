@@ -28,29 +28,31 @@ const faqs = [
 
 export function FAQ() {
   return (
-    <section id="faq" className="mx-auto max-w-2xl px-6 py-24">
-      <div className="mb-16 text-center">
-        <p className="mb-2 text-sm font-medium text-muted-foreground">FAQ</p>
-        <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+    <section id="faq" className="mx-auto max-w-2xl px-6 py-32">
+      <div className="mb-20 text-center">
+        <p className="mb-4 text-sm font-medium uppercase tracking-widest text-muted-foreground/70">
+          FAQ
+        </p>
+        <h2 className="text-4xl font-bold tracking-tight sm:text-5xl">
           Common questions
         </h2>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         {faqs.map((faq, i) => (
           <motion.details
-            key={i}
+            key={faq.q}
             initial={{ opacity: 0, y: 10 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-30px" }}
-            transition={{ duration: 0.3, delay: i * 0.05 }}
-            className="group rounded-xl border border-border/50 bg-card/50 [&_summary::-webkit-details-marker]:hidden"
+            transition={{ duration: 0.4, delay: i * 0.05 }}
+            className="group rounded-[16px] border border-border/50 dark:border-transparent bg-card [&_summary::-webkit-details-marker]:hidden"
           >
-            <summary className="flex cursor-pointer items-center justify-between p-5 font-medium">
+            <summary className="flex cursor-pointer items-center justify-between p-6 text-[15px] font-medium">
               {faq.q}
-              <ChevronDown className="h-5 w-5 text-muted-foreground transition-transform group-open:rotate-180" />
+              <ChevronDown className="h-5 w-5 text-muted-foreground transition-transform duration-300 group-open:rotate-180" />
             </summary>
-            <div className="px-5 pb-5 text-sm leading-relaxed text-muted-foreground">
+            <div className="px-6 pb-6 text-[15px] leading-relaxed text-muted-foreground">
               {faq.a}
             </div>
           </motion.details>
@@ -59,4 +61,3 @@ export function FAQ() {
     </section>
   );
 }
-

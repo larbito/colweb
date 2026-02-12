@@ -16,7 +16,6 @@ import {
 import { formatDate } from "@/lib/mock-data";
 import type { Project } from "@/lib/mock-data";
 
-// Extended project type to support DB-backed projects
 interface DBProject {
   id: string;
   name: string;
@@ -35,7 +34,6 @@ interface ProjectCardProps {
   project: Project | DBProject;
 }
 
-// Helper to format relative date
 function formatRelativeDate(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
@@ -43,7 +41,7 @@ function formatRelativeDate(dateString: string): string {
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
-  
+
   if (diffMins < 1) return "just now";
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
@@ -51,7 +49,6 @@ function formatRelativeDate(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-// Map old project status to display status
 function normalizeStatus(status: string): "draft" | "in_progress" | "complete" {
   switch (status) {
     case "ready":
@@ -68,15 +65,14 @@ function normalizeStatus(status: string): "draft" | "in_progress" | "complete" {
 }
 
 export function ProjectCard({ project }: ProjectCardProps) {
-  // Handle both old mock format and new DB format
   const isDbProject = !('pages' in project);
-  
+
   let readyPages: number;
   let totalPages: number;
   let title: string;
   let status: "draft" | "in_progress" | "complete";
   let canResume: boolean;
-  
+
   if (isDbProject) {
     const dbProject = project as DBProject;
     readyPages = dbProject.imagesCount || 0;
@@ -92,21 +88,21 @@ export function ProjectCard({ project }: ProjectCardProps) {
     status = normalizeStatus(mockProject.status);
     canResume = false;
   }
-  
+
   const updatedAt = project.updatedAt;
 
   return (
-    <Card className="group border-border transition-all duration-300 hover:border-foreground/20 hover:shadow-lg">
-      <CardContent className="p-5">
-        <div className="mb-3 flex items-start justify-between">
+    <Card className="group hover:shadow-lg dark:hover:bg-card/80 transition-all duration-300">
+      <CardContent className="p-6">
+        <div className="mb-4 flex items-start justify-between">
           <div className="flex-1">
             <Link
               href={isDbProject ? `/app/create?projectId=${project.id}` : `/app/projects/${project.id}`}
-              className="font-semibold hover:text-primary"
+              className="font-semibold text-[15px] hover:text-foreground/80 transition-colors"
             >
               {title}
             </Link>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="text-xs">
                 {isDbProject ? "US Letter" : (project as Project).trimSize}
               </Badge>
@@ -120,7 +116,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100">
+              <Button variant="ghost" size="icon-xs" className="opacity-0 group-hover:opacity-100 transition-opacity">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -150,8 +146,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
           <div className="mb-3">
             <ProgressBar value={readyPages} max={totalPages} showLabel />
             {isDbProject && (
-              <div className="mt-1 text-xs text-muted-foreground">
-                {(project as DBProject).promptsCount || 0} prompts • {readyPages} images
+              <div className="mt-1.5 text-xs text-muted-foreground">
+                {(project as DBProject).promptsCount || 0} prompts &middot; {readyPages} images
               </div>
             )}
           </div>
@@ -165,4 +161,3 @@ export function ProjectCard({ project }: ProjectCardProps) {
     </Card>
   );
 }
-
