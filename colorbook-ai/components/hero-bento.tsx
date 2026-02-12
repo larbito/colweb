@@ -16,8 +16,8 @@ export function HeroBento() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <span className="inline-flex items-center gap-2 rounded-full bg-accent/10 border border-accent/20 px-4 py-1.5 text-sm font-medium text-accent-foreground dark:text-accent mb-6">
-              <Sparkles className="h-3.5 w-3.5" />
+            <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-4 py-2 text-sm font-semibold text-primary mb-6">
+              <Sparkles className="h-4 w-4" />
               AI-Powered Generation
             </span>
           </motion.div>
@@ -26,10 +26,10 @@ export function HeroBento() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
-            className="mb-6 text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl"
+            className="mb-6 text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl"
           >
             Create KDP coloring books
-            <span className="text-muted-foreground"> in minutes</span>
+            <span className="text-primary"> in minutes</span>
           </motion.h1>
 
           <motion.p
@@ -66,7 +66,7 @@ export function HeroBento() {
         <div className="relative hidden min-h-[450px] lg:block">
           
           {/* Gradient blur background */}
-          <div className="absolute -inset-4 bg-gradient-to-br from-accent/15 via-transparent to-transparent blur-3xl" />
+          <div className="absolute -inset-4 bg-gradient-to-br from-primary/20 via-transparent to-primary/10 blur-3xl" />
           
           {/* Card 1: Size Presets */}
           <motion.div
@@ -76,10 +76,10 @@ export function HeroBento() {
             whileHover={{ y: -5, transition: { duration: 0.2 } }}
             className="absolute left-0 top-8 z-10 w-56"
           >
-            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-md transition-all hover:border-accent/30">
+            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-md transition-all hover:border-primary/30">
               <div className="mb-3 flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-500/10">
-                  <Ruler className="h-4 w-4 text-cyan-500" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
+                  <Ruler className="h-4 w-4 text-primary" />
                 </div>
                 <p className="text-sm font-semibold">Size Presets</p>
               </div>
@@ -101,10 +101,10 @@ export function HeroBento() {
             whileHover={{ y: -5, transition: { duration: 0.2 } }}
             className="absolute right-0 top-0 z-20 w-64"
           >
-            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-md transition-all hover:border-blue-500/30">
+            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-md transition-all hover:border-primary/30">
               <div className="mb-3 flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10">
-                  <FileText className="h-4 w-4 text-blue-500" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
+                  <FileText className="h-4 w-4 text-primary" />
                 </div>
                 <p className="text-sm font-semibold">Story Prompts</p>
               </div>
@@ -130,10 +130,10 @@ export function HeroBento() {
             whileHover={{ y: -5, transition: { duration: 0.2 } }}
             className="absolute bottom-0 left-16 z-30 w-52"
           >
-            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-md transition-all hover:border-accent/30">
+            <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-md transition-all hover:border-primary/30">
               <div className="mb-3 flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/10">
-                  <Image className="h-4 w-4 text-accent" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
+                  <Image className="h-4 w-4 text-primary" />
                 </div>
                 <p className="text-sm font-semibold">Preview</p>
               </div>

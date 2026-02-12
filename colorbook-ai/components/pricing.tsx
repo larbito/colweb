@@ -50,10 +50,10 @@ export function Pricing() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-50px" }}
             transition={{ duration: 0.4, delay: i * 0.1 }}
-            className={`relative rounded-2xl border p-6 transition-all duration-300 hover:shadow-xl ${
+            className={`relative rounded-2xl border p-6 transition-all duration-300 hover:shadow-xl backdrop-blur-sm ${
               tier.popular
-                ? "border-primary/50 bg-primary/[0.03] shadow-lg hover:border-primary/70"
-                : "border-border/50 bg-card/50 hover:border-foreground/20"
+                ? "border-primary/50 bg-primary/[0.06] shadow-lg shadow-primary/5 hover:border-primary/70"
+                : "border-border/50 bg-card/50 hover:border-primary/20"
             }`}
           >
             {tier.popular && (

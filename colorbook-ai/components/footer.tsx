@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Sparkles } from "lucide-react";
 
 const links = {
   product: [
@@ -23,12 +24,10 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-6 py-16">
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           <div>
-            <Link href="/" className="flex items-center gap-2 font-semibold">
-              <svg width="24" height="24" viewBox="0 0 28 28" fill="none" className="text-primary">
-                <rect width="28" height="28" rx="8" fill="currentColor" fillOpacity="0.15"/>
-                <path d="M8 10C8 8.89543 8.89543 8 10 8H18C19.1046 8 20 8.89543 20 10V18C20 19.1046 19.1046 20 18 20H10C8.89543 20 8 19.1046 8 18V10Z" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M11 12H17M11 15H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
+            <Link href="/" className="flex items-center gap-2.5 font-bold">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <Sparkles className="h-5 w-5" />
+              </div>
               ColorBook AI
             </Link>
             <p className="mt-3 text-sm text-muted-foreground">

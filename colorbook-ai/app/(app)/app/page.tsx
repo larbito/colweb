@@ -16,6 +16,7 @@ import {
   Clock,
   Play,
   Download,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -34,15 +35,14 @@ interface DBProject {
 }
 
 /**
- * Premium Dashboard - Clean, symmetric, professional
- * Linear/Vercel style design
+ * Premium Dashboard - Professional SaaS design
+ * Gradient mesh background, elevated cards, clear hierarchy
  */
 export default function DashboardPage() {
   const [userId, setUserId] = useState<string>("");
   const [projects, setProjects] = useState<DBProject[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Initialize userId and fetch projects
   useEffect(() => {
     let id = localStorage.getItem("colweb_user_id");
     if (!id) {
@@ -68,7 +68,6 @@ export default function DashboardPage() {
     fetchProjects();
   }, []);
   
-  // Compute stats
   const recentProjects = projects.slice(0, 6);
   const stats = {
     totalProjects: projects.length,
@@ -76,7 +75,6 @@ export default function DashboardPage() {
     exports: projects.filter(p => p.status === "ready").length,
   };
   
-  // Format relative time
   const formatRelativeTime = (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -92,104 +90,116 @@ export default function DashboardPage() {
   };
 
   return (
-    <main className="flex-1">
+    <main className="flex-1 bg-gradient-mesh min-h-screen">
       <PageContainer maxWidth="2xl">
-        <div className="py-8 space-y-12 animate-fade-in">
+        <div className="py-10 space-y-12">
           
-          {/* Page Header */}
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground mt-2 text-base">Create and manage your coloring books</p>
+          {/* Hero Header */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                <Sparkles className="h-5 w-5 text-primary" />
+              </div>
+              <span className="text-sm font-medium text-primary">Welcome back</span>
+            </div>
+            <h1 className="text-4xl font-bold tracking-tight">
+              Dashboard
+            </h1>
+            <p className="text-lg text-muted-foreground max-w-xl">
+              Create and manage your AI-powered coloring books. Start a new project or continue where you left off.
+            </p>
           </div>
 
-          {/* Quick Create - Two Big Cards */}
-          <section className="stagger-children">
-            <h2 className="text-xs font-semibold text-muted-foreground mb-4 uppercase tracking-widest">
-              Quick Create
+          {/* Quick Create - Premium Cards */}
+          <section>
+            <h2 className="text-sm font-semibold text-muted-foreground mb-5 uppercase tracking-widest">
+              Create New
             </h2>
-            <div className="grid gap-5 md:grid-cols-2">
-              {/* Coloring Book Card */}
+            <div className="grid gap-6 md:grid-cols-2">
               <Link href="/app/create" className="group block">
-                <Card className="h-full border-border hover:border-foreground/25 hover:shadow-lg transition-all duration-300 overflow-hidden">
-                  <CardContent className="p-6 flex items-center gap-5">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-muted group-hover:bg-primary/10 group-hover:scale-105 transition-all duration-300">
-                      <PenTool className="h-6 w-6 text-foreground" />
+                <Card className="h-full overflow-hidden border-0 bg-card/80 backdrop-blur-xl shadow-card-hover hover:shadow-card-elevated hover:shadow-glow-primary transition-all duration-300 group-hover:-translate-y-1">
+                  <CardContent className="p-8">
+                    <div className="flex items-start gap-6">
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 group-hover:from-primary/30 group-hover:to-primary/10 transition-colors">
+                        <PenTool className="h-8 w-8 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-xl font-bold text-foreground mb-1">Coloring Book</h3>
+                        <p className="text-muted-foreground mb-6">
+                          Full coloring books with AI-generated illustrations, storybook mode, and KDP-ready export.
+                        </p>
+                        <Button className="group-hover:bg-primary/90">
+                          Get Started <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground text-lg">Coloring Book</h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Full coloring books with AI-generated illustrations
-                      </p>
-                    </div>
-                    <Button size="sm" className="shrink-0 group-hover:translate-x-1 transition-transform">
-                      Start <ArrowRight className="ml-1 h-4 w-4" />
-                    </Button>
                   </CardContent>
                 </Card>
               </Link>
 
-              {/* Quote Book Card */}
               <Link href="/app/quote-book" className="group block">
-                <Card className="h-full border-border hover:border-foreground/25 hover:shadow-lg transition-all duration-300 overflow-hidden">
-                  <CardContent className="p-6 flex items-center gap-5">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-muted group-hover:bg-primary/10 group-hover:scale-105 transition-all duration-300">
-                      <Quote className="h-6 w-6 text-foreground" />
+                <Card className="h-full overflow-hidden border-0 bg-card/80 backdrop-blur-xl shadow-card-hover hover:shadow-card-elevated hover:shadow-glow-primary transition-all duration-300 group-hover:-translate-y-1">
+                  <CardContent className="p-8">
+                    <div className="flex items-start gap-6">
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 group-hover:from-primary/30 group-hover:to-primary/10 transition-colors">
+                        <Quote className="h-8 w-8 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-xl font-bold text-foreground mb-1">Quote Book</h3>
+                        <p className="text-muted-foreground mb-6">
+                          Typography-based pages with decorative frames, perfect for motivation or gift books.
+                        </p>
+                        <Button className="group-hover:bg-primary/90">
+                          Get Started <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground text-lg">Quote Book</h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Typography-based pages with decorative frames
-                      </p>
-                    </div>
-                    <Button size="sm" className="shrink-0 group-hover:translate-x-1 transition-transform">
-                      Start <ArrowRight className="ml-1 h-4 w-4" />
-                    </Button>
                   </CardContent>
                 </Card>
               </Link>
             </div>
           </section>
 
-          {/* Stats Row */}
+          {/* Stats - Elevated Row */}
           <section>
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-              <Card className="border-border hover:border-foreground/15 transition-colors">
+              <Card className="border-0 bg-card/60 backdrop-blur-sm shadow-soft overflow-hidden">
                 <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
-                      <FolderOpen className="h-6 w-6 text-muted-foreground" />
-                    </div>
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-3xl font-semibold tabular-nums">{stats.totalProjects}</p>
-                      <p className="text-sm text-muted-foreground mt-0.5">Projects</p>
+                      <p className="text-4xl font-bold tabular-nums text-foreground">{stats.totalProjects}</p>
+                      <p className="text-sm font-medium text-muted-foreground mt-1">Projects</p>
+                    </div>
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                      <FolderOpen className="h-7 w-7 text-primary" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="border-border hover:border-foreground/15 transition-colors">
+              <Card className="border-0 bg-card/60 backdrop-blur-sm shadow-soft overflow-hidden">
                 <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
-                      <Image className="h-6 w-6 text-muted-foreground" />
-                    </div>
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-3xl font-semibold tabular-nums">{stats.totalPages}</p>
-                      <p className="text-sm text-muted-foreground mt-0.5">Pages Generated</p>
+                      <p className="text-4xl font-bold tabular-nums text-foreground">{stats.totalPages}</p>
+                      <p className="text-sm font-medium text-muted-foreground mt-1">Pages Generated</p>
+                    </div>
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                      <Image className="h-7 w-7 text-primary" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="border-border hover:border-foreground/15 transition-colors">
+              <Card className="border-0 bg-card/60 backdrop-blur-sm shadow-soft overflow-hidden">
                 <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
-                      <FileText className="h-6 w-6 text-muted-foreground" />
-                    </div>
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-3xl font-semibold tabular-nums">{stats.exports}</p>
-                      <p className="text-sm text-muted-foreground mt-0.5">PDFs Exported</p>
+                      <p className="text-4xl font-bold tabular-nums text-foreground">{stats.exports}</p>
+                      <p className="text-sm font-medium text-muted-foreground mt-1">PDFs Exported</p>
+                    </div>
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                      <FileText className="h-7 w-7 text-primary" />
                     </div>
                   </div>
                 </CardContent>
@@ -199,8 +209,8 @@ export default function DashboardPage() {
 
           {/* Recent Projects */}
           <section>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-foreground">
                 Recent Projects
               </h2>
               {projects.length > 0 && (
@@ -213,28 +223,28 @@ export default function DashboardPage() {
             </div>
 
             {loading ? (
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <Skeleton key={i} className="h-24 w-full rounded-lg" />
+                  <Skeleton key={i} className="h-32 w-full rounded-2xl" />
                 ))}
               </div>
             ) : recentProjects.length === 0 ? (
-              <Card className="border-border border-dashed">
-                <CardContent className="p-16 text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted/80 mx-auto mb-6">
-                    <FolderOpen className="h-8 w-8 text-muted-foreground" />
+              <Card className="border-2 border-dashed border-primary/20 bg-card/40 overflow-hidden">
+                <CardContent className="p-20 text-center">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-6">
+                    <FolderOpen className="h-10 w-10 text-primary" />
                   </div>
-                  <h3 className="font-semibold text-foreground text-lg mb-2">No projects yet</h3>
-                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
-                    Create your first coloring book to get started
+                  <h3 className="font-semibold text-foreground text-xl mb-2">No projects yet</h3>
+                  <p className="text-muted-foreground mb-8 max-w-sm mx-auto text-base">
+                    Create your first coloring book and start selling on Amazon KDP.
                   </p>
-                  <Button asChild size="lg">
-                    <Link href="/app/create">Create Book</Link>
+                  <Button asChild size="lg" className="px-8">
+                    <Link href="/app/create">Create Your First Book</Link>
                   </Button>
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {recentProjects.map((project) => (
                   <ProjectRow key={project.id} project={project} formatTime={formatRelativeTime} />
                 ))}
@@ -248,7 +258,6 @@ export default function DashboardPage() {
   );
 }
 
-// Project Row Component
 function ProjectRow({ 
   project, 
   formatTime 
@@ -270,13 +279,13 @@ function ProjectRow({
   }[project.status] || "Draft";
   
   const statusColor = {
-    draft: "text-muted-foreground",
-    generating: "text-yellow-500",
-    partial: "text-yellow-500",
-    ready: "text-green-500",
-    failed: "text-red-500",
-    expired: "text-muted-foreground",
-  }[project.status] || "text-muted-foreground";
+    draft: "bg-muted text-muted-foreground",
+    generating: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    partial: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    ready: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+    failed: "bg-red-500/15 text-red-600 dark:text-red-400",
+    expired: "bg-muted text-muted-foreground",
+  }[project.status] || "bg-muted text-muted-foreground";
 
   const href = project.status === "ready" 
     ? `/app/projects/${project.id}`
@@ -284,52 +293,48 @@ function ProjectRow({
 
   return (
     <Link href={href} className="group block">
-      <Card className="border-border hover:border-foreground/25 hover:shadow-md transition-all duration-300">
+      <Card className="border-0 bg-card/60 backdrop-blur-sm shadow-soft hover:bg-card/80 hover:shadow-card-hover transition-all duration-300 overflow-hidden">
         <CardContent className="p-5">
-          <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="flex items-start justify-between gap-3 mb-4">
             <div className="flex-1 min-w-0">
-              <h3 className="font-medium text-foreground truncate group-hover:text-foreground/80">
+              <h3 className="font-semibold text-foreground truncate group-hover:text-primary transition-colors">
                 {project.name || "Untitled Project"}
               </h3>
-              <div className="flex items-center gap-2 mt-1">
-                <span className={cn("text-xs font-medium", statusColor)}>
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                <span className={cn("text-xs font-medium px-2.5 py-1 rounded-full", statusColor)}>
                   {statusLabel}
                 </span>
-                <span className="text-xs text-muted-foreground">•</span>
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Clock className="h-3 w-3" />
                   {formatTime(project.updated_at)}
                 </span>
               </div>
             </div>
-            
-            {/* Action Button */}
             {project.status === "ready" ? (
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+              <Button size="sm" variant="ghost" className="h-9 w-9 p-0 rounded-xl">
                 <Download className="h-4 w-4" />
               </Button>
             ) : project.canResume ? (
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+              <Button size="sm" variant="ghost" className="h-9 w-9 p-0 rounded-xl">
                 <Play className="h-4 w-4" />
               </Button>
             ) : null}
           </div>
 
-          {/* Progress Bar */}
-          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-            <div 
-              className={cn(
-                "h-full rounded-full transition-all duration-300",
-                project.status === "ready" ? "bg-green-500" : "bg-foreground/50"
-              )}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <div className="flex justify-between mt-1.5">
-            <span className="text-xs text-muted-foreground">
-              {project.images_generated_count}/{project.pages_requested} pages
-            </span>
-            <span className="text-xs text-muted-foreground">{progress}%</span>
+          <div className="space-y-2">
+            <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <div 
+                className={cn(
+                  "h-full rounded-full transition-all duration-500",
+                  project.status === "ready" ? "bg-emerald-500" : "bg-primary"
+                )}
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>{project.images_generated_count}/{project.pages_requested} pages</span>
+              <span className="font-medium">{progress}%</span>
+            </div>
           </div>
         </CardContent>
       </Card>

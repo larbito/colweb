@@ -19,13 +19,13 @@ const buttonVariants = cva(
     variants: {
       variant: {
         // Primary: Uses theme primary (black in light, white in dark)
-        default: "bg-primary text-primary-foreground hover:opacity-90 shadow-sm",
+        default: "bg-primary text-primary-foreground hover:opacity-90 shadow-sm hover:shadow-md transition-shadow",
         
         // Destructive: Red variant for dangerous actions
         destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
         
         // Outline/Secondary: Transparent with border
-        outline: "border border-border bg-transparent text-foreground hover:bg-muted",
+        outline: "border border-border bg-transparent text-foreground hover:bg-muted hover:border-primary/30",
         
         // Secondary: Subtle background
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Menu } from "lucide-react";
+import { Menu, Sparkles } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -36,12 +36,10 @@ export function Navbar() {
       )}
     >
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-2.5 font-semibold">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="text-primary">
-            <rect width="28" height="28" rx="8" fill="currentColor" fillOpacity="0.15"/>
-            <path d="M8 10C8 8.89543 8.89543 8 10 8H18C19.1046 8 20 8.89543 20 10V18C20 19.1046 19.1046 20 18 20H10C8.89543 20 8 19.1046 8 18V10Z" stroke="currentColor" strokeWidth="1.5"/>
-            <path d="M11 12H17M11 15H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
+        <Link href="/" className="flex items-center gap-2.5 font-bold">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <Sparkles className="h-5 w-5" />
+          </div>
           <span>ColorBook AI</span>
         </Link>
 

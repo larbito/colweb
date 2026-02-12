@@ -12,7 +12,7 @@ export function FinalCTA() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
         transition={{ duration: 0.5 }}
-        className="relative overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-br from-primary/5 via-card to-card p-10 text-center shadow-lg md:p-14"
+        className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card p-10 text-center shadow-lg shadow-primary/5 backdrop-blur-sm md:p-14"
       >
         {/* Gradient border effect */}
         <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/20 via-transparent to-transparent opacity-50" />
@@ -23,7 +23,7 @@ export function FinalCTA() {
             Ready to create?
           </div>
 
-          <h2 className="mb-4 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="mb-4 text-3xl font-bold tracking-tight sm:text-4xl">
             Ship your first coloring book today
           </h2>
 

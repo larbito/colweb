@@ -46,31 +46,31 @@ const features = [
   },
 ];
 
-// Tint color mappings (max 4 colors)
+// Tint color mappings - primary palette for cohesive brand
 const tintStyles = {
   emerald: {
-    bg: "bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]",
-    border: "border-emerald-500/10 dark:border-emerald-500/15",
-    iconBg: "bg-emerald-500/10",
-    iconColor: "text-emerald-600 dark:text-emerald-400",
+    bg: "bg-primary/[0.06] dark:bg-primary/[0.08]",
+    border: "border-primary/10 dark:border-primary/15",
+    iconBg: "bg-primary/10",
+    iconColor: "text-primary",
   },
   blue: {
-    bg: "bg-blue-500/[0.06] dark:bg-blue-500/[0.08]",
-    border: "border-blue-500/10 dark:border-blue-500/15",
-    iconBg: "bg-blue-500/10",
-    iconColor: "text-blue-600 dark:text-blue-400",
+    bg: "bg-primary/[0.05] dark:bg-primary/[0.07]",
+    border: "border-primary/10 dark:border-primary/15",
+    iconBg: "bg-primary/10",
+    iconColor: "text-primary",
   },
   amber: {
-    bg: "bg-amber-500/[0.06] dark:bg-amber-500/[0.08]",
-    border: "border-amber-500/10 dark:border-amber-500/15",
-    iconBg: "bg-amber-500/10",
-    iconColor: "text-amber-600 dark:text-amber-400",
+    bg: "bg-primary/[0.04] dark:bg-primary/[0.06]",
+    border: "border-primary/10 dark:border-primary/15",
+    iconBg: "bg-primary/10",
+    iconColor: "text-primary",
   },
   neutral: {
-    bg: "bg-gray-500/[0.04] dark:bg-gray-500/[0.06]",
-    border: "border-gray-500/10 dark:border-gray-500/15",
-    iconBg: "bg-gray-500/10",
-    iconColor: "text-gray-600 dark:text-gray-400",
+    bg: "bg-muted/50 dark:bg-muted/30",
+    border: "border-border",
+    iconBg: "bg-primary/10",
+    iconColor: "text-primary",
   },
 };
 

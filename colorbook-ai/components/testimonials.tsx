@@ -12,7 +12,7 @@ const testimonials = [
     tag: "Beta user",
     quote: "Finally, a tool that understands the KDP workflow. I went from idea to published book in a single afternoon.",
     avatar: "👩‍🎨",
-    bgColor: "bg-pink-100 dark:bg-pink-950",
+    bgColor: "bg-primary/10",
   },
   {
     name: "David L.",
@@ -20,7 +20,7 @@ const testimonials = [
     tag: "Early adopter",
     quote: "The story-mode prompts are a game changer. My coloring books now have actual narratives that kids love.",
     avatar: "👨‍💼",
-    bgColor: "bg-blue-100 dark:bg-blue-950",
+    bgColor: "bg-primary/10",
   },
   {
     name: "Emily R.",
@@ -28,7 +28,7 @@ const testimonials = [
     tag: "Beta user",
     quote: "I've tried other AI tools, but this is the only one that gives me consistent, print-ready line art every time.",
     avatar: "👩‍🏫",
-    bgColor: "bg-purple-100 dark:bg-purple-950",
+    bgColor: "bg-primary/10",
   },
 ];
 

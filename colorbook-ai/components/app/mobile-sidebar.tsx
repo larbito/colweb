@@ -77,10 +77,10 @@ export function MobileSidebar() {
         </button>
         
         <Link href="/app" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-background">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Sparkles className="h-4 w-4" />
           </div>
-          <span className="font-semibold text-foreground">ColorBook AI</span>
+          <span className="font-bold text-foreground">ColorBook AI</span>
         </Link>
       </header>
 
@@ -104,10 +104,10 @@ export function MobileSidebar() {
           {/* Header */}
           <div className="flex h-14 items-center justify-between border-b border-border px-4">
             <Link href="/app" className="flex items-center gap-2" onClick={onClose}>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-background">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <Sparkles className="h-4 w-4" />
               </div>
-              <span className="font-semibold text-foreground">ColorBook AI</span>
+              <span className="font-bold text-foreground">ColorBook AI</span>
             </Link>
             
             <button
@@ -133,13 +133,13 @@ export function MobileSidebar() {
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                       active 
-                        ? "bg-muted text-foreground" 
+                        ? "bg-primary/10 text-primary" 
                         : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                     )}
                   >
                     <item.icon className={cn(
                       "h-[18px] w-[18px]",
-                      active ? "text-foreground" : "text-muted-foreground"
+                      active ? "text-primary" : "text-muted-foreground"
                     )} />
                     <span>{item.label}</span>
                   </Link>

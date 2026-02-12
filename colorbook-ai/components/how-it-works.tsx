@@ -48,12 +48,12 @@ export function HowItWorks() {
               transition={{ duration: 0.4, delay: i * 0.15 }}
               className="flex items-start gap-6"
             >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-card text-sm font-semibold shadow-sm">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/5 text-sm font-semibold text-primary shadow-sm">
                 {item.step}
               </div>
               <div className="pt-2">
                 <div className="mb-2 flex items-center gap-2">
-                  <item.icon className="h-4 w-4 text-muted-foreground" />
+                  <item.icon className="h-4 w-4 text-primary" />
                   <h3 className="font-semibold">{item.title}</h3>
                 </div>
                 <p className="text-muted-foreground">{item.description}</p>

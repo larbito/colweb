@@ -6,6 +6,9 @@
    ============================================================ */
 
 @theme {
+  /* Font - Plus Jakarta Sans (from next/font variable) */
+  --font-sans: var(--font-plus-jakarta), ui-sans-serif, system-ui, sans-serif;
+  
   /* Core colors */
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
@@ -47,8 +50,8 @@
   --popover: 0 0% 100%;
   --popover-foreground: 0 0% 9%;
   
-  /* Primary - Black/White system */
-  --primary: 0 0% 9%;
+  /* Primary - Deep indigo for premium feel */
+  --primary: 239 84% 48%;
   --primary-foreground: 0 0% 100%;
   
   /* Secondary */
@@ -59,9 +62,9 @@
   --muted: 0 0% 96%;
   --muted-foreground: 0 0% 45%;
   
-  /* Accent - Silver/Off-white (not purple) */
-  --accent: 0 0% 92%;
-  --accent-foreground: 0 0% 9%;
+  /* Accent - Soft indigo tint */
+  --accent: 239 84% 96%;
+  --accent-foreground: 239 84% 35%;
   
   /* Destructive */
   --destructive: 0 72% 51%;
@@ -128,9 +131,9 @@
   --popover-foreground: 210 17% 90%;
   --panel: 212 24% 11%;            /* #0F1620 */
   
-  /* Primary - White buttons with black text */
-  --primary: 0 0% 100%;            /* Pure white */
-  --primary-foreground: 214 27% 6%; /* Dark background */
+  /* Primary - Vibrant indigo for dark mode */
+  --primary: 239 84% 55%;
+  --primary-foreground: 0 0% 100%;
   
   /* Secondary */
   --secondary: 213 20% 14%;
@@ -159,7 +162,7 @@
   /* Borders - subtle white 6% */
   --border: 213 15% 16%;           /* rgba(255,255,255,0.06) */
   --input: 213 15% 16%;
-  --ring: 0 0% 60%;
+  --ring: 239 84% 55%;
   
   /* Sidebar - Slightly darker */
   --sidebar: 214 27% 5%;           /* Darker than page */
@@ -883,13 +886,37 @@ body {
 }
 
 /* ============================================================
+   GRADIENT BACKGROUNDS - Premium mesh
+   ============================================================ */
+
+.bg-gradient-mesh {
+  background: 
+    radial-gradient(ellipse 80% 50% at 50% -20%, hsl(239 84% 65% / 0.15), transparent 50%),
+    radial-gradient(ellipse 60% 40% at 100% 80%, hsl(239 84% 55% / 0.08), transparent 50%),
+    radial-gradient(ellipse 40% 30% at 0% 80%, hsl(239 84% 55% / 0.06), transparent 50%),
+    hsl(var(--background));
+}
+
+.dark .bg-gradient-mesh {
+  background: 
+    radial-gradient(ellipse 80% 50% at 50% -20%, hsl(239 84% 55% / 0.12), transparent 50%),
+    radial-gradient(ellipse 60% 40% at 100% 80%, hsl(239 84% 55% / 0.06), transparent 50%),
+    radial-gradient(ellipse 40% 30% at 0% 80%, hsl(239 84% 55% / 0.04), transparent 50%),
+    hsl(var(--background));
+}
+
+.bg-card-gradient {
+  background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--card) / 0.8) 100%);
+}
+
+/* ============================================================
    LANDING PAGE SPECIFIC
    ============================================================ */
 
 .hero-gradient {
   background: radial-gradient(
     ellipse 80% 50% at 50% -10%,
-    hsl(var(--muted) / 0.3),
+    hsl(239 84% 65% / 0.2),
     transparent 70%
   );
 }
