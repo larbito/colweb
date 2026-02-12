@@ -118,6 +118,7 @@ interface ValidationDebug {
 interface PageState extends PagePromptItem {
   status: PageStatus;
   imageBase64?: string;
+  imageUrl?: string; // For batch mode - signed URL from storage
   error?: string;
   errorCode?: string;
   isEditing?: boolean;
@@ -311,6 +312,8 @@ function CreateColoringBookPageContent() {
   
   // Step 3: Generation
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationMode, setGenerationMode] = useState<"realtime" | "batch">("realtime");
+  const [batchId, setBatchId] = useState<string | null>(null);
   const [batchPause, setBatchPause] = useState<BatchPauseInfo>({ isPaused: false });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [characterIdentityProfile, setCharacterIdentityProfile] = useState<any>(null);
@@ -405,7 +408,7 @@ function CreateColoringBookPageContent() {
   const notDoneCount = pages.length - doneCount;
   const enhancedCount = pages.filter(p => p.enhanceStatus === "enhanced").length;
   const processedCount = pages.filter(p => p.finalLetterStatus === "done").length;
-  const imagesWithData = pages.filter(p => p.imageBase64);
+  const imagesWithData = pages.filter(p => p.imageBase64 || p.imageUrl);
   const pagesWithWarnings = pages.filter(p => p.warning || (p.validation && !p.validation.passed)).length;
 
   // ============================================================
@@ -556,6 +559,162 @@ function CreateColoringBookPageContent() {
     }
   };
   
+  /**
+   * Generate images via OpenAI Batch API (50% cheaper, slower)
+   */
+  const generateAllImagesBatch = async (pagesToGenerate: PageState[]) => {
+    if (!projectId || !userId) {
+      toast.error("Project not created yet. Please wait or refresh.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setCurrentStep(3);
+    setBatchId(null);
+
+    setPages(prev => prev.map(p => 
+      pagesToGenerate.some(pg => pg.page === p.page)
+        ? { ...p, status: "queued" as PageStatus }
+        : p
+    ));
+
+    setJobProgress({
+      totalItems: pagesToGenerate.length,
+      completedItems: 0,
+      phase: "generating",
+      startedAt: Date.now(),
+    });
+
+    try {
+      const createRes = await fetch("/api/batch/openai/create-image-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          userId,
+          pages: pagesToGenerate.map(p => ({
+            pageIndex: p.page,
+            prompt: p.prompt,
+            title: p.title,
+          })),
+          size: getImageSize(),
+          isStorybookMode: bookType === "storybook",
+          characterProfile: bookType === "storybook" ? characterIdentityProfile : undefined,
+          complexity,
+        }),
+      });
+
+      const createData = await safeJsonParse(createRes);
+      if (!createRes.ok) {
+        throw new Error(createData.error || "Failed to create batch");
+      }
+
+      const { batchId: newBatchId } = createData;
+      setBatchId(newBatchId);
+
+      toast.info("Batch submitted! Polling for completion (check back in a few minutes).");
+
+      // Poll every 4 seconds
+      const pollInterval = 4000;
+      let statusData: { status: string; completed: number; total: number } | null = null;
+
+      const poll = async (): Promise<void> => {
+        const statusRes = await fetch(`/api/batch/openai/status?batchId=${newBatchId}`);
+        statusData = await safeJsonParse(statusRes);
+        if (!statusRes.ok) throw new Error((statusData as { error?: string })?.error || "Failed to get status");
+
+        setJobProgress(prev => ({
+          ...prev,
+          completedItems: statusData!.completed,
+          failedCount: statusData!.total - statusData!.completed,
+        }));
+
+        setPages(prev => prev.map(p => {
+          const isTarget = pagesToGenerate.some(pg => pg.page === p.page);
+          if (!isTarget) return p;
+          const status = statusData!.status;
+          if (status === "completed" || status === "finalizing") {
+            return { ...p, status: "generating" as PageStatus }; // Will update after finalize
+          }
+          if (status === "in_progress") {
+            return { ...p, status: "generating" as PageStatus };
+          }
+          return { ...p, status: "queued" as PageStatus };
+        }));
+
+        if (statusData!.status === "completed") {
+          const finalizeRes = await fetch("/api/batch/openai/finalize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ batchId: newBatchId, projectId, userId }),
+          });
+          const finalizeData = await safeJsonParse(finalizeRes);
+          if (!finalizeRes.ok) {
+            throw new Error(finalizeData.error || "Failed to finalize batch");
+          }
+
+          const { updatedPages: updated, failedPageIndexes } = finalizeData;
+
+          setPages(prev => prev.map(p => {
+            const isTarget = pagesToGenerate.some(pg => pg.page === p.page);
+            if (!isTarget) return p;
+            const u = updated.find((x: { pageIndex: number }) => x.pageIndex === p.page);
+            if (u) {
+              return {
+                ...p,
+                status: "done" as PageStatus,
+                imageUrl: u.signedUrl,
+                imageBase64: undefined,
+                error: undefined,
+              };
+            }
+            if (failedPageIndexes.includes(p.page)) {
+              return {
+                ...p,
+                status: "generating" as PageStatus,
+                canRetry: true,
+                note: "Retry with realtime mode",
+              };
+            }
+            return p;
+          }));
+
+          if (updated.length > 0) {
+            await updateProjectStatus(projectId, "generating", {
+              imagesGeneratedCount: updated.length,
+            });
+          }
+          if (failedPageIndexes.length > 0) {
+            toast.warning(`${updated.length} done, ${failedPageIndexes.length} failed. Retry failed pages with Realtime mode.`);
+          } else {
+            toast.success(`All ${updated.length} images generated!`);
+          }
+          return;
+        }
+
+        if (["failed", "expired", "cancelled"].includes(statusData!.status)) {
+          throw new Error(`Batch ${statusData!.status}`);
+        }
+
+        await new Promise(r => setTimeout(r, pollInterval));
+        return poll();
+      };
+
+      await poll();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Batch generation failed");
+      setPages(prev => prev.map(p =>
+        pagesToGenerate.some(pg => pg.page === p.page)
+          ? { ...p, status: "pending" as PageStatus, canRetry: true }
+          : p
+      ));
+    } finally {
+      setIsGenerating(false);
+      setBatchId(null);
+      setJobProgress(prev => ({ ...prev, phase: "complete" }));
+    }
+  };
+
   /**
    * Save prompts to the database
    */
@@ -863,6 +1022,11 @@ function CreateColoringBookPageContent() {
     );
     if (pagesToGenerate.length === 0) {
       toast.info("All pages already generated!");
+      return;
+    }
+
+    if (generationMode === "batch") {
+      await generateAllImagesBatch(pagesToGenerate);
       return;
     }
 
@@ -1349,7 +1513,7 @@ function CreateColoringBookPageContent() {
   // ============================================================
 
   const enhanceAllPages = async () => {
-    const pagesToEnhance = pages.filter(p => p.status === "done" && p.imageBase64 && p.enhanceStatus !== "enhanced");
+    const pagesToEnhance = pages.filter(p => p.status === "done" && (p.imageBase64 || p.imageUrl) && p.enhanceStatus !== "enhanced");
     if (pagesToEnhance.length === 0) {
       toast.info("All pages are already enhanced!");
       return;
@@ -1370,11 +1534,14 @@ function CreateColoringBookPageContent() {
         p.page === page.page ? { ...p, enhanceStatus: "enhancing" as EnhanceStatus } : p
       ));
 
+      const imageBase64 = page.imageBase64 || (page.imageUrl ? await fetchImageAsBase64(page.imageUrl) : null);
+      if (!imageBase64) continue;
+
       try {
         const response = await fetch("/api/image/enhance", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: page.imageBase64, scale: 2 }),
+          body: JSON.stringify({ imageBase64, scale: 2 }),
         });
 
         const data = await response.json();
@@ -1410,10 +1577,31 @@ function CreateColoringBookPageContent() {
     toast.success(`Enhanced ${successCount} pages!`);
   };
 
+  // Fetch image as base64 from URL (for batch-generated pages)
+  const fetchImageAsBase64 = async (url: string): Promise<string> => {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        const base64 = result.split(",")[1];
+        resolve(base64 || "");
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   // Enhance a single page
   const enhanceSinglePage = async (pageNumber: number) => {
     const page = pages.find(p => p.page === pageNumber);
-    if (!page || !page.imageBase64) {
+    if (!page) {
+      toast.error("Page not found");
+      return;
+    }
+    const imageBase64 = page.imageBase64 || (page.imageUrl ? await fetchImageAsBase64(page.imageUrl) : null);
+    if (!imageBase64) {
       toast.error("Page not ready for enhancement");
       return;
     }
@@ -1431,7 +1619,7 @@ function CreateColoringBookPageContent() {
       const response = await fetch("/api/image/enhance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: page.imageBase64, scale: 2 }),
+        body: JSON.stringify({ imageBase64, scale: 2 }),
       });
 
       const data = await response.json();
@@ -1465,16 +1653,18 @@ function CreateColoringBookPageContent() {
       return;
     }
 
-    // Use the best available version
     const imageBase64 = page.finalLetterBase64 || page.enhancedImageBase64 || page.imageBase64;
-    if (!imageBase64) {
+    const imageUrl = page.imageUrl;
+    const href = imageBase64
+      ? `data:image/png;base64,${imageBase64}`
+      : imageUrl || null;
+    if (!href) {
       toast.error("Page has no image to download");
       return;
     }
 
-    // Create download link
     const link = document.createElement("a");
-    link.href = `data:image/png;base64,${imageBase64}`;
+    link.href = href;
     link.download = `page-${String(pageNumber).padStart(3, "0")}.png`;
     document.body.appendChild(link);
     link.click();
@@ -1483,7 +1673,7 @@ function CreateColoringBookPageContent() {
   };
 
   const processAllPages = async () => {
-    const pagesToProcess = pages.filter(p => p.status === "done" && p.imageBase64 && p.finalLetterStatus !== "done");
+    const pagesToProcess = pages.filter(p => p.status === "done" && (p.imageBase64 || p.imageUrl) && p.finalLetterStatus !== "done");
     if (pagesToProcess.length === 0) {
       toast.info("All pages are already processed!");
       return;
@@ -1504,12 +1694,15 @@ function CreateColoringBookPageContent() {
         p.page === page.page ? { ...p, finalLetterStatus: "processing" as ProcessingStatus } : p
       ));
 
+      const imageBase64 = page.imageBase64 || (page.imageUrl ? await fetchImageAsBase64(page.imageUrl) : null);
+      if (!imageBase64) continue;
+
       try {
         const response = await fetch("/api/image/process", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            imageBase64: page.imageBase64,
+            imageBase64,
             enhance: true,
             enhanceScale: 2,
             marginPercent: 3,
@@ -2032,6 +2225,14 @@ function CreateColoringBookPageContent() {
       return page.enhancedImageBase64;
     }
     return page.imageBase64;
+  };
+
+  const getCurrentViewerImageSrc = () => {
+    const page = imagesWithData[viewerIndex];
+    if (!page) return null;
+    if (page.imageUrl) return page.imageUrl;
+    const b64 = getCurrentViewerImage();
+    return b64 ? `data:image/png;base64,${b64}` : null;
   };
 
   const scrollToPrompt = (pageNumber: number) => {
@@ -2573,7 +2774,7 @@ function CreateColoringBookPageContent() {
                                 >
                                   <Copy className="mr-1 h-3 w-3" /> Copy
                                 </Button>
-                                {page.imageBase64 && (
+                                {(page.imageBase64 || page.imageUrl) && (
                                   <Button
                                     size="sm"
                                     variant="ghost"
@@ -2593,24 +2794,45 @@ function CreateColoringBookPageContent() {
               </div>
 
                 {/* Action Buttons */}
-                <div className="flex gap-3 pt-4 border-t">
-                  <Button variant="outline" onClick={() => setCurrentStep(1)}>
-                    <ArrowLeft className="mr-2 h-4 w-4" /> Back to Idea
-                  </Button>
-                  <Button 
-                    onClick={generateAllImages}
-                    disabled={isGenerating || pages.length === 0 || generatingPrompts || !pages.some(p => p.prompt)}
-                    className="flex-1"
-                    size="lg"
-                  >
-                {generatingPrompts ? (
-                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Waiting for prompts...</>
-                    ) : isGenerating ? (
-                      <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Generating Images...</>
-                ) : (
-                      <><Play className="mr-2 h-5 w-5" /> Generate {pendingCount} Images</>
-                )}
-              </Button>
+                <div className="flex flex-col gap-3 pt-4 border-t">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Mode:</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" disabled={isGenerating}>
+                          {generationMode === "realtime" ? "Realtime (fast)" : "Batch (cheaper, slower)"}
+                          <ChevronDown className="ml-1 h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent>
+                        <DropdownMenuItem onClick={() => setGenerationMode("realtime")}>
+                          Realtime (fast)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setGenerationMode("batch")}>
+                          Batch (cheaper, slower)
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="flex gap-3">
+                    <Button variant="outline" onClick={() => setCurrentStep(1)}>
+                      <ArrowLeft className="mr-2 h-4 w-4" /> Back to Idea
+                    </Button>
+                    <Button 
+                      onClick={generateAllImages}
+                      disabled={isGenerating || pages.length === 0 || generatingPrompts || !pages.some(p => p.prompt)}
+                      className="flex-1"
+                      size="lg"
+                    >
+                      {generatingPrompts ? (
+                        <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Waiting for prompts...</>
+                      ) : isGenerating ? (
+                        <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> {generationMode === "batch" ? "Batch in progress..." : "Generating Images..."}</>
+                      ) : (
+                        <><Play className="mr-2 h-5 w-5" /> Generate {pendingCount} Images</>
+                      )}
+                    </Button>
+                  </div>
                 </div>
             </div>
           </SectionCard>
@@ -2760,20 +2982,24 @@ function CreateColoringBookPageContent() {
                         (page as { canRetry?: boolean }).canRetry && "border-amber-500/30 animate-pulse",
                         page.status === "paused" && "border-amber-500/30 bg-amber-500/5"
                       )}
-                      onClick={() => page.imageBase64 && openViewer(page.page)}
+                      onClick={() => (page.imageBase64 || page.imageUrl) && openViewer(page.page)}
                     >
                       {/* White background for proper image preview */}
                       <div className="aspect-[3/4] bg-white relative">
-                        {page.imageBase64 ? (
+                        {(page.imageBase64 || page.imageUrl) ? (
                           <>
                             <img
-                              src={`data:image/png;base64,${
-                                page.activeVersion === "finalLetter" && page.finalLetterBase64
-                                  ? page.finalLetterBase64
-                                  : page.activeVersion === "enhanced" && page.enhancedImageBase64
-                                    ? page.enhancedImageBase64
-                                    : page.imageBase64
-                              }`}
+                              src={
+                                page.imageUrl
+                                  ? page.imageUrl
+                                  : `data:image/png;base64,${
+                                      page.activeVersion === "finalLetter" && page.finalLetterBase64
+                                        ? page.finalLetterBase64
+                                        : page.activeVersion === "enhanced" && page.enhancedImageBase64
+                                          ? page.enhancedImageBase64
+                                          : page.imageBase64
+                                    }`
+                              }
                               alt={`Page ${page.page}`}
                               className="w-full h-full object-contain"
                             />
@@ -3224,9 +3450,9 @@ function CreateColoringBookPageContent() {
 
           {/* Main Image */}
           <div className="flex-1 flex items-center justify-center bg-muted/30 p-4 overflow-hidden relative">
-            {getCurrentViewerImage() ? (
+            {getCurrentViewerImageSrc() ? (
               <img
-                src={`data:image/png;base64,${getCurrentViewerImage()}`}
+                src={getCurrentViewerImageSrc()!}
                 alt={`Page ${imagesWithData[viewerIndex]?.page}`}
                 className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
               />
@@ -3268,7 +3494,7 @@ function CreateColoringBookPageContent() {
                   )}
                 >
                   <img
-                    src={`data:image/png;base64,${page.imageBase64}`}
+                    src={page.imageUrl || (page.imageBase64 ? `data:image/png;base64,${page.imageBase64}` : "")}
                     alt={`Page ${page.page}`}
                     className="w-full h-full object-cover"
                   />
@@ -3300,10 +3526,10 @@ function CreateColoringBookPageContent() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  const img = getCurrentViewerImage();
-                  if (img) {
+                  const src = getCurrentViewerImageSrc();
+                  if (src) {
                     const link = document.createElement("a");
-                    link.href = `data:image/png;base64,${img}`;
+                    link.href = src;
                     link.download = `coloring-page-${imagesWithData[viewerIndex]?.page}.png`;
                     link.click();
                   }
