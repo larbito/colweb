@@ -41,17 +41,17 @@ export function EmptyState({
 
   return (
     <div className={cn(
-      "flex flex-col items-center justify-center rounded-xl text-center",
+      "flex flex-col items-center justify-center rounded-2xl text-center animate-fade-in",
       variantStyles[variant],
       className
     )}>
       <div className={cn(
-        "mb-4 flex items-center justify-center rounded-full bg-muted",
-        variant === "compact" ? "h-12 w-12" : "h-16 w-16"
+        "mb-5 flex items-center justify-center rounded-2xl bg-muted/80",
+        variant === "compact" ? "h-12 w-12" : "h-20 w-20"
       )}>
         <Icon className={cn(
           "text-muted-foreground",
-          variant === "compact" ? "h-5 w-5" : "h-7 w-7"
+          variant === "compact" ? "h-5 w-5" : "h-8 w-8"
         )} />
       </div>
       <h3 className={cn(

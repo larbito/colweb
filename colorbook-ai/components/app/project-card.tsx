@@ -96,7 +96,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const updatedAt = project.updatedAt;
 
   return (
-    <Card className="group border-border/50 bg-card/60 backdrop-blur transition-all hover:border-border hover:bg-card hover:shadow-lg">
+    <Card className="group border-border transition-all duration-300 hover:border-foreground/20 hover:shadow-lg">
       <CardContent className="p-5">
         <div className="mb-3 flex items-start justify-between">
           <div className="flex-1">

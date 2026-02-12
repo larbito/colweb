@@ -42,17 +42,17 @@ export function AppSidebar() {
     <aside className="fixed left-0 top-0 z-40 hidden h-screen w-64 flex-col border-r border-border bg-sidebar lg:flex">
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 border-b border-border px-5">
-        <Link href="/app" className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background">
+        <Link href="/app" className="flex items-center gap-3 group/logo">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-foreground text-background transition-transform group-hover/logo:scale-105">
             <Sparkles className="h-5 w-5" />
           </div>
-          <span className="text-base font-semibold text-foreground">ColorBook AI</span>
+          <span className="text-base font-semibold text-foreground tracking-tight">ColorBook AI</span>
         </Link>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3">
-        <div className="space-y-1">
+        <div className="space-y-0.5">
           {navItems.map((item) => {
             const active = isActive(item.href);
             
@@ -61,14 +61,14 @@ export function AppSidebar() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                   active 
-                    ? "bg-muted text-foreground" 
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    ? "bg-muted text-foreground shadow-sm" 
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                 )}
               >
                 <item.icon className={cn(
-                  "h-[18px] w-[18px]",
+                  "h-[18px] w-[18px] shrink-0",
                   active ? "text-foreground" : "text-muted-foreground"
                 )} />
                 <span>{item.label}</span>

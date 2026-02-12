@@ -32,7 +32,7 @@ export function Navbar() {
     <header
       className={cn(
         "fixed left-0 right-0 top-0 z-50 transition-all duration-300",
-        scrolled && "border-b border-border/40 bg-background/80 backdrop-blur-xl"
+        scrolled && "border-b border-border/40 bg-background/90 backdrop-blur-xl shadow-sm"
       )}
     >
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -50,7 +50,7 @@ export function Navbar() {
             <Link 
               key={link.label} 
               href={link.href} 
-              className="text-muted-foreground transition hover:text-foreground"
+              className="text-muted-foreground transition-colors duration-200 hover:text-foreground"
             >
               {link.label}
             </Link>
@@ -79,7 +79,7 @@ export function Navbar() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button asChild size="sm" className="hidden rounded-full px-4 md:inline-flex">
+          <Button asChild size="sm" className="hidden rounded-full px-5 md:inline-flex">
             <Link href="/auth">Get Started</Link>
           </Button>
         </div>
